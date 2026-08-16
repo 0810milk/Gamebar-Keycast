@@ -220,6 +220,8 @@ class PipeServer:
         history = deque()
         frames = 0
         summary_at = time.monotonic()
+        last_raw = 0
+        last_skip = 0
         while not self._stop.is_set():
             reconcile(self._state)
             self._state.vx = user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
@@ -237,16 +239,19 @@ class PipeServer:
                                       ctypes.byref(written), None):
                 return  # 客户端断开，返回等待重新连接
             frames += 1
-            # 每 0.5s 记一条坐标链路摘要（原生输入/限频/坐标来源/归一化值）
+            # 每 0.5s 记一条坐标链路摘要（原生输入/限频/坐标来源/归一化值，均为本周期增量）
             now = time.monotonic()
             if now - summary_at >= 0.5:
                 proc, skip, src = raw_stats()
+                delta_raw = proc - last_raw
+                delta_skip = skip - last_skip
+                last_raw, last_skip = proc, skip
                 fps = frames / max(now - summary_at, 1e-6)
                 vis = "1" if hooks._cursor_visible() else "0"
                 debuglog.log(
                     "[pump] fps=%.0f raw=%d skip=%d src=%s vis=%s "
                     "mx=%d my=%d ux=%d uy=%d" % (
-                        fps, proc, skip, src, vis,
+                        fps, delta_raw, delta_skip, src, vis,
                         self._state.mx, self._state.my,
                         self._state.ux, self._state.uy))
                 summary_at = now
