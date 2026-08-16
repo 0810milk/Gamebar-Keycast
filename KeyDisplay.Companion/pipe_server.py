@@ -246,12 +246,13 @@ class PipeServer:
                 delta_raw = proc - last_raw
                 delta_skip = skip - last_skip
                 last_raw, last_skip = proc, skip
+                sx, sy = hooks.scale_stats()
                 fps = frames / max(now - summary_at, 1e-6)
                 vis = "1" if hooks._cursor_visible() else "0"
                 debuglog.log(
                     "[pump] fps=%.0f raw=%d skip=%d src=%s vis=%s "
-                    "mx=%d my=%d ux=%d uy=%d" % (
-                        fps, delta_raw, delta_skip, src, vis,
+                    "sx=%.2f sy=%.2f mx=%d my=%d ux=%d uy=%d" % (
+                        fps, delta_raw, delta_skip, src, vis, sx, sy,
                         self._state.mx, self._state.my,
                         self._state.ux, self._state.uy))
                 summary_at = now
