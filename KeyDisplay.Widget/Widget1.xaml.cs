@@ -30,6 +30,8 @@ namespace KeyDisplay
         private readonly InputStateReader _reader;
         private InputSnapshot _latest;
         private uint _lastSeq = uint.MaxValue;   // 已渲染的帧序号；uint.MaxValue 强制首帧渲染
+        private double _padW = 80;               // 鼠标垫当前宽高（按屏幕纵横比动态计算）
+        private double _padH = 80;
         private bool _dark = true;
         private bool _docked;
         private XboxGameBarWidget _widget;   // 本实例自己的 widget（由 App 导航传入），不用共享 App.Widget
@@ -329,13 +331,41 @@ namespace KeyDisplay
 
             double vw = snap.VsW > 0 ? snap.VsW : 1920;
             double vh = snap.VsH > 0 ? snap.VsH : 1080;
-            double px = ((snap.MouseX - snap.VsX) / vw) * 80.0;
-            double py = ((snap.MouseY - snap.VsY) / vh) * 80.0;
-            px = Math.Max(0.0, Math.Min(70.0, px));
-            py = Math.Max(0.0, Math.Min(70.0, py));
+            UpdatePadSize(snap.VsW, snap.VsH);
+            double px = ((snap.MouseX - snap.VsX) / vw) * _padW;
+            double py = ((snap.MouseY - snap.VsY) / vh) * _padH;
+            px = Math.Max(0.0, Math.Min(_padW - 10.0, px));
+            py = Math.Max(0.0, Math.Min(_padH - 10.0, py));
             Canvas.SetLeft(MouseDot, px);
             Canvas.SetTop(MouseDot, py);
             MouseDot.Visibility = Visibility.Visible;
+        }
+
+        // 鼠标垫尺寸跟随屏幕纵横比：随帧下发的 vs_w/vs_h 就是鼠标坐标的映射基准，
+        // 比例天然一致，分辨率/多显示器切换时实时跟随。
+        private void UpdatePadSize(int vsW, int vsH)
+        {
+            double w, h;
+            ComputePadSize(vsW, vsH, out w, out h);
+            if (Math.Abs(w - _padW) < 0.5 && Math.Abs(h - _padH) < 0.5) return;
+            _padW = w;
+            _padH = h;
+            MousePad.Width = w;
+            MousePad.Height = h;
+        }
+
+        // 先按比例装入最大盒子（180x120），极端比例（超宽/超高）保比例缩放到最小边以上，
+        // 避免把面板撑爆；vs_w/vs_h 无效时按 16:9 兜底。
+        private static void ComputePadSize(int vsW, int vsH, out double w, out double h)
+        {
+            const double MaxW = 180, MaxH = 120, MinW = 40, MinH = 36;
+            double rw = vsW > 0 ? vsW : 1920;
+            double rh = vsH > 0 ? vsH : 1080;
+            double scale = Math.Min(MaxW / rw, MaxH / rh);
+            w = rw * scale;
+            h = rh * scale;
+            if (w < MinW) { double f = MinW / w; w = MinW; h *= f; }
+            if (h < MinH) { double f = MinH / h; h = MinH; w *= f; }
         }
 
         private void ThemeToggle_Click(object sender, TappedRoutedEventArgs e)

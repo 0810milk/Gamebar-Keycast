@@ -317,3 +317,33 @@
 
 - 16 项单测全过；widget MSIX 构建/签名/重装成功；新伴生进程已部署重启；
   `Setup.exe` 已重建、桌面备份已刷新；config.json 无 BOM 解析正常（fps=240 生效）。
+
+---
+
+## 15. 鼠标垫跟随屏幕纵横比（2026-08-16）
+
+### 需求
+
+"鼠标垫尺寸/比例按用户实际屏幕比例调整；如有更好的比例判定方法请告知。"
+
+### 比例判定（比"识别分辨率"更优的方案）
+
+**直接用协议帧里已带有的虚拟屏幕尺寸 `vs_w/vs_h`**（伴生进程每帧 GetSystemMetrics
+`SM_CXVIRTUALSCREEN/CYVIRTUALSCREEN` 实时下发）：
+它是鼠标坐标的映射基准，比例天然一致；分辨率切换/多显示器/投影时实时跟随；
+零新增数据。备选方案均更差：`GetSystemMetrics(SM_CXSCREEN)` 只含主屏（多显示器会错）、
+`EnumDisplayMonitors` 需自选显示器且静态、EDID/DXGI 枚举过重无收益。
+注意虚拟屏幕是所有显示器的并集（多显示器时鼠标垫显示的是整个虚拟屏）——如需只按主屏比例，
+伴生进程改用 `SM_CXSCREEN/SM_CYSCREEN` 即可（一行改动，但多显示器时坐标会落到垫外）。
+
+### 实现（KeyDisplay.Widget/Widget1.xaml.cs）
+
+- `ComputePadSize`：按 `vs_w:vs_h` 保比例装入 180×120 上限盒子，极端比例保比例缩放
+  到最小边（40×36）以上，防面板被撑爆；无效值按 16:9 兜底。
+- `UpdatePadSize`：尺寸变化时才设置 `MousePad.Width/Height`（避免每帧触发布局）。
+- 鼠标点映射与钳位改用动态 `_padW/_padH`（不再硬编码 80/70）。
+
+### 验证
+
+- widget MSIX 构建/签名/重装成功（`Status: Ok`），`Setup.exe` 已重建、桌面备份已刷新。
+- 待用户实测：16:9 → 约 180×101 宽垫；21:9 → 约 180×77；竖屏/超高屏 → 高垫。
