@@ -25,7 +25,6 @@ class SnapshotTests(unittest.TestCase):
         st.set_mouse("X2", True)
         st.mx, st.my, st.seq = 1234, -56, 7
         st.vx, st.vy, st.vw, st.vh = -1920, 0, 3840, 1080
-        st.ux, st.uy = 333, 666
         blob = st.serialize()
         self.assertEqual(len(blob), SNAPSHOT_SIZE)
         snap = parse_snapshot(blob)
@@ -37,28 +36,10 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual((snap["mx"], snap["my"], snap["seq"]), (1234, -56, 7))
         self.assertEqual((snap["vx"], snap["vy"], snap["vw"], snap["vh"]),
                          (-1920, 0, 3840, 1080))
-        self.assertEqual((snap["ux"], snap["uy"]), (333, 666))
 
     def test_serialize_sizes(self):
         st = InputState()
         self.assertEqual(len(st.serialize()), SNAPSHOT_SIZE)
-
-    def test_normalize_position(self):
-        # 活动范围 x∈[100,300], y∈[0,100]：x 两端→0/1000，中间→500
-        self.assertEqual(pipe_server.normalize_position(100, 50, 100, 300, 0, 100),
-                         (0, 500))
-        self.assertEqual(pipe_server.normalize_position(300, 50, 100, 300, 0, 100),
-                         (1000, 500))
-        self.assertEqual(pipe_server.normalize_position(200, 50, 100, 300, 0, 100),
-                         (500, 500))
-        # 范围退化（单点）时返回中间值
-        self.assertEqual(pipe_server.normalize_position(50, 50, 50, 50, 50, 50),
-                         (500, 500))
-        # 越界钳制到 0..1000
-        self.assertEqual(pipe_server.normalize_position(-100, 50, 100, 300, 0, 100),
-                         (0, 500))
-        self.assertEqual(pipe_server.normalize_position(9999, 50, 100, 300, 0, 100),
-                         (1000, 500))
 
     def test_raw_input_throttled(self):
         # 限频：同一时刻（<1/500s）内的事件直接跳过，不解析 lParam
@@ -67,60 +48,6 @@ class SnapshotTests(unittest.TestCase):
         # 时间拨到很久以前 → 放行（lParam=0 → GetRawInputData 失败 → 静默返回）
         hooks._last_raw_ts = 0.0
         hooks._handle_raw_input(0)
-
-    def test_accumulate_motion_scale_and_clamp(self):
-        # 隐藏光标累计：按校准比例缩放，并钳制到虚拟屏幕范围
-        hooks._state = InputState()
-        hooks._state.vx, hooks._state.vy = 0, 0
-        hooks._state.vw, hooks._state.vh = 1000, 800
-        real_sx, real_sy = hooks._scale_x, hooks._scale_y
-        hooks._scale_x, hooks._scale_y = 2.0, 0.5
-        try:
-            hooks._accumulate_motion(100, 100)
-            self.assertEqual((hooks._state.mx, hooks._state.my), (200, 50))
-            # 越界钳制到虚拟屏幕
-            hooks._accumulate_motion(5000, 0)
-            self.assertEqual((hooks._state.mx, hooks._state.my), (1000, 50))
-            hooks._accumulate_motion(-10000, 0)
-            self.assertEqual((hooks._state.mx, hooks._state.my), (0, 50))
-        finally:
-            hooks._scale_x, hooks._scale_y = real_sx, real_sy
-
-    def test_calibrate_scale(self):
-        # 桌面校准：10 个原始增量对应光标位移 30px → sx=0.5*1+0.5*3=2.0
-        hooks._cal_at = 0.0
-        hooks._cal_raw_dx = hooks._cal_raw_dy = 0.0
-        hooks._cal_cur_dx = hooks._cal_cur_dy = 0.0
-        hooks._cal_last_pos = (0, 0)
-        real_pos = hooks._read_cursor_position
-        real_sx, real_sy = hooks._scale_x, hooks._scale_y
-        hooks._scale_x, hooks._scale_y = 1.0, 1.0
-        try:
-            hooks._read_cursor_position = lambda: (30, 40)
-            hooks._calibrate_scale(10, 0)
-            self.assertAlmostEqual(hooks._scale_x, 2.0, places=2)
-            self.assertAlmostEqual(hooks._scale_y, 1.0, places=2)  # 无纵向原始增量，不更新
-        finally:
-            hooks._read_cursor_position = real_pos
-            hooks._scale_x, hooks._scale_y = real_sx, real_sy
-
-    def test_calibrate_scale_locked_cursor_keeps_scale(self):
-        # 回归"游戏内光标不动"：光标锁定（增量持续但位置不动）时系数不得衰减
-        hooks._cal_at = 0.0
-        hooks._cal_raw_dx = hooks._cal_raw_dy = 0.0
-        hooks._cal_cur_dx = hooks._cal_cur_dy = 0.0
-        hooks._cal_last_pos = (500, 300)
-        real_pos = hooks._read_cursor_position
-        real_sx, real_sy = hooks._scale_x, hooks._scale_y
-        hooks._scale_x, hooks._scale_y = 1.0, 1.0
-        try:
-            hooks._read_cursor_position = lambda: (500, 300)  # 位置不动
-            hooks._calibrate_scale(100, 100)                  # 增量持续到达
-            self.assertEqual(hooks._scale_x, 1.0)             # 系数保持，不衰减
-            self.assertEqual(hooks._scale_y, 1.0)
-        finally:
-            hooks._read_cursor_position = real_pos
-            hooks._scale_x, hooks._scale_y = real_sx, real_sy
 
     def test_visibility_debounced(self):
         # 可见性闪烁（<150ms）不切换模式，返回稳定值
@@ -142,57 +69,6 @@ class SnapshotTests(unittest.TestCase):
             hooks.user32.GetCursorInfo = real_get
             hooks._vis_state = real_state
             hooks._vis_change_at = 0.0
-
-    def test_update_normalized_end_to_end(self):
-        # 回归：_update_normalized 的窗口推进参数顺序错误会崩溃/产出错误归一化。
-        from collections import deque
-        st = InputState()
-        st.vw, st.vh = 1920, 1080
-        ps = pipe_server.PipeServer.__new__(pipe_server.PipeServer)
-        ps._state = st
-        h = deque()
-        # 单点 → 退化 → 中心
-        st.mx, st.my = 400, 300
-        ps._update_normalized(h, 10)
-        self.assertEqual((st.ux, st.uy), (500, 500))
-        # 窗口 [100,400] 内 x=400 → 1000（满行程）
-        st.mx, st.my = 100, 300
-        ps._update_normalized(h, 10)
-        st.mx, st.my = 400, 300
-        ps._update_normalized(h, 10)
-        self.assertEqual(st.ux, 1000)
-        # 静止不推进：窗口不变，归一化值不变（不漂移）
-        ps._update_normalized(h, 10)
-        self.assertEqual(st.ux, 1000)
-
-    def test_normalize_frozen_cursor_does_not_drift(self):
-        # 冻结光标时窗口也冻结（_push_sample 不推进）→ 归一化值不变；
-        # 若窗口被强制收敛，地板会把 span<floor 的窗口锚定在中心，值稳定在 500。
-        from collections import deque
-        h = deque([(100, 0), (300, 0), (400, 0)])
-        # 位置未变 → 不推进、不过期（窗口保持 [100,400]，ux 保持 1000 不变）
-        self.assertFalse(pipe_server.PipeServer._push_sample(h, 10, 400, 0))
-        self.assertEqual(list(h), [(100, 0), (300, 0), (400, 0)])
-        ux, _ = pipe_server.normalize_position(400, 0, 100, 400, 0, 100)
-        self.assertEqual(ux, 1000)
-        # 位置变化 → 推进，窗口随之更新
-        self.assertTrue(pipe_server.PipeServer._push_sample(h, 10, 401, 0))
-        self.assertEqual(len(h), 4)
-        # 即便窗口被人为收敛到 span<floor，地板锚定也让值稳定在 500（不漂移）
-        for lo, hi in [(380, 420), (400, 400)]:
-            ux2, _ = pipe_server.normalize_position(400, 400, lo, hi, 0, 100, 192.0, 96.0)
-            self.assertEqual(ux2, 500, "window=[%d,%d] 不应漂移" % (lo, hi))
-
-    def test_normalize_floor_damps_jitter(self):
-        # 微抖动 ±2px 在 192px 地板内只引起 ~1% 位移，不会被放大成满垫跑动
-        ux_a, _ = pipe_server.normalize_position(398, 0, 398, 402, 0, 100, 192.0, 96.0)
-        ux_b, _ = pipe_server.normalize_position(402, 0, 398, 402, 0, 100, 192.0, 96.0)
-        self.assertLessEqual(abs(ux_a - ux_b), 30)
-        # 活动范围大于地板时仍保持满行程自适应
-        ux_full, _ = pipe_server.normalize_position(100, 0, 100, 500, 0, 100, 192.0, 96.0)
-        self.assertEqual(ux_full, 0)
-        ux_full2, _ = pipe_server.normalize_position(500, 0, 100, 500, 0, 100, 192.0, 96.0)
-        self.assertEqual(ux_full2, 1000)
 
     def test_parse_rejects_short(self):
         self.assertIsNone(parse_snapshot(b"\x00" * 10))

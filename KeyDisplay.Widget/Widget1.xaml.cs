@@ -331,21 +331,22 @@ namespace KeyDisplay
             SetKey(_mouse["X2"], x2);
 
             UpdatePadSize(snap.VsW, snap.VsH);
-            // 归一化坐标（0..1000）→ 垫面位置；归一化基于"最近活动范围"，
-            // 光标无论被限制在屏幕哪个子区域，点都能铺满垫面并触边
-            double px = (snap.Ux / 1000.0) * _padW;
-            double py = (snap.Uy / 1000.0) * _padH;
+            // 绝对屏幕坐标 → 垫面位置（点 = 屏幕的真实镜像）
+            double vw = snap.VsW > 0 ? snap.VsW : 1920;
+            double vh = snap.VsH > 0 ? snap.VsH : 1080;
+            double px = ((snap.MouseX - snap.VsX) / vw) * _padW;
+            double py = ((snap.MouseY - snap.VsY) / vh) * _padH;
             px = Math.Max(0.0, Math.Min(_padW - 10.0, px));
             py = Math.Max(0.0, Math.Min(_padH - 10.0, py));
             Canvas.SetLeft(MouseDot, px);
             Canvas.SetTop(MouseDot, py);
             MouseDot.Visibility = Visibility.Visible;
 
-            // 点渲染状态监控（每秒一条）：ux/uy、垫尺寸、点坐标与可见性
+            // 点渲染状态监控（每秒一条）：屏幕坐标、垫尺寸、点位置与可见性
             if ((DateTime.Now - _lastDotLog).TotalSeconds >= 1.0)
             {
                 _lastDotLog = DateTime.Now;
-                DiagLog("dot ux=" + snap.Ux + " uy=" + snap.Uy
+                DiagLog("dot mx=" + snap.MouseX + " my=" + snap.MouseY
                         + " pad=" + (int)_padW + "x" + (int)_padH
                         + " pos=" + (int)px + "," + (int)py
                         + " vis=" + (MouseDot.Visibility == Visibility.Visible ? 1 : 0));

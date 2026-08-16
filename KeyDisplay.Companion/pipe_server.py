@@ -8,39 +8,12 @@ import ctypes
 import ctypes.wintypes as wt
 import threading
 import time
-from collections import deque
 
 import debuglog
 import hooks
 from hooks import reconcile, sync_mouse_position, raw_stats
 from state import SNAPSHOT_SIZE
 
-
-def normalize_position(x, y, min_x, max_x, min_y, max_y,
-                       floor_x=0, floor_y=0, scale=1000):
-    """把坐标归一化到 0..scale（在给定活动范围内）；范围退化（单点）时返回中间值。
-
-    floor_x/floor_y：活动范围小于该值时，以当前位置为中心扩到该值再归一化。
-    防止两种严重伪影：
-    1) 光标静止时滑动窗口 min/max 朝当前位置收敛，冻结点被归一化后漂移（自行行走）；
-    2) 范围过小时微抖动被放大成满垫跑动。
-    """
-    def norm(v, lo, hi):
-        if hi <= lo:
-            return scale // 2
-        return max(0, min(scale, int((v - lo) * scale / (hi - lo))))
-
-    def window(v, lo, hi, floor):
-        span = hi - lo
-        if floor > 0 and span < floor:
-            center = v
-            lo = center - floor / 2
-            hi = center + floor / 2
-        return lo, hi
-
-    lo_x, hi_x = window(x, min_x, max_x, floor_x)
-    lo_y, hi_y = window(y, min_y, max_y, floor_y)
-    return norm(x, lo_x, hi_x), norm(y, lo_y, hi_y)
 
 PIPE_NAME = r"\\.\pipe\KeyDisplayState"
 
@@ -216,10 +189,6 @@ class PipeServer:
 
     def _pump_loop(self, handle):
         user32 = ctypes.WinDLL("user32", use_last_error=True)
-        # 活动范围滑动窗口：最近 N 帧（约 1.5 秒）的鼠标坐标 min/max，
-        # 归一化后无论光标被限制在屏幕哪个子区域，点都能走满鼠标垫并触边
-        n_history = max(1, int(round(1.5 / self._interval)))
-        history = deque()
         frames = 0
         summary_at = time.monotonic()
         last_raw = 0
@@ -232,7 +201,6 @@ class PipeServer:
             self._state.vh = user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
             # 桌面（光标可见）坐标的 60Hz 校准；隐藏时坐标由 RAWINPUT 增量维护
             sync_mouse_position(self._state)
-            self._update_normalized(history, n_history)
             blob = self._state.serialize()
             self._state.seq += 1
             written = wt.DWORD()
@@ -243,57 +211,23 @@ class PipeServer:
                              % ctypes.get_last_error())
                 return  # 客户端断开，返回等待重新连接
             frames += 1
-            # 每 0.5s 记一条坐标链路摘要（原生输入/限频/坐标来源/归一化值，均为本周期增量）
+            # 每 0.5s 记一条坐标链路摘要（原生输入/限频/坐标来源/坐标，均为本周期增量）
             now = time.monotonic()
             if now - summary_at >= 0.5:
                 proc, skip, src = raw_stats()
                 delta_raw = proc - last_raw
                 delta_skip = skip - last_skip
                 last_raw, last_skip = proc, skip
-                sx, sy = hooks.scale_stats()
                 fps = frames / max(now - summary_at, 1e-6)
                 vis = "1" if hooks._cursor_visible() else "0"
                 debuglog.log(
                     "[pump] fps=%.0f raw=%d skip=%d src=%s vis=%s "
-                    "sx=%.2f sy=%.2f mx=%d my=%d ux=%d uy=%d" % (
-                        fps, delta_raw, delta_skip, src, vis, sx, sy,
-                        self._state.mx, self._state.my,
-                        self._state.ux, self._state.uy))
+                    "mx=%d my=%d" % (
+                        fps, delta_raw, delta_skip, src, vis,
+                        self._state.mx, self._state.my))
                 summary_at = now
                 frames = 0
             time.sleep(self._interval)
-
-    def _update_normalized(self, history, n_history):
-        """把当前 (mx,my) 推进滑动窗口并归一化到 ux/uy（0..1000）。
-
-        静止（位置与上帧相同）时窗口冻结：不推进也不过期旧样本，
-        光标冻结时光标点完全静止，杜绝"窗口收敛导致的自行行走"。
-        floor 取屏幕尺寸的 10%：活动范围小于地板时以当前位置为中心锚定，
-        防止小范围移动时微抖动被放大成满垫跑动。
-        """
-        self._push_sample(history, n_history, self._state.mx, self._state.my)
-        if not history:
-            return
-        min_x = min(p[0] for p in history)
-        max_x = max(p[0] for p in history)
-        min_y = min(p[1] for p in history)
-        max_y = max(p[1] for p in history)
-        floor_x = max(96.0, self._state.vw * 0.10)
-        floor_y = max(96.0, self._state.vh * 0.10)
-        self._state.ux, self._state.uy = normalize_position(
-            self._state.mx, self._state.my, min_x, max_x, min_y, max_y,
-            floor_x, floor_y)
-
-    @staticmethod
-    def _push_sample(history, n_history, mx, my):
-        """样本推进滑动窗口；与末尾样本相同（静止）时不推进，避免窗口随时间收敛漂移。"""
-        cur = (mx, my)
-        if history and history[-1] == cur:
-            return False
-        history.append(cur)
-        while len(history) > n_history:
-            history.popleft()
-        return True
 
 
 class StopFlag:
