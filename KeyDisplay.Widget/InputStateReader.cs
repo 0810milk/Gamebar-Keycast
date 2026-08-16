@@ -86,6 +86,16 @@ namespace KeyDisplay
                     _failCount = 0;
 
                     Log("connected");
+                    // 与伴生进程的消息模式一致（byte 模式读消息管道在部分场景会导致
+                    // 读返回 0 提前断开，表现为连接抖动/收不到数据）
+                    try
+                    {
+                        uint mode = NativeMethods.PIPE_READMODE_MESSAGE;
+                        NativeMethods.SetNamedPipeHandleState(handle, ref mode, IntPtr.Zero, IntPtr.Zero);
+                    }
+                    catch
+                    {
+                    }
                     using (var stream = new FileStream(new SafeFileHandle(handle, true), FileAccess.Read))
                     {
                         var buf = new byte[44];

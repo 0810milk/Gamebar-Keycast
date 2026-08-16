@@ -19,5 +19,15 @@ namespace KeyDisplay
             uint dwCreationDisposition,
             uint dwFlagsAndAttributes,
             IntPtr hTemplateFile);
+
+        public const uint PIPE_READMODE_MESSAGE = 0x2;
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool SetNamedPipeHandleState(
+            IntPtr hNamedPipe,
+            ref uint lpMode,
+            IntPtr lpMaxCollectionCount,
+            IntPtr lpCollectDataTimeout);
     }
 }

@@ -208,6 +208,8 @@ class PipeServer:
         debuglog.log("[pipe] client connected")
         try:
             self._pump_loop(handle)
+        except Exception as exc:  # noqa: BLE001 泵线程异常必须落盘，否则连接静默抖动
+            debuglog.log("[pipe] pump error: %s: %s" % (type(exc).__name__, exc))
         finally:
             kernel32.CloseHandle(handle)
             debuglog.log("[pipe] client disconnected")
@@ -237,6 +239,8 @@ class PipeServer:
             buf = ctypes.create_string_buffer(blob)
             if not kernel32.WriteFile(handle, buf, SNAPSHOT_SIZE,
                                       ctypes.byref(written), None):
+                debuglog.log("[pipe] write failed err=%d"
+                             % ctypes.get_last_error())
                 return  # 客户端断开，返回等待重新连接
             frames += 1
             # 每 0.5s 记一条坐标链路摘要（原生输入/限频/坐标来源/归一化值，均为本周期增量）
