@@ -61,7 +61,7 @@ cd ..\installer
 完整流程见 [docs/BUILD.md](docs/BUILD.md) 与 [docs/INSTALL.md](docs/INSTALL.md)。
 
 > 接手维护/移植请先读 [docs/HANDOFF.md](docs/HANDOFF.md)（含本机工具链、构建命令、易踩坑）；
-> 当前唯一未解决问题（固定组件后只显示按键）见 [docs/ISSUE-PINNED-CHROME.md](docs/ISSUE-PINNED-CHROME.md)。
+> 「固定后只显示按键」问题的调查与修复记录见 [docs/ISSUE-PINNED-CHROME.md](docs/ISSUE-PINNED-CHROME.md)。
 
 ## 测试
 

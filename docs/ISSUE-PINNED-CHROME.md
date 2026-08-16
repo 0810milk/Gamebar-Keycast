@@ -1,7 +1,7 @@
 # 已解决：固定组件后只显示按键（隐藏背景与黑白按钮）
 
-> 状态：**根因已定位并已修复（2026-08-16），待用户实测确认**。
-> 根因与修复方案见文末「第 9 节 根因与修复」。1–8 节为历史调查记录，保留备查。
+> 状态：**根因已定位并已修复（2026-08-16，两轮），待用户实测确认**。
+> 第一轮修复见文末「第 9 节」，第二轮（移除黑白按钮、修复退出闪退）见「第 10 节」。1–8 节为历史调查记录，保留备查。
 
 ## 1. 需求（用户原话归纳）
 
@@ -150,3 +150,46 @@
   可判断 `WindowBounds` 在固定态是否可读、`TryResizeWindowAsync` 是否被触发）。
 - 多实例场景：每个实例现在各自持自己的 widget 引用、各自渲染，不再互相串扰；
   `App.OnActivated` 的 `AppExtensionId` 日志可帮助确认 Game Bar 是否为 pinned+floating 各建实例。
+
+---
+
+## 10. 第二轮修复（2026-08-16，移除黑白按钮 + 修复退出闪退）
+
+### 用户反馈
+
+- 主题切换正常；
+- **退出 Game Bar 时小组件直接关闭**（期望：固定后退出只留按键）；
+- 退出后背景没有隐藏。
+
+### 取证（新 diag.txt，43 行）
+
+- 激活误报已被第一轮修复正确消化：`initial docked=False mode=PinnedOnly pinned=False` ✓；
+- 固定/退出时 `mode changed => docked=True mode=PinnedOnly pinned=True` 均正确翻转 ✓；
+- **关键：全程没有任何 `bounds` / `resize failed` 行** —— 说明每次模式切换后 `ApplyDocked`
+  在 `ApplyTheme()` 阶段就中断（异常沿 async void 同步段上抛 → 未处理 → 进程崩溃 → 小组件关闭），
+  而每次 `activate launch=True` 都是崩溃后 Game Bar 重新拉起的实例；
+  即第一轮加的「延迟 400ms TryResizeWindowAsync」与 `MinWindowSize=240` 在退出/切换时机仍是闪退源
+  （与版本 E 的闪退同机制，之前归因不准）。
+- 每次打开都会新增实例（5 个实例/会话），第二个实例起管道连接失败 `err=231`（伴生进程单客户端，未修）。
+
+### 改动（采纳用户判断：黑白按钮是问题根源，按文档兜底方案收敛）
+
+1. **`Widget1.xaml`**：整体删除 `ThemeRow`（黑/白两个 Border 按钮）与 Grid 行定义，
+   组件表面不再有任何按钮；主题切换改由**右键菜单 `ThemeItem`**（原已存在）提供。
+2. **`Widget1.xaml.cs`**：
+   - 删除 `SetThemeToggle` / `ThemeDark_Click` / `ThemeLight_Click`；`ApplyTheme` 的 docked 分支只隐藏
+     `RootPanel` 背景/边框与 `StatusText`。
+   - **删除第一轮的 `MinWindowSize=240` 与「延迟 400ms `TryResizeWindowAsync`」**（退出闪退源）。
+   - 所有 widget 属性读取（`IsDocked`、事件 handler 日志、poll）一律 try-catch：
+     COM 属性在退出/销毁瞬间可能抛错，任何异常按"未固定"处理且绝不外抛 → 进程不可能再被模式处理炸掉。
+   - `ApplyDocked` 的 `ApplyTheme()` 也包 try-catch，失败仅记日志。
+   - 保留：实例私有 `_widget`（导航参数传入）、复合判定 `mode==PinnedOnly && Pinned`、
+     `GameBarDisplayModeChanged`+`PinnedChanged` 双事件 + 500ms 轮询兜底、bounds 诊断日志。
+
+### 验证状态
+
+- 已重建 MSIX、签名、重装成功（`Status: Ok`），diag.txt 已清空。
+- **待用户实测**：Win+G 打开 → 面板+按键+状态字；右键可切换黑白主题；
+  固定后退出 Game Bar → 只剩按键（背景/状态字隐藏）、**不再闪退关闭**；再次打开 → 面板回来。
+- 回读 diag.txt 应能首次看到 `bounds WxH` 行（证明 ApplyDocked 完整执行）与干净的
+  `docked` 翻转序列。

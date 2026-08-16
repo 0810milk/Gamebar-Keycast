@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Threading.Tasks;
 using Microsoft.Gaming.XboxGameBar;
 using Windows.Foundation;
 using Windows.Storage;
@@ -87,9 +86,17 @@ namespace KeyDisplay
 
         // GameBarDisplayMode 在激活瞬间会误报 PinnedOnly（此时 Pinned=false），
         // 按微软文档"固定态 = PinnedOnly 且 Pinned=true"判定，避免 Game Bar 内一打开就只剩按键。
+        // 退出/销毁瞬间 COM 属性可能抛错，任何异常都按"未固定"处理，绝不向外抛出。
         private static bool IsDocked(XboxGameBarWidget w)
         {
-            return w.GameBarDisplayMode == XboxGameBarDisplayMode.PinnedOnly && w.Pinned;
+            try
+            {
+                return w.GameBarDisplayMode == XboxGameBarDisplayMode.PinnedOnly && w.Pinned;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private void OnModePoll(object sender, object e)
@@ -99,7 +106,7 @@ namespace KeyDisplay
             bool docked = IsDocked(widget);
             if (docked != _docked)
             {
-                DiagLog("poll docked=" + docked + " mode=" + widget.GameBarDisplayMode + " pinned=" + widget.Pinned);
+                try { DiagLog("poll docked=" + docked + " mode=" + widget.GameBarDisplayMode + " pinned=" + widget.Pinned); } catch { }
                 _docked = docked;
                 ApplyDocked();
             }
@@ -114,15 +121,7 @@ namespace KeyDisplay
                 _docked = IsDocked(widget);
                 widget.GameBarDisplayModeChanged += OnGameBarDisplayModeChanged;
                 widget.PinnedChanged += OnPinnedChanged;
-                DiagLog("widget present, initial docked=" + _docked + " mode=" + widget.GameBarDisplayMode + " pinned=" + widget.Pinned);
-                try
-                {
-                    // 完整 UI 高约 234，抬高最小高度防止窗口被压矮裁掉底部按钮行
-                    widget.MinWindowSize = new Size(widget.MinWindowSize.Width, 240);
-                }
-                catch
-                {
-                }
+                try { DiagLog("widget present, initial docked=" + _docked + " mode=" + widget.GameBarDisplayMode + " pinned=" + widget.Pinned); } catch { }
             }
             else
             {
@@ -143,7 +142,7 @@ namespace KeyDisplay
             bool docked = IsDocked(w);
             if (docked != _docked)
             {
-                DiagLog("mode changed => docked=" + docked + " mode=" + w.GameBarDisplayMode + " pinned=" + w.Pinned);
+                try { DiagLog("mode changed => docked=" + docked + " mode=" + w.GameBarDisplayMode + " pinned=" + w.Pinned); } catch { }
                 _docked = docked;
                 ApplyDocked();
             }
@@ -157,49 +156,33 @@ namespace KeyDisplay
             bool docked = IsDocked(w);
             if (docked != _docked)
             {
-                DiagLog("pinned changed => docked=" + docked + " mode=" + w.GameBarDisplayMode + " pinned=" + w.Pinned);
+                try { DiagLog("pinned changed => docked=" + docked + " mode=" + w.GameBarDisplayMode + " pinned=" + w.Pinned); } catch { }
                 _docked = docked;
                 ApplyDocked();
             }
         }
 
         // 状态变化：重绘界面并记录窗口尺寸（用于确认按钮是否被窗口裁剪）
-        private async void ApplyDocked()
+        private void ApplyDocked()
         {
-            ApplyTheme();
+            try
+            {
+                ApplyTheme();
+            }
+            catch (Exception ex)
+            {
+                DiagLog("applytheme failed: " + ex.GetType().Name + " " + ex.Message);
+            }
             var widget = _widget;
             if (widget == null) return;
             try
             {
                 var b = widget.WindowBounds;
-                DiagLog("bounds " + (int)b.Width + "x" + (int)b.Height + " docked=" + _docked + " mode=" + widget.GameBarDisplayMode + " pinned=" + widget.Pinned);
+                DiagLog("bounds " + (int)b.Width + "x" + (int)b.Height + " docked=" + _docked);
             }
             catch (Exception ex)
             {
                 DiagLog("bounds read failed: " + ex.GetType().Name + " " + ex.Message);
-            }
-
-            if (!_docked)
-            {
-                // 回到 Game Bar 前台：若窗口曾被压矮，延迟 400ms 再恢复足够显示完整 UI 的高度，
-                // 避免在固定/非固定切换瞬间调整尺寸（该时机调用曾导致闪退）。
-                await Task.Delay(400);
-                try
-                {
-                    if (_widget != null && !_docked)
-                    {
-                        var b = _widget.WindowBounds;
-                        if (b.Height < 240)
-                        {
-                            DiagLog("resize up to 560x280 from " + (int)b.Width + "x" + (int)b.Height);
-                            await _widget.TryResizeWindowAsync(new Size(560, 280));
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    DiagLog("resize failed: " + ex.GetType().Name + " " + ex.Message);
-                }
             }
         }
 
@@ -242,41 +225,19 @@ namespace KeyDisplay
             foreach (var kv in _keys) SetKey(kv.Value, false);
             foreach (var kv in _mouse) SetKey(kv.Value, false);
 
-            SetThemeToggle(ThemeDarkBtn, ThemeDarkBtnText, _dark);
-            SetThemeToggle(ThemeLightBtn, ThemeLightBtnText, !_dark);
-
             if (_docked)
             {
-                // Game Bar 关闭、仅固定组件叠加显示时：隐藏面板背景/边框、主题按钮与状态字，只留按键
+                // Game Bar 关闭、仅固定组件叠加显示时：隐藏面板背景/边框与状态字，只留按键
                 RootPanel.Background = _transparent;
                 RootPanel.BorderBrush = _transparent;
-                ThemeRow.Visibility = Visibility.Collapsed;
                 StatusText.Visibility = Visibility.Collapsed;
             }
             else
             {
-                ThemeRow.Visibility = Visibility.Visible;
                 StatusText.Visibility = Visibility.Visible;
             }
 
             ApplicationData.Current.LocalSettings.Values["Theme"] = _dark ? "dark" : "light";
-        }
-
-        private void SetThemeToggle(Border btn, TextBlock tb, bool active)
-        {
-            SolidColorBrush bg, fg;
-            if (_dark)
-            {
-                bg = active ? _darkPressedBg : _darkDefaultBg;
-                fg = active ? _darkPressedFg : _darkDefaultFg;
-            }
-            else
-            {
-                bg = active ? _lightPressedBg : _lightDefaultBg;
-                fg = active ? _lightPressedFg : _lightDefaultFg;
-            }
-            btn.Background = bg;
-            tb.Foreground = fg;
         }
 
         private void SetKey(Border border, bool down)
@@ -352,18 +313,6 @@ namespace KeyDisplay
         private void ThemeItem_Click(object sender, RoutedEventArgs e)
         {
             _dark = !_dark;
-            ApplyTheme();
-        }
-
-        private void ThemeDark_Click(object sender, TappedRoutedEventArgs e)
-        {
-            _dark = true;
-            ApplyTheme();
-        }
-
-        private void ThemeLight_Click(object sender, TappedRoutedEventArgs e)
-        {
-            _dark = false;
             ApplyTheme();
         }
 

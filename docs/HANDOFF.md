@@ -171,8 +171,9 @@ e702e68 组件底部增加黑白主题切换按钮
 
 ## 7. 下一步（当前状态）
 
-原唯一阻塞项「固定后只显示按键」已于 2026-08-16 定位根因并修复（见 `docs/ISSUE-PINNED-CHROME.md` 第 9 节）：
-根因是激活时 `GameBarDisplayMode` 误报 `PinnedOnly` 而代码只按 mode 判定；修复为
-`mode==PinnedOnly && Pinned` 复合判定 + 每个实例私有 widget 引用 + 固定高度按钮行。
+原唯一阻塞项「固定后只显示按键」已于 2026-08-16 经两轮修复（见 `docs/ISSUE-PINNED-CHROME.md` 第 9、10 节）：
+第一轮修复激活时 `GameBarDisplayMode` 误报（改为 `mode==PinnedOnly && Pinned` 复合判定 + 实例私有 widget 引用），
+第二轮根据实测反馈移除底部黑白按钮（主题切换收敛到右键菜单）并删除延迟 `TryResizeWindowAsync`/`MinWindowSize`
+（退出闪退源），所有 widget 属性读取已 try-catch 防退出销毁瞬间崩溃。
 新 MSIX 已构建签名并重装（diag.txt 已清空），**待用户 Win+G 实测确认**，
 实测后回读 diag.txt 核对 `mode/pinned/docked/bounds` 序列，再重建 `Setup.exe` 并 commit。
