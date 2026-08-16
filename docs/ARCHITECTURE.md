@@ -7,13 +7,15 @@ KeyDisplayCompanion（Python，桌面进程）           KeyDisplay.Widget（UWP
 ┌──────────────────────────────┐                 ┌──────────────────────────────────┐
 │ hooks.py                     │                 │ Widget1.xaml(.cs)               │
 │  · WH_KEYBOARD_LL / WH_MOUSE │                 │  · 键盘 12 键 + 鼠标 5 键 UI     │
-│  · GetAsyncKeyState reconcile│                 │  · DispatcherTimer 30fps 刷新    │
-│ state.py  InputState         │  命名管道        │  · 右键菜单（主题/启动/退出）    │
-│  · 键盘/鼠标位掩码           │ \\.\pipe\        │ InputStateReader.cs             │
-│ pipe_server.py               │ KeyDisplayState │  · CreateFileW + FileStream 读   │
-│  · 60Hz 推送 36B 快照        │ ───────────────► │  · 断线自动重连                 │
-│  · SDDL DACL + 包 SID 放行   │                 │ NativeMethods.cs                │
-└──────────────────────────────┘                 └──────────────────────────────────┘
+│  · RAWINPUT（游戏内增量累计）│                 │  · CompositionTarget.Rendering  │
+│  · 可见性 150ms 去抖/校准缩放 │  命名管道        │    渲染（跟随显示器刷新率）      │
+│ state.py  InputState         │ \\.\pipe\        │  · 右下角胶囊按钮切主题         │
+│  · 键盘/鼠标位掩码           │ KeyDisplayState │ InputStateReader.cs             │
+│ pipe_server.py               │ ───────────────► │  · CreateFileW + FileStream 读  │
+│  · 多客户端，240Hz 推送 36B  │                 │    （MESSAGE 读模式）           │
+│  · SDDL DACL + 包 SID 放行   │                 │  · 断线自动重连                 │
+└──────────────────────────────┘                 │ NativeMethods.cs                │
+                                                 └──────────────────────────────────┘
 ```
 
 - **伴生进程**：无窗口（`--noconsole`），单实例互斥体

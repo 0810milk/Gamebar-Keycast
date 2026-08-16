@@ -38,7 +38,7 @@
 | `KeyDisplay.Widget/` | UWP C# 小组件工程（VS 构建） |
 | `installer/` | 证书、MSIX 构建、安装/卸载脚本、Inno Setup 脚本 |
 | `tools/` | `gen_assets.py`（生成 UWP 资源）、`preview.py`（tkinter 开发预览） |
-| `docs/` | ARCHITECTURE / BUILD / INSTALL 说明，及交接文档 `HANDOFF.md` 与未解决问题 `ISSUE-PINNED-CHROME.md` |
+| `docs/` | ARCHITECTURE / BUILD / INSTALL 说明，交接文档 `HANDOFF.md`，历史问题调查与修复记录 `ISSUE-PINNED-CHROME.md` |
 | `dist/` | 构建产物（EXE、APPX、Setup.exe，均为 .gitignore 忽略） |
 
 ## 快速开始
