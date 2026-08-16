@@ -1,12 +1,14 @@
 ﻿# 按键显示 —— Game Bar 键盘鼠标状态小组件
 
+> 当前版本：**0.0.1 beta（起步版本）**，版本登记见 [VERSION.md](VERSION.md)。
+
 在 Windows Game Bar（`Win+G`）中实时显示键盘与鼠标操作状态的小组件：
 
 - 键盘：`Q/W/E/R`、`A/S/D/F`、`Shift`、`Ctrl`、`Alt`、`空格`
-- 鼠标：移动垫（光标实时定位）+ `左 / 中 / 右 / 侧1 / 侧2` 五个按键
+- 鼠标：移动垫（光标实时定位）+ `左 / 中 / 右 / 侧下 / 侧上` 五个按键
 - 按下反色、松开恢复，无动画
-- 暗色 / 亮色半透明主题（小组件内右键切换）
-- 端到端延迟 < 50ms（60Hz 快照推送 + 30fps UI 刷新）
+- 暗色 / 亮色半透明主题（右下角胶囊按钮切换）
+- 高帧率：伴生进程推送频率可配置（默认 240Hz），UI 渲染跟随显示器刷新率
 - `Setup.exe` 一键安装，支持控制面板卸载
 
 ## 架构总览
@@ -14,10 +16,10 @@
 ```
 ┌─────────────────────────┐       命名管道        ┌──────────────────────────┐
 │  KeyDisplayCompanion    │  \\.\pipe\KeyDisplay  │  KeyDisplay.Widget       │
-│  (Python + PyInstaller) │ ←── 36B/帧, 60Hz ───► │  (UWP C# Game Bar 小组件) │
+│  (Python + PyInstaller) │ ←── 36B/帧, 240Hz ──► │  (UWP C# Game Bar 小组件) │
 │  · WH_KEYBOARD_LL 钩子   │                      │  · CreateFileW + FileStream│
-│  · WH_MOUSE_LL 钩子      │                      │  · DispatcherTimer 30fps  │
-│  · GetAsyncKeyState 兜底 │                      │  · 右键菜单切换主题       │
+│  · WH_MOUSE_LL 钩子      │                      │  · 跟随刷新率渲染         │
+│  · GetAsyncKeyState 兜底 │                      │  · 右下角胶囊按钮切主题    │
 └─────────────────────────┘                      └──────────────────────────┘
         ▲ keydisplay://start（协议唤起）
         │
