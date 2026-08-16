@@ -82,7 +82,12 @@ def scale_stats():
 
 
 def _calibrate_scale(dx, dy):
-    """桌面（光标可见）时校准 raw 增量 → 屏幕像素 比例（指数平滑，每 1s 更新一次）。"""
+    """桌面（光标可见）时校准 raw 增量 → 屏幕像素 比例（指数平滑，每 1s 更新一次）。
+
+    仅当光标实际移动（位移 >1px）才更新：光标锁定/顶到屏幕边缘时（增量持续但
+    位置不动）保持原系数，否则 0 比值会让系数每周期减半，游戏内累计随之失效
+    （表现为"游戏内光标不动"）。系数限制在 [0.1, 5.0] 防异常。
+    """
     global _scale_x, _scale_y, _cal_raw_dx, _cal_raw_dy, \
         _cal_cur_dx, _cal_cur_dy, _cal_last_pos, _cal_at
     _cal_raw_dx += abs(dx)
@@ -96,10 +101,12 @@ def _calibrate_scale(dx, dy):
         _cal_last_pos = (x, y)
     now = time.monotonic()
     if now - _cal_at >= 1.0:
-        if _cal_raw_dx > 0:
-            _scale_x = 0.5 * _scale_x + 0.5 * (_cal_cur_dx / _cal_raw_dx)
-        if _cal_raw_dy > 0:
-            _scale_y = 0.5 * _scale_y + 0.5 * (_cal_cur_dy / _cal_raw_dy)
+        if _cal_raw_dx > 0 and _cal_cur_dx > 1:
+            ratio = min(_cal_cur_dx / _cal_raw_dx, 5.0)
+            _scale_x = max(0.1, 0.5 * _scale_x + 0.5 * ratio)
+        if _cal_raw_dy > 0 and _cal_cur_dy > 1:
+            ratio = min(_cal_cur_dy / _cal_raw_dy, 5.0)
+            _scale_y = max(0.1, 0.5 * _scale_y + 0.5 * ratio)
         _cal_raw_dx = _cal_raw_dy = _cal_cur_dx = _cal_cur_dy = 0.0
         _cal_last_pos = None
         _cal_at = now
@@ -193,23 +200,39 @@ user32.GetCursorPos.argtypes = [ctypes.POINTER(POINT)]
 user32.GetCursorPos.restype = wt.BOOL
 
 
+# 可见性去抖：GetCursorInfo 在游戏/菜单切换时可能高频闪烁，需持续
+# VIS_DEBOUNCE 秒才切换模式，避免累计坐标被 GetCursorPos 反复打回冻结位置
+VIS_DEBOUNCE = 0.15
+_vis_state = True       # 去抖后的可见性
+_vis_change_at = 0.0    # 首次检测到状态变化的时刻（0=无待定切换）
+
+
 def _cursor_visible():
-    """光标是否可见；GetCursorInfo 失败时按可见处理（尽力用绝对坐标）。
+    """光标是否可见（150ms 去抖）；GetCursorInfo 失败时按可见处理。
 
     记录可见性切换（进入/退出游戏隐藏状态），便于监控日志判断坐标链路。
     """
-    global _cursor_hidden, _hidden_delta_logged
+    global _cursor_hidden, _hidden_delta_logged, _vis_state, _vis_change_at
     ci = CURSORINFO()
     ci.cbSize = ctypes.sizeof(CURSORINFO)
     visible = True
     if user32.GetCursorInfo(ctypes.byref(ci)):
         visible = bool(ci.flags & CURSOR_SHOWING)
-    if _cursor_hidden is not None and visible != _cursor_hidden:
-        debuglog.log("[raw] cursor %s" % ("visible" if visible else "hidden"))
-        if not visible:
-            _hidden_delta_logged = 0  # 每次进入隐藏状态重置增量日志计数
-    _cursor_hidden = visible
-    return visible
+
+    now = time.monotonic()
+    if visible != _vis_state:
+        if _vis_change_at == 0.0:
+            _vis_change_at = now
+        elif now - _vis_change_at >= VIS_DEBOUNCE:
+            _vis_state = visible
+            _vis_change_at = 0.0
+            _cursor_hidden = not visible
+            debuglog.log("[raw] cursor %s" % ("visible" if visible else "hidden"))
+            if not visible:
+                _hidden_delta_logged = 0  # 每次进入隐藏状态重置增量日志计数
+    else:
+        _vis_change_at = 0.0
+    return _vis_state
 
 
 def _read_cursor_position():

@@ -104,6 +104,45 @@ class SnapshotTests(unittest.TestCase):
             hooks._read_cursor_position = real_pos
             hooks._scale_x, hooks._scale_y = real_sx, real_sy
 
+    def test_calibrate_scale_locked_cursor_keeps_scale(self):
+        # 回归"游戏内光标不动"：光标锁定（增量持续但位置不动）时系数不得衰减
+        hooks._cal_at = 0.0
+        hooks._cal_raw_dx = hooks._cal_raw_dy = 0.0
+        hooks._cal_cur_dx = hooks._cal_cur_dy = 0.0
+        hooks._cal_last_pos = (500, 300)
+        real_pos = hooks._read_cursor_position
+        real_sx, real_sy = hooks._scale_x, hooks._scale_y
+        hooks._scale_x, hooks._scale_y = 1.0, 1.0
+        try:
+            hooks._read_cursor_position = lambda: (500, 300)  # 位置不动
+            hooks._calibrate_scale(100, 100)                  # 增量持续到达
+            self.assertEqual(hooks._scale_x, 1.0)             # 系数保持，不衰减
+            self.assertEqual(hooks._scale_y, 1.0)
+        finally:
+            hooks._read_cursor_position = real_pos
+            hooks._scale_x, hooks._scale_y = real_sx, real_sy
+
+    def test_visibility_debounced(self):
+        # 可见性闪烁（<150ms）不切换模式，返回稳定值
+        real_get = hooks.user32.GetCursorInfo
+        real_state = hooks._vis_state
+        hooks._vis_state = True
+        hooks._vis_change_at = 0.0
+
+        def fake_hidden(ci):
+            ctypes.cast(ci, ctypes.POINTER(hooks.CURSORINFO)).contents.flags = 0
+            return True
+
+        try:
+            hooks.user32.GetCursorInfo = fake_hidden
+            hooks._cursor_visible()
+            self.assertTrue(hooks._cursor_visible())  # 两次快速调用仍为可见（去抖中）
+            self.assertTrue(hooks._vis_state)
+        finally:
+            hooks.user32.GetCursorInfo = real_get
+            hooks._vis_state = real_state
+            hooks._vis_change_at = 0.0
+
     def test_update_normalized_end_to_end(self):
         # 回归：_update_normalized 的窗口推进参数顺序错误会崩溃/产出错误归一化。
         from collections import deque
