@@ -17,3 +17,6 @@ KeyDisplay.Widget/BundleArtifacts/
 KeyDisplay.Widget/Generated Files/
 *.user
 *.suo
+
+# 本地用户测试安装目录
+用户测试/

@@ -1,4 +1,4 @@
-# 卸载：
+﻿# 卸载：
 #   1. 移除 UWP 小组件包
 #   2. 删除 keydisplay 协议注册
 #   3. 删除 %ProgramFiles%\KeyDisplay

@@ -1,4 +1,4 @@
-# 手动安装（非 Inno Setup）：
+﻿# 手动安装（非 Inno Setup）：
 #   1. 将伴生进程复制到 %ProgramFiles%\KeyDisplay
 #   2. 调用 install-msix.ps1（证书 + APPX + 协议 + config.json）
 #

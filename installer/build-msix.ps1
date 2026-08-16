@@ -1,4 +1,4 @@
-# 构建并签名 UWP 小组件 APPX（侧载包），产物输出到 dist\KeyDisplay.Install。
+﻿# 构建并签名 UWP 小组件 APPX（侧载包），产物输出到 dist\KeyDisplay.Install。
 #
 # 依赖:
 #   - Visual Studio（含 UWP 工作负载）

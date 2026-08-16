@@ -1,4 +1,4 @@
-# 生成自签名代码签名证书（用于 MSIX/APPX 侧载签名），并导出 .cer 与 .pfx。
+﻿# 生成自签名代码签名证书（用于 MSIX/APPX 侧载签名），并导出 .cer 与 .pfx。
 #
 # 用法:
 #   .\make-cert.ps1 [-OutDir <dir>] [-PfxPassword <密码>] [-Subject <主题>]
