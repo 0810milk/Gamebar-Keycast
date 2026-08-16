@@ -34,5 +34,11 @@
 2. **安装包**：重建 `Setup.exe`（`ISCC installer\setup.iss`），产物
    `dist\KeySetup.Setup\KeyDisplaySetup.exe`，并同步刷新桌面备份副本。
 
+**安装包归档（保证"每版安装包 ↔ 源码"对应）**：
+
+- 每个版本发布时，把安装包复制到 `release\<版本>\KeyDisplaySetup.exe` **并随源码一起提交进 git**
+  （`release/` 不在 .gitignore 内）；版本号与 `VERSION.md`、`installer\setup.iss` 的 `MyAppVersion` 三者保持一致。
+- 这样每个版本的安装包与源码在同一次提交里，天然一一对应，历史版本可随时取用。
+
 > 即：版本递增（发布）时，源码与安装包必须成对交付，缺一不可。
 > 仅文档/说明类改动不递增版本，不强制重建安装包。
