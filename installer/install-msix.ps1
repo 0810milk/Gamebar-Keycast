@@ -52,8 +52,11 @@ $pkg = Get-AppxPackage -Name "KeyDisplay.Widget"
 if (-not $pkg) { throw "未找到已安装的 KeyDisplay.Widget 包" }
 $pfn = $pkg.PackageFamilyName
 $cfgPath = Join-Path (Split-Path $CompanionExe -Parent) "config.json"
-@{ packageFamilyName = $pfn } | ConvertTo-Json | Set-Content -Path $cfgPath -Encoding UTF8
-Write-Host "config.json: $cfgPath (packageFamilyName=$pfn)"
+$cfg = @{ packageFamilyName = $pfn; fps = 240 } | ConvertTo-Json
+# UTF-8 无 BOM：PowerShell 5.1 的 Set-Content -Encoding UTF8 会写 BOM，
+# 导致 Python json 解析失败（fps 等配置不生效）。
+[System.IO.File]::WriteAllText($cfgPath, $cfg, (New-Object System.Text.UTF8Encoding $false))
+Write-Host "config.json: $cfgPath (packageFamilyName=$pfn, fps=240)"
 
 Write-Host ""
 Write-Host "安装完成。按 Win+G 打开 Game Bar，在小组件中固定/打开「按键显示」。"

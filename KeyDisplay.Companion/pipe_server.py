@@ -107,11 +107,13 @@ def _make_pipe(sec_attr):
 
 
 class PipeServer:
-    def __init__(self, state, stop_event, package_family_name=None):
+    def __init__(self, state, stop_event, package_family_name=None, fps=240):
         self._state = state
         self._stop = stop_event
         self._package_family_name = package_family_name
         self._sec = _security_attributes(package_family_name)
+        # 推送帧率由 config.json 的 fps 决定，默认 240Hz（覆盖高刷显示器），可再调高
+        self._interval = 1.0 / max(1.0, float(fps))
         self._connected = False
 
     @property
@@ -189,7 +191,7 @@ class PipeServer:
             if not kernel32.WriteFile(handle, buf, SNAPSHOT_SIZE,
                                       ctypes.byref(written), None):
                 return  # 客户端断开，返回等待重新连接
-            time.sleep(1.0 / 60.0)
+            time.sleep(self._interval)
 
 
 class StopFlag:

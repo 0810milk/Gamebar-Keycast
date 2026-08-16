@@ -21,6 +21,7 @@ namespace KeyDisplay
         public int VsY;
         public int VsW;
         public int VsH;
+        public uint Seq;     // 帧序号，用于判断数据是否变化（未变化时跳过重绘）
     }
 
     /// <summary>
@@ -143,7 +144,8 @@ namespace KeyDisplay
                 VsX = BitConverter.ToInt32(b, 16),
                 VsY = BitConverter.ToInt32(b, 20),
                 VsW = BitConverter.ToInt32(b, 24),
-                VsH = BitConverter.ToInt32(b, 28)
+                VsH = BitConverter.ToInt32(b, 28),
+                Seq = BitConverter.ToUInt32(b, 32)
             };
         }
     }

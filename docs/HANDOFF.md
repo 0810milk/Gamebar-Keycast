@@ -171,11 +171,9 @@ e702e68 组件底部增加黑白主题切换按钮
 
 ## 7. 下一步（当前状态）
 
-「固定后只显示按键」与「主题切换崩溃」已于 2026-08-16 修复（见 `docs/ISSUE-PINNED-CHROME.md` 第 9–11 节）：
-固定态改为 `mode==PinnedOnly && Pinned` 复合判定 + 实例私有 widget 引用；`GameBarDisplayModeChanged`/`PinnedChanged`
-在非 UI 线程回调（0x8001010E），事件处理统一 `Dispatcher.RunAsync` 封送 UI 线程；
-右键菜单（MenuFlyout）在 Game Bar 宿主内有崩溃风险已移除，主题切换为屏幕上的单一紧凑胶囊按钮。
-同日另修复伴生进程「鼠标点双位置振荡」（hooks.py 双坐标源冲突，见第 12 节），
-新 `KeyDisplayCompanion.exe` 已部署并重连。
-**待用户实测**：固定后退出只留按键、主题切换不崩、游戏中鼠标点平滑跟随。
-确认后重建 `Setup.exe`（如未重建）并 commit；新 MSIX 已重装、diag.txt 已清空。
+「固定后只显示按键」「主题切换崩溃」「鼠标点双位置振荡」均已修复（见 `docs/ISSUE-PINNED-CHROME.md`
+第 9–13 节）；2026-08-16 另放开帧率（第 14 节）：伴生进程推送频率由 `config.json` 的 `fps` 配置
+（默认 240Hz），小组件渲染改用 `CompositionTarget.Rendering` 跟随显示器刷新率（不再被 30fps 卡住），
+快照序号未变时跳过重绘（空闲零开销）。
+**待用户实测**：固定后退出只留按键、主题切换不崩、游戏中鼠标点平滑跟随、高刷显示器下按键/鼠标点更流畅。
+确认后按需调整 `fps`（config.json），重建 `Setup.exe` 并 commit；新 MSIX 已重装、diag.txt 已清空。

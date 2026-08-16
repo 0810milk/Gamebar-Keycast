@@ -26,10 +26,10 @@ namespace KeyDisplay
 
         private readonly Dictionary<string, Border> _keys = new Dictionary<string, Border>();
         private readonly Dictionary<string, Border> _mouse = new Dictionary<string, Border>();
-        private readonly DispatcherTimer _timer;
         private readonly DispatcherTimer _modeTimer;
         private readonly InputStateReader _reader;
         private InputSnapshot _latest;
+        private uint _lastSeq = uint.MaxValue;   // 已渲染的帧序号；uint.MaxValue 强制首帧渲染
         private bool _dark = true;
         private bool _docked;
         private XboxGameBarWidget _widget;   // 本实例自己的 widget（由 App 导航传入），不用共享 App.Widget
@@ -71,9 +71,6 @@ namespace KeyDisplay
 
             _reader = new InputStateReader();
             _reader.Snapshot += (_, snap) => _latest = snap;
-
-            _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(33) };
-            _timer.Tick += (_, e) => ApplySnapshot();
 
             // 周期轮询 GameBarDisplayMode，确保无论实例如何创建/激活，都能收敛到正确的固定状态
             _modeTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
@@ -129,9 +126,12 @@ namespace KeyDisplay
                 DiagLog("widget null");
             }
             ApplyTheme();
+            // 渲染跟随显示器刷新率（CompositionTarget.Rendering 每 UI 帧触发一次，
+            // 60/120/144/240Hz 显示器就是多少帧），不再被固定 30fps 限制；
+            // 数据序号未变化时跳过重绘，空闲时几乎零开销。
+            CompositionTarget.Rendering += OnRendering;
             _modeTimer.Start();
             _reader.Start();
-            _timer.Start();
             TryStartCompanion();
         }
 
@@ -208,8 +208,8 @@ namespace KeyDisplay
                 widget.GameBarDisplayModeChanged -= OnGameBarDisplayModeChanged;
                 widget.PinnedChanged -= OnPinnedChanged;
             }
+            CompositionTarget.Rendering -= OnRendering;
             _modeTimer.Stop();
-            _timer.Stop();
             _reader.Dispose();
             _latest = null;
         }
@@ -292,14 +292,21 @@ namespace KeyDisplay
             if (tb != null) tb.Foreground = fg;
         }
 
-        private void ApplySnapshot()
+        // 每 UI 帧触发；数据帧序号未变化时跳过重绘（高帧率下空闲时零开销）
+        private void OnRendering(object sender, object e)
         {
             var snap = _latest;
             if (snap == null)
             {
-                StatusText.Text = "\u672a\u8fde\u63a5"; // 未连接
+                if (_lastSeq != uint.MaxValue)
+                {
+                    _lastSeq = uint.MaxValue;
+                    StatusText.Text = "\u672a\u8fde\u63a5"; // 未连接
+                }
                 return;
             }
+            if (snap.Seq == _lastSeq) return;
+            _lastSeq = snap.Seq;
             StatusText.Text = "";
 
             for (int i = 0; i < KeyNames.Length; i++)

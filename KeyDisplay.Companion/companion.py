@@ -98,7 +98,7 @@ def main():
     if hook_error:
         raise hook_error[0]
 
-    server = PipeServer(state, stop, pfn)
+    server = PipeServer(state, stop, pfn, fps=int(config.get("fps", 240)))
     server_thread = threading.Thread(target=server.run, daemon=True)
     server_thread.start()
 

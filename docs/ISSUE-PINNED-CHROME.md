@@ -285,3 +285,35 @@
 - 16 项单测全过（WM_MOUSEMOVE 不再写坐标；sync 可见→更新 / 隐藏→保持）。
 - 已重建 `KeyDisplayCompanion.exe` 并部署重启，widget 重连（diag `connected`）；
 - `Setup.exe` 已重建，桌面备份已刷新。
+
+---
+
+## 14. 帧率放开（2026-08-16，解除 60Hz/30fps 硬限制）
+
+### 需求
+
+"帧率跑多高跑多高，不要只限制在 60 帧"。原链路有两处硬限制：
+伴生进程固定 60Hz 推送（`time.sleep(1/60)`）、小组件固定 30fps 渲染（DispatcherTimer 33ms）。
+
+### 改动
+
+1. **伴生进程推送频率可配置**（`pipe_server.py`）：`PipeServer(..., fps=240)`，
+   `config.json` 新增 `"fps": 240`（默认 240Hz，覆盖 60/120/144/240Hz 高刷显示器，可再调高）。
+   `companion.py` 从 config 读取并传入。
+2. **小组件渲染跟随显示器刷新率**（`Widget1.xaml.cs`）：删除 33ms DispatcherTimer，
+   改用 `CompositionTarget.Rendering`（每 UI 帧触发一次，显示器多快就渲染多快）。
+3. **序号去重**（`InputStateReader.cs` 解析 36 字节帧的 seq 字段；`Widget1.OnRendering`
+   按 `Seq` 相同即跳过重绘）—— 高帧率下数据未变化时零开销。
+4. 顺带修复 `install-msix.ps1` 写 config.json 带 BOM 导致 Python json 解析失败的问题
+   （改 `UTF8Encoding($false)` 无 BOM 写入，fps 配置真正生效）。
+
+### 说明
+
+- 显示器刷新率是渲染侧的天花板（60Hz 显示器最多显示 60fps；120/144/240Hz 才能看到更高帧率）。
+- 推送频率高于渲染/显示器频率没有额外收益（widget 只消费最新帧），240Hz 默认已足够；
+  需要更高可改 `config.json` 的 `fps`（注意 Windows `time.sleep` 精度上限约 500–1000Hz）。
+
+### 验证
+
+- 16 项单测全过；widget MSIX 构建/签名/重装成功；新伴生进程已部署重启；
+  `Setup.exe` 已重建、桌面备份已刷新；config.json 无 BOM 解析正常（fps=240 生效）。
