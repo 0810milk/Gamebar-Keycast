@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Microsoft.Gaming.XboxGameBar;
 using Windows.Storage;
 using Windows.System;
 using Windows.UI;
@@ -26,6 +27,7 @@ namespace KeyDisplay
         private readonly InputStateReader _reader;
         private InputSnapshot _latest;
         private bool _dark = true;
+        private bool _pinned;
         private static bool s_companionLaunched;
 
         // 暗色主题画刷
@@ -45,6 +47,7 @@ namespace KeyDisplay
         private readonly SolidColorBrush _lightPressedFg = new SolidColorBrush(Colors.White);
         private readonly SolidColorBrush _lightPanel = new SolidColorBrush(Color.FromArgb(0xB3, 0xFF, 0xFF, 0xFF));
         private readonly SolidColorBrush _lightPad = new SolidColorBrush(Color.FromArgb(0x59, 0xFF, 0xFF, 0xFF));
+        private readonly SolidColorBrush _transparent = new SolidColorBrush(Colors.Transparent);
 
         public Widget1()
         {
@@ -70,14 +73,34 @@ namespace KeyDisplay
 
         private void OnLoaded(object sender, RoutedEventArgs e)
         {
+            var app = Application.Current as App;
+            var widget = app != null ? app.Widget : null;
+            if (widget != null)
+            {
+                _pinned = widget.Pinned;
+                widget.PinnedChanged += OnWidgetPinnedChanged;
+            }
             ApplyTheme();
             _reader.Start();
             _timer.Start();
             TryStartCompanion();
         }
 
+        private void OnWidgetPinnedChanged(object sender, object e)
+        {
+            var w = sender as XboxGameBarWidget;
+            if (w != null) _pinned = w.Pinned;
+            ApplyTheme();
+        }
+
         private void OnUnloaded(object sender, RoutedEventArgs e)
         {
+            var app = Application.Current as App;
+            var widget = app != null ? app.Widget : null;
+            if (widget != null)
+            {
+                widget.PinnedChanged -= OnWidgetPinnedChanged;
+            }
             _timer.Stop();
             _reader.Dispose();
             _latest = null;
@@ -110,6 +133,20 @@ namespace KeyDisplay
 
             SetThemeToggle(ThemeDarkBtn, ThemeDarkBtnText, _dark);
             SetThemeToggle(ThemeLightBtn, ThemeLightBtnText, !_dark);
+
+            if (_pinned)
+            {
+                // 固定到屏幕后只显示按键：隐藏面板背景/边框、主题按钮与状态字
+                RootPanel.Background = _transparent;
+                RootPanel.BorderBrush = _transparent;
+                ThemeRow.Visibility = Visibility.Collapsed;
+                StatusText.Visibility = Visibility.Collapsed;
+            }
+            else
+            {
+                ThemeRow.Visibility = Visibility.Visible;
+                StatusText.Visibility = Visibility.Visible;
+            }
 
             ApplicationData.Current.LocalSettings.Values["Theme"] = _dark ? "dark" : "light";
         }

@@ -35,6 +35,12 @@ namespace KeyDisplay
             }
         }
 
+        /// <summary>当前 Game Bar 小组件实例（可能为 null，如独立启动）。</summary>
+        public XboxGameBarWidget Widget
+        {
+            get { return widget1; }
+        }
+
         protected override void OnActivated(IActivatedEventArgs args)
         {
             XboxGameBarWidgetActivatedEventArgs widgetArgs = null;

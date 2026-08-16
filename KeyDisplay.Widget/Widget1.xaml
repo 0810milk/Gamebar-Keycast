@@ -113,7 +113,7 @@
                     </StackPanel>
                 </StackPanel>
                 <!-- 底部主题切换 -->
-                <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,12,0,0">
+                <StackPanel x:Name="ThemeRow" Grid.Row="1" Orientation="Horizontal" Margin="0,12,0,0">
                     <Border x:Name="ThemeDarkBtn" Width="48" Height="30" CornerRadius="6" BorderThickness="1" Tapped="ThemeDark_Click">
                         <TextBlock x:Name="ThemeDarkBtnText" Text="黑" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="13" FontWeight="SemiBold"/>
                     </Border>
