@@ -261,3 +261,27 @@
 ### 验证状态
 
 - 待用户实测：游戏中/光标隐藏时移动鼠标，鼠标点应平滑跟随，不再双位置闪烁。
+
+---
+
+## 13. 鼠标坐标实现重构（2026-08-16，单一数据源）
+
+### 需求
+
+"改一下鼠标位置的实现方式逻辑，目的不变、UI 不变"（第 12 节的"钩子可见性门控"方案结构上仍是双写，
+进一步收敛为单源）。
+
+### 新逻辑（KeyDisplay.Companion/hooks.py + pipe_server.py）
+
+- **桌面（光标可见）**：坐标由 60Hz 推送循环里的 `sync_mouse_position()`（GetCursorPos）轮询校准；
+- **游戏（光标隐藏）**：坐标由 RAWINPUT 增量累计（`_handle_raw_input`）；
+- **WH_MOUSE_LL 钩子只负责鼠标按键采集**（`_mouse_proc`），不再写坐标 —— 从结构上消除双源冲突；
+- 可见性判定 `_cursor_visible()` 仍是两条路径的切换开关，任何时刻只有一个坐标来源写入。
+
+协议、widget、UI 均未改动。
+
+### 验证
+
+- 16 项单测全过（WM_MOUSEMOVE 不再写坐标；sync 可见→更新 / 隐藏→保持）。
+- 已重建 `KeyDisplayCompanion.exe` 并部署重启，widget 重连（diag `connected`）；
+- `Setup.exe` 已重建，桌面备份已刷新。

@@ -119,17 +119,34 @@ user32.GetCursorPos.restype = wt.BOOL
 
 
 def _cursor_visible():
-    """光标是否可见；GetCursorInfo 失败时按可见处理（尽力用绝对坐标）。
-
-    可见时坐标以 GetCursorPos / 钩子事件坐标校准；隐藏或抑制时（游戏）
-    坐标由 RAWINPUT 累计增量维护。两个来源不能同时生效，否则坐标会在
-    两个位置间反复振荡（鼠标点疯狂闪现）。
-    """
+    """光标是否可见；GetCursorInfo 失败时按可见处理（尽力用绝对坐标）。"""
     ci = CURSORINFO()
     ci.cbSize = ctypes.sizeof(CURSORINFO)
     if not user32.GetCursorInfo(ctypes.byref(ci)):
         return True
     return bool(ci.flags & CURSOR_SHOWING)
+
+
+def _read_cursor_position():
+    """读取光标当前屏幕坐标；失败返回 None。"""
+    pt = POINT()
+    if user32.GetCursorPos(ctypes.byref(pt)):
+        return pt.x, pt.y
+    return None
+
+
+def sync_mouse_position(state):
+    """桌面坐标校准（供 60Hz 推送循环调用）。
+
+    光标可见时以 GetCursorPos 为准；隐藏（游戏）时不写入，坐标由
+    RAWINPUT 增量累计维护（见 _handle_raw_input）。任何时刻只有一个
+    坐标来源生效，避免两个来源互相覆写造成坐标在两位置间振荡。
+    """
+    if not _cursor_visible():
+        return
+    pos = _read_cursor_position()
+    if pos is not None:
+        state.mx, state.my = pos
 
 
 WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_long, wt.HWND, wt.UINT,
@@ -163,34 +180,30 @@ def _keyboard_proc(n_code, w_param, l_param):
 
 
 def _mouse_proc(n_code, w_param, l_param):
+    # 坐标不再由钩子维护：桌面（光标可见）由 60Hz GetCursorPos 轮询校准，
+    # 游戏（光标隐藏）由 RAWINPUT 增量累计。钩子只负责鼠标按键采集。
     if n_code >= 0:
         ms = ctypes.cast(l_param, ctypes.POINTER(MSLLHOOKSTRUCT)).contents
-        if w_param == WM_MOUSEMOVE:
-            # 光标可见时才以绝对坐标校准；隐藏时坐标由 RAWINPUT 累计维护，
-            # 这里若继续覆写会把累计结果打回旧位置，造成坐标在两位置间振荡。
-            if _cursor_visible():
-                _state.mx, _state.my = ms.pt.x, ms.pt.y
-        else:
-            for name, (down_msg, up_msg) in MOUSE_MSGS.items():
-                if w_param == down_msg:
-                    _state.set_mouse(name, True)
-                    break
-                if w_param == up_msg:
-                    _state.set_mouse(name, False)
-                    break
-            if w_param == WM_XBUTTONDOWN or w_param == WM_XBUTTONUP:
-                xbtn = (ms.mouseData >> 16) & 0xFFFF
-                name = "X1" if xbtn == 1 else ("X2" if xbtn == 2 else None)
-                if name:
-                    _state.set_mouse(name, w_param == WM_XBUTTONDOWN)
+        for name, (down_msg, up_msg) in MOUSE_MSGS.items():
+            if w_param == down_msg:
+                _state.set_mouse(name, True)
+                break
+            if w_param == up_msg:
+                _state.set_mouse(name, False)
+                break
+        if w_param == WM_XBUTTONDOWN or w_param == WM_XBUTTONUP:
+            xbtn = (ms.mouseData >> 16) & 0xFFFF
+            name = "X1" if xbtn == 1 else ("X2" if xbtn == 2 else None)
+            if name:
+                _state.set_mouse(name, w_param == WM_XBUTTONDOWN)
     return user32.CallNextHookEx(None, n_code, w_param, l_param)
 
 
 def _handle_raw_input(l_param):
-    """解析 WM_INPUT 鼠标原始数据。
+    """解析 WM_INPUT 鼠标原始数据，维护"光标隐藏"时的坐标。
 
-    光标可见时以 GetCursorPos 校准绝对坐标（精确）；隐藏时（独占全屏）
-    累计原始增量。
+    桌面（光标可见）时坐标由 60Hz GetCursorPos 轮询校准（sync_mouse_position），
+    原始输入只负责光标隐藏（独占全屏游戏）时的增量累计；两个来源不会同时写入。
     """
     size = wt.UINT()
     user32.GetRawInputData(l_param, RID_INPUT, None, ctypes.byref(size),
@@ -207,9 +220,7 @@ def _handle_raw_input(l_param):
         return
 
     if _cursor_visible():
-        pt = POINT()
-        if user32.GetCursorPos(ctypes.byref(pt)):
-            _state.mx, _state.my = pt.x, pt.y
+        # 光标可见：坐标由 60Hz GetCursorPos 轮询维护，这里不再写入
         return
 
     if raw.mouse.usFlags & MOUSE_MOVE_ABSOLUTE:

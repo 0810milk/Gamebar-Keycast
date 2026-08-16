@@ -9,7 +9,7 @@ import ctypes.wintypes as wt
 import threading
 import time
 
-from hooks import reconcile
+from hooks import reconcile, sync_mouse_position
 from state import SNAPSHOT_SIZE
 
 PIPE_NAME = r"\\.\pipe\KeyDisplayState"
@@ -180,6 +180,8 @@ class PipeServer:
             self._state.vy = user32.GetSystemMetrics(SM_YVIRTUALSCREEN)
             self._state.vw = user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)
             self._state.vh = user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
+            # 桌面（光标可见）坐标的 60Hz 校准；隐藏时坐标由 RAWINPUT 增量维护
+            sync_mouse_position(self._state)
             blob = self._state.serialize()
             self._state.seq += 1
             written = wt.DWORD()

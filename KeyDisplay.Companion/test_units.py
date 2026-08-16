@@ -110,27 +110,34 @@ class HookMappingTests(unittest.TestCase):
         self._ms(hooks.WM_XBUTTONDOWN, xbtn=2)
         self.assertTrue(hooks._state.mouse & (1 << MOUSE_ORDER.index("X2")))
 
-    def test_mouse_move_updates_position(self):
-        # 光标可见时 WM_MOUSEMOVE 以绝对坐标校准
-        real = hooks._cursor_visible
-        hooks._cursor_visible = lambda: True
-        try:
-            self._ms(hooks.WM_MOUSEMOVE, x=321, y=654)
-            self.assertEqual((hooks._state.mx, hooks._state.my), (321, 654))
-        finally:
-            hooks._cursor_visible = real
-
-    def test_mouse_move_hidden_cursor_keeps_position(self):
-        # 光标隐藏（游戏）时 WM_MOUSEMOVE 不得覆写坐标，
-        # 坐标由 RAWINPUT 累计增量维护，避免两个来源互相打架导致振荡
+    def test_mouse_move_does_not_write_position(self):
+        # 坐标改由 60Hz GetCursorPos 轮询 / RAWINPUT 累计维护，WM_MOUSEMOVE 不再写坐标
         hooks._state.mx, hooks._state.my = 100, 200
-        real = hooks._cursor_visible
+        self._ms(hooks.WM_MOUSEMOVE, x=321, y=654)
+        self.assertEqual((hooks._state.mx, hooks._state.my), (100, 200))
+
+    def test_sync_mouse_position_visible_updates(self):
+        # 光标可见：60Hz 校准以 GetCursorPos 为准
+        hooks._state.mx, hooks._state.my = 0, 0
+        real_v, real_r = hooks._cursor_visible, hooks._read_cursor_position
+        hooks._cursor_visible = lambda: True
+        hooks._read_cursor_position = lambda: (123, 456)
+        try:
+            hooks.sync_mouse_position(hooks._state)
+            self.assertEqual((hooks._state.mx, hooks._state.my), (123, 456))
+        finally:
+            hooks._cursor_visible, hooks._read_cursor_position = real_v, real_r
+
+    def test_sync_mouse_position_hidden_keeps_position(self):
+        # 光标隐藏（游戏）：60Hz 校准不写入，坐标交给 RAWINPUT 增量累计
+        hooks._state.mx, hooks._state.my = 100, 200
+        real_v = hooks._cursor_visible
         hooks._cursor_visible = lambda: False
         try:
-            self._ms(hooks.WM_MOUSEMOVE, x=321, y=654)
+            hooks.sync_mouse_position(hooks._state)
             self.assertEqual((hooks._state.mx, hooks._state.my), (100, 200))
         finally:
-            hooks._cursor_visible = real
+            hooks._cursor_visible = real_v
 
 
 class PipeServerTests(unittest.TestCase):
