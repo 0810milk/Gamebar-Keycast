@@ -33,6 +33,7 @@ namespace KeyDisplay
 
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
         private Task _task;
+        private int _failCount;
 
         public void Start()
         {
@@ -70,11 +71,16 @@ namespace KeyDisplay
                     if (handle.ToInt64() == NativeMethods.INVALID_HANDLE_VALUE)
                     {
                         int err = Marshal.GetLastWin32Error();
-                        Log("CreateFileW failed err=" + err);
+                        _failCount++;
+                        if (_failCount <= 3 || _failCount % 30 == 0)
+                        {
+                            Log("CreateFileW failed err=" + err);
+                        }
                         // 伴生进程尚未启动，稍后重试
                         await Task.Delay(2000, ct).ConfigureAwait(false);
                         continue;
                     }
+                    _failCount = 0;
 
                     Log("connected");
                     using (var stream = new FileStream(new SafeFileHandle(handle, true), FileAccess.Read))

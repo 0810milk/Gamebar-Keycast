@@ -36,7 +36,7 @@
 | `KeyDisplay.Widget/` | UWP C# 小组件工程（VS 构建） |
 | `installer/` | 证书、MSIX 构建、安装/卸载脚本、Inno Setup 脚本 |
 | `tools/` | `gen_assets.py`（生成 UWP 资源）、`preview.py`（tkinter 开发预览） |
-| `docs/` | BUILD / INSTALL / ARCHITECTURE 说明 |
+| `docs/` | ARCHITECTURE / BUILD / INSTALL 说明，及交接文档 `HANDOFF.md` 与未解决问题 `ISSUE-PINNED-CHROME.md` |
 | `dist/` | 构建产物（EXE、APPX、Setup.exe，均为 .gitignore 忽略） |
 
 ## 快速开始
@@ -59,6 +59,9 @@ cd ..\installer
 ```
 
 完整流程见 [docs/BUILD.md](docs/BUILD.md) 与 [docs/INSTALL.md](docs/INSTALL.md)。
+
+> 接手维护/移植请先读 [docs/HANDOFF.md](docs/HANDOFF.md)（含本机工具链、构建命令、易踩坑）；
+> 当前唯一未解决问题（固定组件后只显示按键）见 [docs/ISSUE-PINNED-CHROME.md](docs/ISSUE-PINNED-CHROME.md)。
 
 ## 测试
 

@@ -58,6 +58,7 @@ namespace KeyDisplay
                 // 若 IsLaunchActivation 为 true，表示 Game Bar 正在启动小组件的新实例，
                 // 必须新建并持有 XboxGameBarWidget（每次小组件打开都是一个新实例）。
                 // 否则是后续激活，保持既有实例即可。
+                DiagLog("activate launch=" + widgetArgs.IsLaunchActivation);
                 if (widgetArgs.IsLaunchActivation)
                 {
                     var rootFrame = new Frame();
@@ -68,7 +69,8 @@ namespace KeyDisplay
                         widgetArgs,
                         Window.Current.CoreWindow,
                         rootFrame);
-                    rootFrame.Navigate(typeof(Widget1));
+                    try { DiagLog("widget appid=" + widget1.AppExtensionId); } catch { }
+                    rootFrame.Navigate(typeof(Widget1), widget1);
 
                     Window.Current.Closed += Widget1Window_Closed;
 
@@ -116,6 +118,19 @@ namespace KeyDisplay
             widget1 = null;
 
             deferral.Complete();
+        }
+
+        private static void DiagLog(string msg)
+        {
+            try
+            {
+                var dir = Windows.Storage.ApplicationData.Current.LocalFolder.Path;
+                System.IO.File.AppendAllText(System.IO.Path.Combine(dir, "diag.txt"),
+                    DateTime.Now.ToString("HH:mm:ss.fff") + " " + msg + "\r\n");
+            }
+            catch
+            {
+            }
         }
     }
 }

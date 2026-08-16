@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using Microsoft.Gaming.XboxGameBar;
+using Windows.Foundation;
 using Windows.Storage;
 using Windows.System;
 using Windows.UI;
@@ -9,6 +11,7 @@ using Windows.UI.Xaml.Controls;
 using Windows.UI.Xaml.Controls.Primitives;
 using Windows.UI.Xaml.Input;
 using Windows.UI.Xaml.Media;
+using Windows.UI.Xaml.Navigation;
 using Windows.UI.Xaml.Shapes;
 
 namespace KeyDisplay
@@ -24,10 +27,12 @@ namespace KeyDisplay
         private readonly Dictionary<string, Border> _keys = new Dictionary<string, Border>();
         private readonly Dictionary<string, Border> _mouse = new Dictionary<string, Border>();
         private readonly DispatcherTimer _timer;
+        private readonly DispatcherTimer _modeTimer;
         private readonly InputStateReader _reader;
         private InputSnapshot _latest;
         private bool _dark = true;
-        private bool _pinned;
+        private bool _docked;
+        private XboxGameBarWidget _widget;   // 本实例自己的 widget（由 App 导航传入），不用共享 App.Widget
         private static bool s_companionLaunched;
 
         // 暗色主题画刷
@@ -69,38 +74,144 @@ namespace KeyDisplay
 
             _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(33) };
             _timer.Tick += (_, e) => ApplySnapshot();
+
+            // 周期轮询 GameBarDisplayMode，确保无论实例如何创建/激活，都能收敛到正确的固定状态
+            _modeTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+            _modeTimer.Tick += OnModePoll;
+        }
+
+        protected override void OnNavigatedTo(NavigationEventArgs e)
+        {
+            _widget = e.Parameter as XboxGameBarWidget;
+        }
+
+        // GameBarDisplayMode 在激活瞬间会误报 PinnedOnly（此时 Pinned=false），
+        // 按微软文档"固定态 = PinnedOnly 且 Pinned=true"判定，避免 Game Bar 内一打开就只剩按键。
+        private static bool IsDocked(XboxGameBarWidget w)
+        {
+            return w.GameBarDisplayMode == XboxGameBarDisplayMode.PinnedOnly && w.Pinned;
+        }
+
+        private void OnModePoll(object sender, object e)
+        {
+            var widget = _widget;
+            if (widget == null) return;
+            bool docked = IsDocked(widget);
+            if (docked != _docked)
+            {
+                DiagLog("poll docked=" + docked + " mode=" + widget.GameBarDisplayMode + " pinned=" + widget.Pinned);
+                _docked = docked;
+                ApplyDocked();
+            }
         }
 
         private void OnLoaded(object sender, RoutedEventArgs e)
         {
-            var app = Application.Current as App;
-            var widget = app != null ? app.Widget : null;
+            DiagLog("onloaded enter");
+            var widget = _widget;
             if (widget != null)
             {
-                _pinned = widget.Pinned;
-                widget.PinnedChanged += OnWidgetPinnedChanged;
+                _docked = IsDocked(widget);
+                widget.GameBarDisplayModeChanged += OnGameBarDisplayModeChanged;
+                widget.PinnedChanged += OnPinnedChanged;
+                DiagLog("widget present, initial docked=" + _docked + " mode=" + widget.GameBarDisplayMode + " pinned=" + widget.Pinned);
+                try
+                {
+                    // 完整 UI 高约 234，抬高最小高度防止窗口被压矮裁掉底部按钮行
+                    widget.MinWindowSize = new Size(widget.MinWindowSize.Width, 240);
+                }
+                catch
+                {
+                }
+            }
+            else
+            {
+                DiagLog("widget null");
             }
             ApplyTheme();
+            _modeTimer.Start();
             _reader.Start();
             _timer.Start();
             TryStartCompanion();
         }
 
-        private void OnWidgetPinnedChanged(object sender, object e)
+        private void OnGameBarDisplayModeChanged(object sender, object e)
         {
             var w = sender as XboxGameBarWidget;
-            if (w != null) _pinned = w.Pinned;
+            if (w == null) w = _widget;
+            if (w == null) return;
+            bool docked = IsDocked(w);
+            if (docked != _docked)
+            {
+                DiagLog("mode changed => docked=" + docked + " mode=" + w.GameBarDisplayMode + " pinned=" + w.Pinned);
+                _docked = docked;
+                ApplyDocked();
+            }
+        }
+
+        private void OnPinnedChanged(object sender, object e)
+        {
+            var w = sender as XboxGameBarWidget;
+            if (w == null) w = _widget;
+            if (w == null) return;
+            bool docked = IsDocked(w);
+            if (docked != _docked)
+            {
+                DiagLog("pinned changed => docked=" + docked + " mode=" + w.GameBarDisplayMode + " pinned=" + w.Pinned);
+                _docked = docked;
+                ApplyDocked();
+            }
+        }
+
+        // 状态变化：重绘界面并记录窗口尺寸（用于确认按钮是否被窗口裁剪）
+        private async void ApplyDocked()
+        {
             ApplyTheme();
+            var widget = _widget;
+            if (widget == null) return;
+            try
+            {
+                var b = widget.WindowBounds;
+                DiagLog("bounds " + (int)b.Width + "x" + (int)b.Height + " docked=" + _docked + " mode=" + widget.GameBarDisplayMode + " pinned=" + widget.Pinned);
+            }
+            catch (Exception ex)
+            {
+                DiagLog("bounds read failed: " + ex.GetType().Name + " " + ex.Message);
+            }
+
+            if (!_docked)
+            {
+                // 回到 Game Bar 前台：若窗口曾被压矮，延迟 400ms 再恢复足够显示完整 UI 的高度，
+                // 避免在固定/非固定切换瞬间调整尺寸（该时机调用曾导致闪退）。
+                await Task.Delay(400);
+                try
+                {
+                    if (_widget != null && !_docked)
+                    {
+                        var b = _widget.WindowBounds;
+                        if (b.Height < 240)
+                        {
+                            DiagLog("resize up to 560x280 from " + (int)b.Width + "x" + (int)b.Height);
+                            await _widget.TryResizeWindowAsync(new Size(560, 280));
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    DiagLog("resize failed: " + ex.GetType().Name + " " + ex.Message);
+                }
+            }
         }
 
         private void OnUnloaded(object sender, RoutedEventArgs e)
         {
-            var app = Application.Current as App;
-            var widget = app != null ? app.Widget : null;
+            var widget = _widget;
             if (widget != null)
             {
-                widget.PinnedChanged -= OnWidgetPinnedChanged;
+                widget.GameBarDisplayModeChanged -= OnGameBarDisplayModeChanged;
+                widget.PinnedChanged -= OnPinnedChanged;
             }
+            _modeTimer.Stop();
             _timer.Stop();
             _reader.Dispose();
             _latest = null;
@@ -134,9 +245,9 @@ namespace KeyDisplay
             SetThemeToggle(ThemeDarkBtn, ThemeDarkBtnText, _dark);
             SetThemeToggle(ThemeLightBtn, ThemeLightBtnText, !_dark);
 
-            if (_pinned)
+            if (_docked)
             {
-                // 固定到屏幕后只显示按键：隐藏面板背景/边框、主题按钮与状态字
+                // Game Bar 关闭、仅固定组件叠加显示时：隐藏面板背景/边框、主题按钮与状态字，只留按键
                 RootPanel.Background = _transparent;
                 RootPanel.BorderBrush = _transparent;
                 ThemeRow.Visibility = Visibility.Collapsed;
@@ -271,6 +382,19 @@ namespace KeyDisplay
         {
             var app = Application.Current as App;
             if (app != null) app.CloseWidget();
+        }
+
+        private static void DiagLog(string msg)
+        {
+            try
+            {
+                var dir = ApplicationData.Current.LocalFolder.Path;
+                System.IO.File.AppendAllText(System.IO.Path.Combine(dir, "diag.txt"),
+                    DateTime.Now.ToString("HH:mm:ss.fff") + " " + msg + "\r\n");
+            }
+            catch
+            {
+            }
         }
     }
 }
