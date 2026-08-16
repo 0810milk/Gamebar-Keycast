@@ -1,17 +1,19 @@
 """输入状态模型与二进制快照协议。
 
-快照为固定 36 字节小端二进制（v2，含虚拟屏幕范围）：
+快照为固定 44 字节小端二进制（v3，含虚拟屏幕范围与归一化坐标）：
     [0:4]   MAGIC      = b"KDSP"
-    [4]     version    = 2
+    [4]     version    = 3
     [5:7]   keys       = uint16，12 个键盘键位掩码
     [7]     mouse      = uint8，5 个鼠标按键掩码
-    [8:12]  mouse_x    = int32，屏幕坐标
+    [8:12]  mouse_x    = int32，屏幕坐标（绝对值）
     [12:16] mouse_y    = int32，屏幕坐标
     [16:20] vs_x       = int32，虚拟屏幕原点 X（GetSystemMetrics SM_XVIRTUALSCREEN）
     [20:24] vs_y       = int32，虚拟屏幕原点 Y
     [24:28] vs_w       = int32，虚拟屏幕宽度
     [28:32] vs_h       = int32，虚拟屏幕高度
-    [32:36] seq        = uint32，自增序号
+    [32:36] ux         = int32，0..1000：鼠标位置在"最近活动范围"内的归一化 X
+    [36:40] uy         = int32，0..1000：归一化 Y
+    [40:44] seq        = uint32，自增序号
 
 keys 位序：bit0=Q bit1=W bit2=E bit3=R bit4=A bit5=S bit6=D bit7=F
            bit8=Shift bit9=Ctrl bit10=Alt bit11=Space
@@ -20,8 +22,8 @@ mouse 位序：bit0=左键 bit1=右键 bit2=中键 bit3=侧键1 bit4=侧键2
 import struct
 
 MAGIC = b"KDSP"
-VERSION = 2
-SNAPSHOT_SIZE = 36
+VERSION = 3
+SNAPSHOT_SIZE = 44
 
 KEY_ORDER = ["Q", "W", "E", "R", "A", "S", "D", "F",
              "Shift", "Ctrl", "Alt", "Space"]
@@ -29,7 +31,8 @@ MOUSE_ORDER = ["L", "R", "M", "X1", "X2"]
 
 
 class InputState:
-    __slots__ = ("keys", "mouse", "mx", "my", "vx", "vy", "vw", "vh", "seq")
+    __slots__ = ("keys", "mouse", "mx", "my", "vx", "vy", "vw", "vh",
+                 "ux", "uy", "seq")
 
     def __init__(self):
         self.keys = 0
@@ -40,6 +43,10 @@ class InputState:
         self.vy = 0
         self.vw = 1920
         self.vh = 1080
+        # 归一化坐标（0..1000）：鼠标位置在"最近活动范围"内的比例位置，
+        # 保证光标无论被限制在屏幕哪个子区域，点都能走满鼠标垫并触边
+        self.ux = 500
+        self.uy = 500
         self.seq = 0
 
     def set_key(self, name, down):
@@ -57,9 +64,10 @@ class InputState:
             self.mouse &= ~bit
 
     def serialize(self):
-        return struct.pack("<4sBHBiiiiiiI", MAGIC, VERSION, self.keys,
+        return struct.pack("<4sBHBiiiiiiiiI", MAGIC, VERSION, self.keys,
                            self.mouse, self.mx, self.my,
-                           self.vx, self.vy, self.vw, self.vh, self.seq)
+                           self.vx, self.vy, self.vw, self.vh,
+                           self.ux, self.uy, self.seq)
 
 
 def parse_snapshot(data):
@@ -67,9 +75,10 @@ def parse_snapshot(data):
     if len(data) < SNAPSHOT_SIZE:
         return None
     data = data[:SNAPSHOT_SIZE]
-    magic, ver, keys, mouse, mx, my, vx, vy, vw, vh, seq = struct.unpack(
-        "<4sBHBiiiiiiI", data)
+    magic, ver, keys, mouse, mx, my, vx, vy, vw, vh, ux, uy, seq = struct.unpack(
+        "<4sBHBiiiiiiiiI", data)
     if magic != MAGIC or ver != VERSION:
         return None
     return {"keys": keys, "mouse": mouse, "mx": mx, "my": my,
-            "vx": vx, "vy": vy, "vw": vw, "vh": vh, "seq": seq}
+            "vx": vx, "vy": vy, "vw": vw, "vh": vh,
+            "ux": ux, "uy": uy, "seq": seq}

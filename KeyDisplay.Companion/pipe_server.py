@@ -8,9 +8,19 @@ import ctypes
 import ctypes.wintypes as wt
 import threading
 import time
+from collections import deque
 
 from hooks import reconcile, sync_mouse_position
 from state import SNAPSHOT_SIZE
+
+
+def normalize_position(x, y, min_x, max_x, min_y, max_y, scale=1000):
+    """把坐标归一化到 0..scale（在给定活动范围内）；范围退化（单点）时返回中间值。"""
+    def norm(v, lo, hi):
+        if hi <= lo:
+            return scale // 2
+        return max(0, min(scale, int((v - lo) * scale / (hi - lo))))
+    return norm(x, min_x, max_x), norm(y, min_y, max_y)
 
 PIPE_NAME = r"\\.\pipe\KeyDisplayState"
 
@@ -176,6 +186,10 @@ class PipeServer:
                                        wt.DWORD, ctypes.POINTER(wt.DWORD), ctypes.c_void_p]
         kernel32.WriteFile.restype = wt.BOOL
         user32 = ctypes.WinDLL("user32", use_last_error=True)
+        # 活动范围滑动窗口：最近 N 帧（约 1.5 秒）的鼠标坐标 min/max，
+        # 归一化后无论光标被限制在屏幕哪个子区域，点都能走满鼠标垫并触边
+        n_history = max(1, int(round(1.5 / self._interval)))
+        history = deque()
         while not self._stop.is_set():
             reconcile(self._state)
             self._state.vx = user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
@@ -184,6 +198,7 @@ class PipeServer:
             self._state.vh = user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
             # 桌面（光标可见）坐标的 60Hz 校准；隐藏时坐标由 RAWINPUT 增量维护
             sync_mouse_position(self._state)
+            self._update_normalized(history, n_history)
             blob = self._state.serialize()
             self._state.seq += 1
             written = wt.DWORD()
@@ -192,6 +207,18 @@ class PipeServer:
                                       ctypes.byref(written), None):
                 return  # 客户端断开，返回等待重新连接
             time.sleep(self._interval)
+
+    def _update_normalized(self, history, n_history):
+        """把当前 (mx,my) 追加进滑动窗口，计算活动范围并归一化到 ux/uy（0..1000）。"""
+        history.append((self._state.mx, self._state.my))
+        while len(history) > n_history:
+            history.popleft()
+        min_x = min(p[0] for p in history)
+        max_x = max(p[0] for p in history)
+        min_y = min(p[1] for p in history)
+        max_y = max(p[1] for p in history)
+        self._state.ux, self._state.uy = normalize_position(
+            self._state.mx, self._state.my, min_x, max_x, min_y, max_y)
 
 
 class StopFlag:

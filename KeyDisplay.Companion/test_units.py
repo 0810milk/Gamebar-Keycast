@@ -25,6 +25,7 @@ class SnapshotTests(unittest.TestCase):
         st.set_mouse("X2", True)
         st.mx, st.my, st.seq = 1234, -56, 7
         st.vx, st.vy, st.vw, st.vh = -1920, 0, 3840, 1080
+        st.ux, st.uy = 333, 666
         blob = st.serialize()
         self.assertEqual(len(blob), SNAPSHOT_SIZE)
         snap = parse_snapshot(blob)
@@ -36,10 +37,28 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual((snap["mx"], snap["my"], snap["seq"]), (1234, -56, 7))
         self.assertEqual((snap["vx"], snap["vy"], snap["vw"], snap["vh"]),
                          (-1920, 0, 3840, 1080))
+        self.assertEqual((snap["ux"], snap["uy"]), (333, 666))
 
     def test_serialize_sizes(self):
         st = InputState()
-        self.assertEqual(len(st.serialize()), 36)
+        self.assertEqual(len(st.serialize()), SNAPSHOT_SIZE)
+
+    def test_normalize_position(self):
+        # 活动范围 x∈[100,300], y∈[0,100]：x 两端→0/1000，中间→500
+        self.assertEqual(pipe_server.normalize_position(100, 50, 100, 300, 0, 100),
+                         (0, 500))
+        self.assertEqual(pipe_server.normalize_position(300, 50, 100, 300, 0, 100),
+                         (1000, 500))
+        self.assertEqual(pipe_server.normalize_position(200, 50, 100, 300, 0, 100),
+                         (500, 500))
+        # 范围退化（单点）时返回中间值
+        self.assertEqual(pipe_server.normalize_position(50, 50, 50, 50, 50, 50),
+                         (500, 500))
+        # 越界钳制到 0..1000
+        self.assertEqual(pipe_server.normalize_position(-100, 50, 100, 300, 0, 100),
+                         (0, 500))
+        self.assertEqual(pipe_server.normalize_position(9999, 50, 100, 300, 0, 100),
+                         (1000, 500))
 
     def test_parse_rejects_short(self):
         self.assertIsNone(parse_snapshot(b"\x00" * 10))

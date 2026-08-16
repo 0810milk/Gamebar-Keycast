@@ -17,10 +17,12 @@ namespace KeyDisplay
         public byte Mouse;   // 5 位：L R M X1 X2
         public int MouseX;
         public int MouseY;
-        public int VsX;      // 虚拟屏幕原点/尺寸，用于把坐标映射到鼠标垫
+        public int VsX;      // 虚拟屏幕原点/尺寸，用于确定鼠标垫的纵横比
         public int VsY;
         public int VsW;
         public int VsH;
+        public int Ux;       // 0..1000：鼠标在"最近活动范围"内的归一化 X
+        public int Uy;       // 0..1000：归一化 Y
         public uint Seq;     // 帧序号，用于判断数据是否变化（未变化时跳过重绘）
     }
 
@@ -86,7 +88,7 @@ namespace KeyDisplay
                     Log("connected");
                     using (var stream = new FileStream(new SafeFileHandle(handle, true), FileAccess.Read))
                     {
-                        var buf = new byte[36];
+                        var buf = new byte[44];
                         while (!ct.IsCancellationRequested)
                         {
                             int offset = 0;
@@ -145,7 +147,9 @@ namespace KeyDisplay
                 VsY = BitConverter.ToInt32(b, 20),
                 VsW = BitConverter.ToInt32(b, 24),
                 VsH = BitConverter.ToInt32(b, 28),
-                Seq = BitConverter.ToUInt32(b, 32)
+                Ux = BitConverter.ToInt32(b, 32),
+                Uy = BitConverter.ToInt32(b, 36),
+                Seq = BitConverter.ToUInt32(b, 40)
             };
         }
     }

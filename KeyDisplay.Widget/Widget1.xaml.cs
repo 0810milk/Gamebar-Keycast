@@ -329,11 +329,11 @@ namespace KeyDisplay
             SetKey(_mouse["X1"], x1);
             SetKey(_mouse["X2"], x2);
 
-            double vw = snap.VsW > 0 ? snap.VsW : 1920;
-            double vh = snap.VsH > 0 ? snap.VsH : 1080;
             UpdatePadSize(snap.VsW, snap.VsH);
-            double px = ((snap.MouseX - snap.VsX) / vw) * _padW;
-            double py = ((snap.MouseY - snap.VsY) / vh) * _padH;
+            // 归一化坐标（0..1000）→ 垫面位置；归一化基于"最近活动范围"，
+            // 光标无论被限制在屏幕哪个子区域，点都能铺满垫面并触边
+            double px = (snap.Ux / 1000.0) * _padW;
+            double py = (snap.Uy / 1000.0) * _padH;
             px = Math.Max(0.0, Math.Min(_padW - 10.0, px));
             py = Math.Max(0.0, Math.Min(_padH - 10.0, py));
             Canvas.SetLeft(MouseDot, px);
