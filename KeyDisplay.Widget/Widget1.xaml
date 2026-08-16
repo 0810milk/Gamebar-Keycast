@@ -109,12 +109,48 @@
                         </StackPanel>
                     </StackPanel>
                 </StackPanel>
-                <!-- 底部主题切换：单一紧凑胶囊按钮，标签显示可切换到的主题，点击即切换 -->
-                <Border x:Name="ThemeToggleBtn" Grid.Row="1" Width="44" Height="26" HorizontalAlignment="Right"
-                        CornerRadius="13" BorderThickness="1" Margin="0,8,0,0" Tapped="ThemeToggle_Click">
-                    <TextBlock x:Name="ThemeToggleBtnText" Text="白" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12" FontWeight="SemiBold"/>
-                </Border>
+                <!-- 底部工具条：设置图标 + 主题切换胶囊按钮（右对齐） -->
+                <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+                    <Border x:Name="SettingsBtn" Width="44" Height="26" CornerRadius="13" BorderThickness="1"
+                            Margin="0,0,8,0" Tapped="Settings_Click">
+                        <TextBlock x:Name="SettingsBtnIcon" Text="&#x2699;" FontFamily="Segoe UI Symbol"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="14"/>
+                    </Border>
+                    <Border x:Name="ThemeToggleBtn" Width="44" Height="26" CornerRadius="13" BorderThickness="1"
+                            Tapped="ThemeToggle_Click">
+                        <TextBlock x:Name="ThemeToggleBtnText" Text="白" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12" FontWeight="SemiBold"/>
+                    </Border>
+                </StackPanel>
                 <TextBlock x:Name="StatusText" Text="" HorizontalAlignment="Right" VerticalAlignment="Top" FontSize="10" Opacity="0.6"/>
+                <!-- 设置子菜单覆盖层：点击设置图标展开，点遮罩或关闭按钮收起（不用系统 Flyout，避免 Game Bar 宿主崩溃） -->
+                <Grid x:Name="SettingsPanel" Grid.RowSpan="2" Visibility="Collapsed" Background="#40000000"
+                      Tapped="SettingsPanel_Tapped">
+                    <Border x:Name="SettingsMenu" Width="190" CornerRadius="8" BorderThickness="1"
+                            HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,8,44"
+                            Tapped="SettingsMenu_Tapped">
+                        <StackPanel Padding="12">
+                            <TextBlock x:Name="SettingsTitle" Text="设置" FontSize="14" FontWeight="SemiBold"/>
+                            <Grid Margin="0,12,0,0">
+                                <TextBlock x:Name="SettingsThemeLabel" Text="主题" FontSize="13" VerticalAlignment="Center"/>
+                                <Border x:Name="SettingsThemeBtn" Width="44" Height="22" CornerRadius="11"
+                                        BorderThickness="1" HorizontalAlignment="Right" Tapped="SettingsTheme_Click">
+                                    <TextBlock x:Name="SettingsThemeText" Text="白" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="11"/>
+                                </Border>
+                            </Grid>
+                            <Border x:Name="SettingsTestBtn" Height="26" CornerRadius="6" BorderThickness="1"
+                                    Margin="0,12,0,0" Tapped="SettingsTest_Click"
+                                    PointerPressed="SettingsTest_Pressed"
+                                    PointerReleased="SettingsTest_Released"
+                                    PointerExited="SettingsTest_Exited">
+                                <TextBlock x:Name="SettingsTestText" Text="测试按钮" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
+                            </Border>
+                            <Border x:Name="SettingsCloseBtn" Height="26" CornerRadius="6" BorderThickness="1"
+                                    Margin="0,12,0,0" Tapped="SettingsClose_Click">
+                                <TextBlock x:Name="SettingsCloseText" Text="关闭" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+                </Grid>
             </Grid>
         </Border>
     </Grid>

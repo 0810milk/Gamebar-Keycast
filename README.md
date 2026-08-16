@@ -1,6 +1,6 @@
 ﻿# 按键显示 —— Game Bar 键盘鼠标状态小组件
 
-> 当前版本：**0.1.0 beta**，版本登记见 [VERSION.md](VERSION.md)。
+> 当前版本：**0.2.0 beta**，版本登记见 [VERSION.md](VERSION.md)。
 
 在 Windows Game Bar（`Win+G`）中实时显示键盘与鼠标操作状态的小组件：
 

@@ -13,5 +13,6 @@
         VerticalAlignment="Center"
         Orientation="Vertical">
         <TextBlock Padding="0,0,0,5" Text="按键显示小组件（通过 Win+G 打开）" />
+        <Button Content="打开按键 UI（调试）" Click="OpenWidget_Click" Margin="0,10,0,0"/>
     </StackPanel>
 </Page>

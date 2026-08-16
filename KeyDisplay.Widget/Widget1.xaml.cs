@@ -271,17 +271,22 @@ namespace KeyDisplay
 
             if (_docked)
             {
-                // Game Bar 关闭、仅固定组件叠加显示时：隐藏面板背景/边框、主题按钮与状态字，只留按键
+                // Game Bar 关闭、仅固定组件叠加显示时：隐藏面板背景/边框、工具条按钮、状态字与设置，只留按键
                 RootPanel.Background = _transparent;
                 RootPanel.BorderBrush = _transparent;
                 ThemeToggleBtn.Visibility = Visibility.Collapsed;
+                SettingsBtn.Visibility = Visibility.Collapsed;
+                SettingsPanel.Visibility = Visibility.Collapsed;
                 StatusText.Visibility = Visibility.Collapsed;
             }
             else
             {
                 ThemeToggleBtn.Visibility = Visibility.Visible;
+                SettingsBtn.Visibility = Visibility.Visible;
                 StatusText.Visibility = Visibility.Visible;
             }
+
+            ApplySettingsColors();
 
             ApplicationData.Current.LocalSettings.Values["Theme"] = _dark ? "dark" : "light";
         }
@@ -429,6 +434,102 @@ namespace KeyDisplay
         {
             _dark = !_dark;
             ApplyTheme();
+        }
+
+        // 设置子菜单配色：菜单框、标题、主题行、关闭按钮都随当前主题刷新
+        private void ApplySettingsColors()
+        {
+            SettingsMenu.Background = _dark ? _darkPanel : _lightPanel;
+            SettingsMenu.BorderBrush = _dark ? _darkBorder : _lightBorder;
+            SettingsTitle.Foreground = _dark ? _darkDefaultFg : _lightDefaultFg;
+            SettingsThemeLabel.Foreground = _dark ? _darkDefaultFg : _lightDefaultFg;
+
+            SettingsThemeText.Text = _dark ? "\u767d" : "\u9ed1";   // 白 / 黑
+            if (_dark)
+            {
+                SettingsThemeBtn.Background = _lightDefaultBg;
+                SettingsThemeBtn.BorderBrush = _lightBorder;
+                SettingsThemeText.Foreground = _lightDefaultFg;
+                SettingsCloseBtn.Background = _darkDefaultBg;
+                SettingsCloseBtn.BorderBrush = _darkBorder;
+                SettingsCloseText.Foreground = _darkDefaultFg;
+                SettingsTestBtn.Background = _darkDefaultBg;
+                SettingsTestBtn.BorderBrush = _darkBorder;
+                SettingsTestText.Foreground = _darkDefaultFg;
+                SettingsBtnIcon.Foreground = _darkDefaultFg;
+            }
+            else
+            {
+                SettingsThemeBtn.Background = _darkDefaultBg;
+                SettingsThemeBtn.BorderBrush = _darkBorder;
+                SettingsThemeText.Foreground = _darkDefaultFg;
+                SettingsCloseBtn.Background = _lightDefaultBg;
+                SettingsCloseBtn.BorderBrush = _lightBorder;
+                SettingsCloseText.Foreground = _lightDefaultFg;
+                SettingsTestBtn.Background = _lightDefaultBg;
+                SettingsTestBtn.BorderBrush = _lightBorder;
+                SettingsTestText.Foreground = _lightDefaultFg;
+                SettingsBtnIcon.Foreground = _lightDefaultFg;
+            }
+        }
+
+        // 点击设置图标：展开设置子菜单
+        private void Settings_Click(object sender, TappedRoutedEventArgs e)
+        {
+            ApplySettingsColors();
+            SettingsPanel.Visibility = Visibility.Visible;
+            DiagLog("settings opened theme=" + (_dark ? "dark" : "light"));
+        }
+
+        // 点击关闭按钮：收起设置子菜单
+        private void SettingsClose_Click(object sender, TappedRoutedEventArgs e)
+        {
+            SettingsPanel.Visibility = Visibility.Collapsed;
+            DiagLog("settings closed by close btn");
+        }
+
+        // 点击菜单框内部：标记已处理，避免冒泡到遮罩触发关闭
+        private void SettingsMenu_Tapped(object sender, TappedRoutedEventArgs e)
+        {
+            e.Handled = true;
+        }
+
+        // 点击遮罩（菜单框外）：收起设置子菜单
+        private void SettingsPanel_Tapped(object sender, TappedRoutedEventArgs e)
+        {
+            SettingsPanel.Visibility = Visibility.Collapsed;
+            DiagLog("settings closed by mask");
+        }
+
+        // 设置面板里的主题切换：与底部胶囊按钮同逻辑
+        private void SettingsTheme_Click(object sender, TappedRoutedEventArgs e)
+        {
+            _dark = !_dark;
+            ApplyTheme();
+        }
+
+        // 测试按钮：按下反色（点击反馈），松开恢复主题色
+        private void SettingsTest_Pressed(object sender, PointerRoutedEventArgs e)
+        {
+            SettingsTestBtn.Background = _dark ? _darkPressedBg : _lightPressedBg;
+            SettingsTestBtn.BorderBrush = _dark ? _darkPressedBg : _lightPressedBg;
+            SettingsTestText.Foreground = _dark ? _darkPressedFg : _lightPressedFg;
+        }
+
+        private void SettingsTest_Released(object sender, PointerRoutedEventArgs e)
+        {
+            ApplySettingsColors();
+        }
+
+        private void SettingsTest_Exited(object sender, PointerRoutedEventArgs e)
+        {
+            ApplySettingsColors();
+        }
+
+        // 测试按钮点击：记日志，验证点击链路
+        private void SettingsTest_Click(object sender, TappedRoutedEventArgs e)
+        {
+            DiagLog("test button clicked theme=" + (_dark ? "dark" : "light"));
         }
 
         private static void DiagLog(string msg)
