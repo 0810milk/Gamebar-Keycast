@@ -42,12 +42,16 @@ Write-Host "==> MSBuild 构建 (侧载模式)"
     /v:m
 if ($LASTEXITCODE -ne 0) { throw "MSBuild 失败（错误码 $LASTEXITCODE）" }
 
-Write-Host "==> 定位 APPX 产物"
-$bin = Join-Path $root "KeyDisplay.Widget\bin\$Arch\$Configuration"
-$appx = Get-ChildItem -Path $bin -Recurse -Filter "KeyDisplay.Widget_*.appx" -ErrorAction SilentlyContinue |
+Write-Host "==> 定位 MSIX/APPX 产物"
+$widgetDir = Join-Path $root "KeyDisplay.Widget"
+$appx = Get-ChildItem -Path $widgetDir -Recurse -Filter "KeyDisplay.Widget_*.msix" -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTime -Descending | Select-Object -First 1
-if (-not $appx) { throw "未找到 KeyDisplay.Widget_*.appx 产物" }
-Write-Host "APPX: $($appx.FullName)"
+if (-not $appx) {
+    $appx = Get-ChildItem -Path $widgetDir -Recurse -Filter "KeyDisplay.Widget_*.appx" -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+}
+if (-not $appx) { throw "未找到 KeyDisplay.Widget_*.msix/appx 产物" }
+Write-Host "MSIX: $($appx.FullName)"
 
 Write-Host "==> 生成并导出签名证书"
 $certOut = & (Join-Path $PSScriptRoot "make-cert.ps1") -OutDir $outDir
@@ -61,7 +65,7 @@ $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurs
     Sort-Object FullName -Descending | Select-Object -First 1
 if (-not $signtool) { throw "未找到 signtool，请安装 Windows SDK" }
 
-Write-Host "==> 签名 APPX"
+Write-Host "==> 签名 MSIX"
 $dest = Join-Path $outDir $appx.Name
 Copy-Item -Path $appx.FullName -Destination $dest -Force
 $sec = ConvertTo-SecureString -String $pfxPwd -AsPlainText -Force

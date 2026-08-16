@@ -7,7 +7,7 @@ using Microsoft.Win32.SafeHandles;
 namespace KeyDisplay
 {
     /// <summary>
-    /// 一份 20 字节输入快照。
+    /// 一份 36 字节输入快照。
     /// </summary>
     public sealed class InputSnapshot
     {
@@ -15,6 +15,10 @@ namespace KeyDisplay
         public byte Mouse;   // 5 位：L R M X1 X2
         public int MouseX;
         public int MouseY;
+        public int VsX;      // 虚拟屏幕原点/尺寸，用于把坐标映射到鼠标垫
+        public int VsY;
+        public int VsW;
+        public int VsH;
     }
 
     /// <summary>
@@ -69,7 +73,7 @@ namespace KeyDisplay
 
                     using (var stream = new FileStream(new SafeFileHandle(handle, true), FileAccess.Read))
                     {
-                        var buf = new byte[20];
+                        var buf = new byte[36];
                         while (!ct.IsCancellationRequested)
                         {
                             int offset = 0;
@@ -107,10 +111,14 @@ namespace KeyDisplay
         {
             return new InputSnapshot
             {
-                Keys = (ushort)(b[4] | (b[5] << 8)),
-                Mouse = b[6],
-                MouseX = BitConverter.ToInt32(b, 7),
-                MouseY = BitConverter.ToInt32(b, 11)
+                Keys = (ushort)(b[5] | (b[6] << 8)),
+                Mouse = b[7],
+                MouseX = BitConverter.ToInt32(b, 8),
+                MouseY = BitConverter.ToInt32(b, 12),
+                VsX = BitConverter.ToInt32(b, 16),
+                VsY = BitConverter.ToInt32(b, 20),
+                VsW = BitConverter.ToInt32(b, 24),
+                VsH = BitConverter.ToInt32(b, 28)
             };
         }
     }

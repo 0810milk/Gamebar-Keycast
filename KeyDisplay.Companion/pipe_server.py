@@ -14,6 +14,12 @@ from state import SNAPSHOT_SIZE
 
 PIPE_NAME = r"\\.\pipe\KeyDisplayState"
 
+# 虚拟屏幕度量索引（与 GetSystemMetrics 常量一致）
+SM_XVIRTUALSCREEN = 76
+SM_YVIRTUALSCREEN = 77
+SM_CXVIRTUALSCREEN = 78
+SM_CYVIRTUALSCREEN = 79
+
 PIPE_ACCESS_DUPLEX = 0x3
 FILE_FLAG_OVERLAPPED = 0x40000000
 PIPE_TYPE_MESSAGE = 0x4
@@ -161,8 +167,13 @@ class PipeServer:
         kernel32.WriteFile.argtypes = [ctypes.c_void_p, ctypes.c_void_p,
                                        wt.DWORD, ctypes.POINTER(wt.DWORD), ctypes.c_void_p]
         kernel32.WriteFile.restype = wt.BOOL
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
         while not self._stop.is_set():
             reconcile(self._state)
+            self._state.vx = user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
+            self._state.vy = user32.GetSystemMetrics(SM_YVIRTUALSCREEN)
+            self._state.vw = user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)
+            self._state.vh = user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
             blob = self._state.serialize()
             self._state.seq += 1
             written = wt.DWORD()

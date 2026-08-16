@@ -37,7 +37,7 @@ UninstallDisplayIcon={app}\{#MyAppExeName},0
 [Files]
 Source: "..\KeyDisplay.Companion\dist\KeyDisplayCompanion.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\cert\KeyDisplay.cer"; DestDir: "{app}\cert"; Flags: ignoreversion
-Source: "..\dist\KeyDisplay.Install\*.appx"; DestDir: "{app}\appx"; Flags: ignoreversion
+Source: "..\dist\KeyDisplay.Install\*.msix"; DestDir: "{app}\appx"; Flags: ignoreversion
 Source: "install-msix.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 [Registry]
@@ -47,11 +47,11 @@ Root: HKCU; Subkey: "Software\Classes\keydisplay\shell\open\command"; ValueType:
 Root: HKCU; Subkey: "Software\Classes\keydisplay\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"",0"; Flags: uninsdeletekey
 
 [Run]
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\install-msix.ps1"" -AppxPath ""{app}\appx\KeyDisplay.Widget_*.appx"" -CertPath ""{app}\cert\KeyDisplay.cer"" -CompanionExe ""{app}\{#MyAppExeName}"""; Flags: runhidden waituntilterminated; StatusMsg: "正在安装 Game Bar 小组件..."
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\install-msix.ps1"" -AppxPath ""{app}\appx\KeyDisplay.Widget_*.msix"" -CertPath ""{app}\cert\KeyDisplay.cer"" -CompanionExe ""{app}\{#MyAppExeName}"""; Flags: runhidden waituntilterminated; StatusMsg: "正在安装 Game Bar 小组件..."
 
 [UninstallRun]
 ; 注意：Inno 在 [UninstallRun] 之前会先删除文件，因此这里用内联命令（不依赖已删除的脚本）。
-Filename: "powershell.exe"; Parameters: "-NoProfile -Command ""Get-AppxPackage -Name 'KeyDisplay.Widget' | Remove-AppxPackage -ErrorAction SilentlyContinue; Get-ChildItem 'Cert:\LocalMachine\TrustedPeople' -ErrorAction SilentlyContinue | Where-Object { $_.Subject -like '*CN=KeyDisplay*' } | Remove-Item -ErrorAction SilentlyContinue"""; Flags: runhidden
+Filename: "powershell.exe"; Parameters: "-NoProfile -Command ""Get-AppxPackage -Name 'KeyDisplay.Widget' | Remove-AppxPackage -ErrorAction SilentlyContinue; Get-ChildItem 'Cert:\LocalMachine\TrustedPeople' -ErrorAction SilentlyContinue | Where-Object {{ $_.Subject -like '*CN=KeyDisplay*' }} | Remove-Item -ErrorAction SilentlyContinue"""; Flags: runhidden
 
 [UninstallDelete]
 Type: files; Name: "{app}\config.json"

@@ -1,4 +1,4 @@
-# 按键显示 —— Game Bar 键盘鼠标状态小组件
+﻿# 按键显示 —— Game Bar 键盘鼠标状态小组件
 
 在 Windows Game Bar（`Win+G`）中实时显示键盘与鼠标操作状态的小组件：
 
@@ -14,7 +14,7 @@
 ```
 ┌─────────────────────────┐       命名管道        ┌──────────────────────────┐
 │  KeyDisplayCompanion    │  \\.\pipe\KeyDisplay  │  KeyDisplay.Widget       │
-│  (Python + PyInstaller) │ ←── 20B/帧, 60Hz ───► │  (UWP C# Game Bar 小组件) │
+│  (Python + PyInstaller) │ ←── 36B/帧, 60Hz ───► │  (UWP C# Game Bar 小组件) │
 │  · WH_KEYBOARD_LL 钩子   │                      │  · CreateFileW + FileStream│
 │  · WH_MOUSE_LL 钩子      │                      │  · DispatcherTimer 30fps  │
 │  · GetAsyncKeyState 兜底 │                      │  · 右键菜单切换主题       │

@@ -24,6 +24,7 @@ class SnapshotTests(unittest.TestCase):
         st.set_mouse("L", True)
         st.set_mouse("X2", True)
         st.mx, st.my, st.seq = 1234, -56, 7
+        st.vx, st.vy, st.vw, st.vh = -1920, 0, 3840, 1080
         blob = st.serialize()
         self.assertEqual(len(blob), SNAPSHOT_SIZE)
         snap = parse_snapshot(blob)
@@ -33,10 +34,12 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(snap["mouse"],
                          (1 << MOUSE_ORDER.index("L")) | (1 << MOUSE_ORDER.index("X2")))
         self.assertEqual((snap["mx"], snap["my"], snap["seq"]), (1234, -56, 7))
+        self.assertEqual((snap["vx"], snap["vy"], snap["vw"], snap["vh"]),
+                         (-1920, 0, 3840, 1080))
 
     def test_serialize_sizes(self):
         st = InputState()
-        self.assertEqual(len(st.serialize()), 20)
+        self.assertEqual(len(st.serialize()), 36)
 
     def test_parse_rejects_short(self):
         self.assertIsNone(parse_snapshot(b"\x00" * 10))
@@ -121,7 +124,7 @@ class PipeServerTests(unittest.TestCase):
     def test_derive_package_sid_no_crash(self):
         self.assertIsNone(pipe_server._derive_package_sid("__nonexistent__"))
 
-    def test_snapshot_is_20_bytes(self):
+    def test_snapshot_is_36_bytes(self):
         st = InputState()
         self.assertEqual(len(st.serialize()), SNAPSHOT_SIZE)
 

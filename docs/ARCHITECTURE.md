@@ -1,4 +1,4 @@
-# 架构说明
+﻿# 架构说明
 
 ## 组件与职责
 
@@ -11,7 +11,7 @@ KeyDisplayCompanion（Python，桌面进程）           KeyDisplay.Widget（UWP
 │ state.py  InputState         │  命名管道        │  · 右键菜单（主题/启动/退出）    │
 │  · 键盘/鼠标位掩码           │ \\.\pipe\        │ InputStateReader.cs             │
 │ pipe_server.py               │ KeyDisplayState │  · CreateFileW + FileStream 读   │
-│  · 60Hz 推送 20B 快照        │ ───────────────► │  · 断线自动重连                 │
+│  · 60Hz 推送 36B 快照        │ ───────────────► │  · 断线自动重连                 │
 │  · SDDL DACL + 包 SID 放行   │                 │ NativeMethods.cs                │
 └──────────────────────────────┘                 └──────────────────────────────────┘
 ```
@@ -22,24 +22,30 @@ KeyDisplayCompanion（Python，桌面进程）           KeyDisplay.Widget（UWP
 - **小组件**：仅在 Game Bar 显示时存活；打开即尝试连接管道，连不上时
   每 2 秒重试，并触发一次协议启动。
 
-## 快照协议（20 字节，小端）
+## 快照协议（36 字节，小端）
 
 ```
 偏移  类型    字段
 0     char[4]  MAGIC "KDSP"
-4     u8       version = 1
+4     u8       version = 2
 5     u16      keys
 7     u8       mouse
 8     i32      mouseX
 12    i32      mouseY
-16    u32      seq
+16    i32      vsX（虚拟屏幕原点 X）
+20    i32      vsY
+24    i32      vsW
+28    i32      vsH
+32    u32      seq
 ```
 
 - `keys` 位序（12 位）：`0=Q 1=W 2=E 3=R 4=A 5=S 6=D 7=F 8=Shift 9=Ctrl 10=Alt 11=Space`
 - `mouse` 位序（5 位）：`0=L 1=R 2=M 3=X1 4=X2`
-- `mouseX/Y`：Win32 屏幕坐标；小组件用虚拟屏幕范围
-  （`GetSystemMetrics` SM_X/Y/CX/CYVIRTUALSCREEN）映射到 80×80 鼠标垫。
-- 字节布局 `struct.calcsize('<4sBHBiiI') == 20`。
+- `mouseX/Y`：Win32 屏幕坐标；虚拟屏幕范围（`vsX/vsY/vsW/vsH`）由伴生进程
+  用 `GetSystemMetrics`（SM_*VIRTUALSCREEN）采集后随帧下发，
+  小组件据此把坐标映射到 80×80 鼠标垫（UWP 沙箱内不允许 P/Invoke
+  `user32!GetSystemMetrics`，故由桌面侧传入）。
+- 字节布局 `struct.calcsize('<4sBHBiiiiiiI') == 36`。
 
 Python 侧序列化：`KeyDisplay.Companion\state.py`；
 C# 侧解析：`KeyDisplay.Widget\InputStateReader.cs`。
@@ -62,7 +68,7 @@ C# 侧解析：`KeyDisplay.Widget\InputStateReader.cs`。
   并额外放行 `packageFamilyName` 派生的包 SID
   （`DeriveAppContainerSidFromAppContainerName`，来自 `config.json`）。
 - 客户端：UWP 沙箱内 `System.IO.Pipes` 不可用，改用
-  `CreateFileW` + `FileStream(SafeFileHandle)` 同步读 20 字节帧
+  `CreateFileW` + `FileStream(SafeFileHandle)` 同步读 36 字节帧
   （`FILE_FLAG_OVERLAPPED` 以支持取消）。
 
 ## UWP 小组件清单要点（Package.appxmanifest）

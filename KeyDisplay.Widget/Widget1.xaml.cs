@@ -46,22 +46,6 @@ namespace KeyDisplay
         private readonly SolidColorBrush _lightPanel = new SolidColorBrush(Color.FromArgb(0xB3, 0xFF, 0xFF, 0xFF));
         private readonly SolidColorBrush _lightPad = new SolidColorBrush(Color.FromArgb(0x59, 0xFF, 0xFF, 0xFF));
 
-        // 虚拟屏幕边界（用于把光标坐标映射到鼠标垫）
-        private static readonly int VxLeft;
-        private static readonly int VyTop;
-        private static readonly int VxWidth;
-        private static readonly int VyHeight;
-
-        static Widget1()
-        {
-            VxLeft = NativeMethods.GetSystemMetrics(76);   // SM_XVIRTUALSCREEN
-            VyTop = NativeMethods.GetSystemMetrics(77);    // SM_YVIRTUALSCREEN
-            VxWidth = NativeMethods.GetSystemMetrics(78);  // SM_CXVIRTUALSCREEN
-            VyHeight = NativeMethods.GetSystemMetrics(79); // SM_CYVIRTUALSCREEN
-            if (VxWidth <= 0) VxWidth = 1920;
-            if (VyHeight <= 0) VyHeight = 1080;
-        }
-
         public Widget1()
         {
             this.InitializeComponent();
@@ -78,10 +62,10 @@ namespace KeyDisplay
             _dark = (theme is string s && s == "light") ? false : true;
 
             _reader = new InputStateReader();
-            _reader.Snapshot += (s, snap) => _latest = snap;
+            _reader.Snapshot += (_, snap) => _latest = snap;
 
             _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(33) };
-            _timer.Tick += (s, e) => ApplySnapshot();
+            _timer.Tick += (_, e) => ApplySnapshot();
         }
 
         private void OnLoaded(object sender, RoutedEventArgs e)
@@ -176,8 +160,10 @@ namespace KeyDisplay
             SetKey(_mouse["X1"], x1);
             SetKey(_mouse["X2"], x2);
 
-            double px = ((snap.MouseX - VxLeft) / (double)VxWidth) * 80.0;
-            double py = ((snap.MouseY - VyTop) / (double)VyHeight) * 80.0;
+            double vw = snap.VsW > 0 ? snap.VsW : 1920;
+            double vh = snap.VsH > 0 ? snap.VsH : 1080;
+            double px = ((snap.MouseX - snap.VsX) / vw) * 80.0;
+            double py = ((snap.MouseY - snap.VsY) / vh) * 80.0;
             px = Math.Max(0.0, Math.Min(70.0, px));
             py = Math.Max(0.0, Math.Min(70.0, py));
             Canvas.SetLeft(MouseDot, px);
