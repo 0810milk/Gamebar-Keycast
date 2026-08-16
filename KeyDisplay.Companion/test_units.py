@@ -49,6 +49,60 @@ class SnapshotTests(unittest.TestCase):
         hooks._last_raw_ts = 0.0
         hooks._handle_raw_input(0)
 
+    def test_accumulate_motion_scale_and_clamp(self):
+        # 隐藏光标累计：按校准比例缩放，并钳制到虚拟屏幕范围
+        hooks._state = InputState()
+        hooks._state.vx, hooks._state.vy = 0, 0
+        hooks._state.vw, hooks._state.vh = 1000, 800
+        real_sx, real_sy = hooks._scale_x, hooks._scale_y
+        hooks._scale_x, hooks._scale_y = 2.0, 0.5
+        try:
+            hooks._accumulate_motion(100, 100)
+            self.assertEqual((hooks._state.mx, hooks._state.my), (200, 50))
+            # 越界钳制到虚拟屏幕（不再无界漂移）
+            hooks._accumulate_motion(5000, 0)
+            self.assertEqual((hooks._state.mx, hooks._state.my), (1000, 50))
+            hooks._accumulate_motion(-10000, 0)
+            self.assertEqual((hooks._state.mx, hooks._state.my), (0, 50))
+        finally:
+            hooks._scale_x, hooks._scale_y = real_sx, real_sy
+
+    def test_calibrate_scale(self):
+        # 桌面校准：10 个原始增量对应光标位移 30px → sx=0.5*1+0.5*3=2.0
+        hooks._cal_at = 0.0
+        hooks._cal_raw_dx = hooks._cal_raw_dy = 0.0
+        hooks._cal_cur_dx = hooks._cal_cur_dy = 0.0
+        hooks._cal_last_pos = (0, 0)
+        real_pos = hooks._read_cursor_position
+        real_sx, real_sy = hooks._scale_x, hooks._scale_y
+        hooks._scale_x, hooks._scale_y = 1.0, 1.0
+        try:
+            hooks._read_cursor_position = lambda: (30, 40)
+            hooks._calibrate_scale(10, 0)
+            self.assertAlmostEqual(hooks._scale_x, 2.0, places=2)
+            self.assertAlmostEqual(hooks._scale_y, 1.0, places=2)  # 无纵向原始增量，不更新
+        finally:
+            hooks._read_cursor_position = real_pos
+            hooks._scale_x, hooks._scale_y = real_sx, real_sy
+
+    def test_calibrate_scale_locked_cursor_keeps_scale(self):
+        # 回归"游戏内光标不动"：光标锁定（增量持续但位置不动）时系数不得衰减
+        hooks._cal_at = 0.0
+        hooks._cal_raw_dx = hooks._cal_raw_dy = 0.0
+        hooks._cal_cur_dx = hooks._cal_cur_dy = 0.0
+        hooks._cal_last_pos = (500, 300)
+        real_pos = hooks._read_cursor_position
+        real_sx, real_sy = hooks._scale_x, hooks._scale_y
+        hooks._scale_x, hooks._scale_y = 1.0, 1.0
+        try:
+            hooks._read_cursor_position = lambda: (500, 300)  # 位置不动
+            hooks._calibrate_scale(100, 100)                  # 增量持续到达
+            self.assertEqual(hooks._scale_x, 1.0)             # 系数保持，不衰减
+            self.assertEqual(hooks._scale_y, 1.0)
+        finally:
+            hooks._read_cursor_position = real_pos
+            hooks._scale_x, hooks._scale_y = real_sx, real_sy
+
     def test_visibility_debounced(self):
         # 可见性闪烁（<150ms）不切换模式，返回稳定值
         real_get = hooks.user32.GetCursorInfo

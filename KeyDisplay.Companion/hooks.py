@@ -58,10 +58,73 @@ _coord_src = "none"   # 最近一次坐标来源：sync(GetCursorPos)/acc(增量
 _cursor_hidden = None  # 最近一次可见性判定（None=未知）
 _hidden_delta_logged = 0  # 进入隐藏状态后已记录的增量条数（防刷屏）
 
+# --- 原始增量 → 屏幕像素 缩放校准（游戏内隐藏光标累计时使用）---
+# 桌面（光标可见）期间用 GetCursorPos 真值持续校准该比例，游戏内累计时套用，
+# 使点速与桌面手感一致；否则 1 增量=1 像素 会因系统指针速度/游戏灵敏度而失准
+# （累计值脱节 → 点顶到垫边卡住，观感"垫子不够用"）。
+_scale_x = 1.0
+_scale_y = 1.0
+_cal_raw_dx = 0.0     # 校准窗口内累计原始增量（绝对值）
+_cal_raw_dy = 0.0
+_cal_cur_dx = 0.0     # 校准窗口内累计光标位移（GetCursorPos，绝对值）
+_cal_cur_dy = 0.0
+_cal_last_pos = None
+_cal_at = 0.0
+
 
 def raw_stats():
     """返回 (已处理数, 跳过数, 坐标来源)，供泵周期日志清零。"""
     return _raw_count, _raw_skip, _coord_src
+
+
+def scale_stats():
+    """返回当前原始增量→像素缩放系数 (sx, sy)，供监控日志。"""
+    return _scale_x, _scale_y
+
+
+def _calibrate_scale(dx, dy):
+    """桌面（光标可见）时校准 raw 增量 → 屏幕像素 比例（指数平滑，每 1s 更新一次）。
+
+    仅当光标实际移动（位移 >1px）才更新：光标锁定/顶到屏幕边缘时（增量持续但
+    位置不动）保持原系数，否则 0 比值会让系数每周期减半，游戏内累计随之失效
+    （表现为"游戏内光标不动"）。系数限制在 [0.1, 5.0] 防异常。
+    """
+    global _scale_x, _scale_y, _cal_raw_dx, _cal_raw_dy, \
+        _cal_cur_dx, _cal_cur_dy, _cal_last_pos, _cal_at
+    _cal_raw_dx += abs(dx)
+    _cal_raw_dy += abs(dy)
+    pos = _read_cursor_position()
+    if pos is not None:
+        x, y = pos
+        if _cal_last_pos is not None:
+            _cal_cur_dx += abs(x - _cal_last_pos[0])
+            _cal_cur_dy += abs(y - _cal_last_pos[1])
+        _cal_last_pos = (x, y)
+    now = time.monotonic()
+    if now - _cal_at >= 1.0:
+        if _cal_raw_dx > 0 and _cal_cur_dx > 1:
+            ratio = min(_cal_cur_dx / _cal_raw_dx, 5.0)
+            _scale_x = max(0.1, 0.5 * _scale_x + 0.5 * ratio)
+        if _cal_raw_dy > 0 and _cal_cur_dy > 1:
+            ratio = min(_cal_cur_dy / _cal_raw_dy, 5.0)
+            _scale_y = max(0.1, 0.5 * _scale_y + 0.5 * ratio)
+        _cal_raw_dx = _cal_raw_dy = _cal_cur_dx = _cal_cur_dy = 0.0
+        _cal_last_pos = None
+        _cal_at = now
+
+
+def _accumulate_motion(dx, dy):
+    """隐藏光标（游戏）时按校准比例累计增量，并钳制到虚拟屏幕范围内。
+
+    钳制解决"累计值超出屏幕 → 点顶到垫边卡住"：光标真到屏幕边时点停在垫边
+    （对应真实行为），转视角不再无界漂移。
+    """
+    _state.mx += dx * _scale_x
+    _state.my += dy * _scale_y
+    vw = _state.vw or 1920
+    vh = _state.vh or 1080
+    _state.mx = max(_state.vx, min(_state.vx + vw, _state.mx))
+    _state.my = max(_state.vy, min(_state.vy + vh, _state.my))
 
 # 按键虚拟键码（左右修饰键统一映射到同一标签）
 VK = {"Q": 0x51, "W": 0x57, "E": 0x45, "R": 0x52,
@@ -278,7 +341,9 @@ def _handle_raw_input(l_param):
         return
 
     if _cursor_visible():
-        # 光标可见：坐标由 60Hz GetCursorPos 轮询维护，这里不再写入
+        # 光标可见：坐标由 60Hz GetCursorPos 轮询维护，这里不再写入，
+        # 但利用增量做"原始增量→像素"比例校准（供游戏内累计使用）
+        _calibrate_scale(raw.mouse.lLastX, raw.mouse.lLastY)
         return
 
     if raw.mouse.usFlags & MOUSE_MOVE_ABSOLUTE:
@@ -290,8 +355,7 @@ def _handle_raw_input(l_param):
         _state.my = _state.vy + int(raw.mouse.lLastY * vh / 65535)
     else:
         _coord_src = "acc"
-        _state.mx += raw.mouse.lLastX
-        _state.my += raw.mouse.lLastY
+        _accumulate_motion(raw.mouse.lLastX, raw.mouse.lLastY)
         # 隐藏态增量日志：每次进入隐藏只记前 20 条，防刷屏
         if _hidden_delta_logged < 20:
             _hidden_delta_logged += 1
