@@ -108,7 +108,27 @@ namespace KeyDisplay
             foreach (var kv in _keys) SetKey(kv.Value, false);
             foreach (var kv in _mouse) SetKey(kv.Value, false);
 
+            SetThemeToggle(ThemeDarkBtn, ThemeDarkBtnText, _dark);
+            SetThemeToggle(ThemeLightBtn, ThemeLightBtnText, !_dark);
+
             ApplicationData.Current.LocalSettings.Values["Theme"] = _dark ? "dark" : "light";
+        }
+
+        private void SetThemeToggle(Border btn, TextBlock tb, bool active)
+        {
+            SolidColorBrush bg, fg;
+            if (_dark)
+            {
+                bg = active ? _darkPressedBg : _darkDefaultBg;
+                fg = active ? _darkPressedFg : _darkDefaultFg;
+            }
+            else
+            {
+                bg = active ? _lightPressedBg : _lightDefaultBg;
+                fg = active ? _lightPressedFg : _lightDefaultFg;
+            }
+            btn.Background = bg;
+            tb.Foreground = fg;
         }
 
         private void SetKey(Border border, bool down)
@@ -184,6 +204,18 @@ namespace KeyDisplay
         private void ThemeItem_Click(object sender, RoutedEventArgs e)
         {
             _dark = !_dark;
+            ApplyTheme();
+        }
+
+        private void ThemeDark_Click(object sender, TappedRoutedEventArgs e)
+        {
+            _dark = true;
+            ApplyTheme();
+        }
+
+        private void ThemeLight_Click(object sender, TappedRoutedEventArgs e)
+        {
+            _dark = false;
             ApplyTheme();
         }
 
