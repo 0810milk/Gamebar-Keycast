@@ -1,0 +1,19 @@
+# 构建产物与临时文件
+__pycache__/
+*.pyc
+*.spec
+build/
+dist/
+cert/
+
+# 伴生进程运行时
+KeyDisplay.Companion/config.json
+
+# UWP 构建产物
+KeyDisplay.Widget/bin/
+KeyDisplay.Widget/obj/
+KeyDisplay.Widget/AppPackages/
+KeyDisplay.Widget/BundleArtifacts/
+KeyDisplay.Widget/Generated Files/
+*.user
+*.suo

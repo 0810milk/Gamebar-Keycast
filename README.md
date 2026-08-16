@@ -1,0 +1,75 @@
+# 按键显示 —— Game Bar 键盘鼠标状态小组件
+
+在 Windows Game Bar（`Win+G`）中实时显示键盘与鼠标操作状态的小组件：
+
+- 键盘：`Q/W/E/R`、`A/S/D/F`、`Shift`、`Ctrl`、`Alt`、`空格`
+- 鼠标：移动垫（光标实时定位）+ `左 / 中 / 右 / 侧1 / 侧2` 五个按键
+- 按下反色、松开恢复，无动画
+- 暗色 / 亮色半透明主题（小组件内右键切换）
+- 端到端延迟 < 50ms（60Hz 快照推送 + 30fps UI 刷新）
+- `Setup.exe` 一键安装，支持控制面板卸载
+
+## 架构总览
+
+```
+┌─────────────────────────┐       命名管道        ┌──────────────────────────┐
+│  KeyDisplayCompanion    │  \\.\pipe\KeyDisplay  │  KeyDisplay.Widget       │
+│  (Python + PyInstaller) │ ←── 20B/帧, 60Hz ───► │  (UWP C# Game Bar 小组件) │
+│  · WH_KEYBOARD_LL 钩子   │                      │  · CreateFileW + FileStream│
+│  · WH_MOUSE_LL 钩子      │                      │  · DispatcherTimer 30fps  │
+│  · GetAsyncKeyState 兜底 │                      │  · 右键菜单切换主题       │
+└─────────────────────────┘                      └──────────────────────────┘
+        ▲ keydisplay://start（协议唤起）
+        │
+  UWP 小组件打开时自动拉起
+```
+
+伴生进程负责采集输入（全局钩子），小组件负责渲染（Game Bar 沙箱内）。
+两侧不共享进程边界，通过命名管道通信；管道路径、包 SID 放行、快照协议见
+[ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+
+## 目录结构
+
+| 目录 / 文件 | 说明 |
+|---|---|
+| `KeyDisplay.Companion/` | Python 伴生进程（采集输入 + 管道服务） |
+| `KeyDisplay.Widget/` | UWP C# 小组件工程（VS 构建） |
+| `installer/` | 证书、MSIX 构建、安装/卸载脚本、Inno Setup 脚本 |
+| `tools/` | `gen_assets.py`（生成 UWP 资源）、`preview.py`（tkinter 开发预览） |
+| `docs/` | BUILD / INSTALL / ARCHITECTURE 说明 |
+| `dist/` | 构建产物（EXE、APPX、Setup.exe，均为 .gitignore 忽略） |
+
+## 快速开始
+
+```powershell
+# 1) 开发预览（无需 Game Bar，直接看布局与反色效果）
+python tools\preview.py
+
+# 2) 构建伴生进程 EXE
+cd KeyDisplay.Companion
+powershell -ExecutionPolicy Bypass -File build.ps1
+
+# 3) 构建并签名 UWP 小组件 APPX（需要 VS + Windows SDK）
+cd ..\installer
+.\build-msix.ps1
+
+# 4) 一键安装
+.\install.ps1 -Appx ..\dist\KeyDisplay.Install\KeyDisplay.Widget_*.appx
+# 或编译 installer\setup.iss 生成 Setup.exe 后运行
+```
+
+完整流程见 [docs/BUILD.md](docs/BUILD.md) 与 [docs/INSTALL.md](docs/INSTALL.md)。
+
+## 测试
+
+```powershell
+cd KeyDisplay.Companion
+python -m unittest test_units -v
+```
+
+## 已知环境限制
+
+- 本仓库开发环境无法编译 UWP/MSIX（无 VS/.NET SDK），`KeyDisplay.Widget` 为可交付源码，
+  需在装有 Visual Studio（含 UWP 工作负载）与 Windows SDK 的机器上构建。
+- 自动化注入的模拟键盘输入（SendInput）不会触发全局钩子（系统注入丢弃），
+  需物理按键实测键盘链路；鼠标链路已用真实输入验证通过。
