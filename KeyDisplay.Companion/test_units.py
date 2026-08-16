@@ -59,6 +59,11 @@ class SnapshotTests(unittest.TestCase):
         try:
             hooks._accumulate_motion(100, 100)
             self.assertEqual((hooks._state.mx, hooks._state.my), (200, 50))
+            # 回归"泵线程崩溃(required argument is not an integer)"：
+            # 浮点比例累计后 mx/my 必须是整数，serialize 不得抛错
+            self.assertIsInstance(hooks._state.mx, int)
+            self.assertIsInstance(hooks._state.my, int)
+            self.assertEqual(len(hooks._state.serialize()), SNAPSHOT_SIZE)
             # 越界钳制到虚拟屏幕（不再无界漂移）
             hooks._accumulate_motion(5000, 0)
             self.assertEqual((hooks._state.mx, hooks._state.my), (1000, 50))

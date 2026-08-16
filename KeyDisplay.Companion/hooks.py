@@ -118,9 +118,11 @@ def _accumulate_motion(dx, dy):
 
     钳制解决"累计值超出屏幕 → 点顶到垫边卡住"：光标真到屏幕边时点停在垫边
     （对应真实行为），转视角不再无界漂移。
+    结果必须转整数：state.mx/my 会被 struct.pack 以 int 格式打包，
+    浮点值会让泵线程抛"required argument is not an integer"而崩溃。
     """
-    _state.mx += dx * _scale_x
-    _state.my += dy * _scale_y
+    _state.mx = int(_state.mx + dx * _scale_x)
+    _state.my = int(_state.my + dy * _scale_y)
     vw = _state.vw or 1920
     vh = _state.vh or 1080
     _state.mx = max(_state.vx, min(_state.vx + vw, _state.mx))
