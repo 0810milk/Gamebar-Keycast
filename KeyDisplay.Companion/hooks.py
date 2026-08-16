@@ -9,6 +9,7 @@
 """
 import ctypes
 import ctypes.wintypes as wt
+import time
 
 from state import KEY_ORDER
 
@@ -41,6 +42,13 @@ MOUSE_MOVE_ABSOLUTE = 0x1
 RIDEV_INPUTSINK = 0x00000100
 HWND_MESSAGE = ctypes.c_void_p(-3).value
 CURSOR_SHOWING = 0x00000001
+
+# 检测回报率上限（Hz）：高回报率鼠标（1000Hz/8000Hz）每个事件都做两次
+# GetRawInputData 调用，CPU 开销大易卡顿；限频到该值以下的事件直接跳过。
+# 桌面坐标走 GetCursorPos 绝对校准（限频无损），游戏内经活动范围归一化，
+# 限频不影响触边/比例。先按需求取 500，可调。
+RAW_REPORT_LIMIT = 500.0
+_last_raw_ts = 0.0
 
 # 按键虚拟键码（左右修饰键统一映射到同一标签）
 VK = {"Q": 0x51, "W": 0x57, "E": 0x45, "R": 0x52,
@@ -204,7 +212,14 @@ def _handle_raw_input(l_param):
 
     桌面（光标可见）时坐标由 60Hz GetCursorPos 轮询校准（sync_mouse_position），
     原始输入只负责光标隐藏（独占全屏游戏）时的增量累计；两个来源不会同时写入。
+    处理频率限制在 RAW_REPORT_LIMIT（500Hz），跳过超限事件以降低 CPU 开销。
     """
+    global _last_raw_ts
+    now = time.monotonic()
+    if now - _last_raw_ts < 1.0 / RAW_REPORT_LIMIT:
+        return
+    _last_raw_ts = now
+
     size = wt.UINT()
     user32.GetRawInputData(l_param, RID_INPUT, None, ctypes.byref(size),
                            ctypes.sizeof(RAWINPUTHEADER))

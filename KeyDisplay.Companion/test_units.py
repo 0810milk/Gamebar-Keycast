@@ -60,6 +60,14 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(pipe_server.normalize_position(9999, 50, 100, 300, 0, 100),
                          (1000, 500))
 
+    def test_raw_input_throttled(self):
+        # 限频：同一时刻（<1/500s）内的事件直接跳过，不解析 lParam
+        hooks._last_raw_ts = time.monotonic()
+        hooks._handle_raw_input(0)  # 限频内应静默返回，不抛异常
+        # 时间拨到很久以前 → 放行（lParam=0 → GetRawInputData 失败 → 静默返回）
+        hooks._last_raw_ts = 0.0
+        hooks._handle_raw_input(0)
+
     def test_update_normalized_end_to_end(self):
         # 回归：_update_normalized 的窗口推进参数顺序错误会崩溃/产出错误归一化。
         from collections import deque
