@@ -5,6 +5,7 @@ using Windows.Foundation;
 using Windows.Storage;
 using Windows.System;
 using Windows.UI;
+using Windows.UI.Core;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
 using Windows.UI.Xaml.Controls.Primitives;
@@ -142,9 +143,9 @@ namespace KeyDisplay
             bool docked = IsDocked(w);
             if (docked != _docked)
             {
-                try { DiagLog("mode changed => docked=" + docked + " mode=" + w.GameBarDisplayMode + " pinned=" + w.Pinned); } catch { }
                 _docked = docked;
-                ApplyDocked();
+                try { DiagLog("mode changed => docked=" + docked + " mode=" + w.GameBarDisplayMode + " pinned=" + w.Pinned); } catch { }
+                ApplyDockedOnUiThread();
             }
         }
 
@@ -156,9 +157,22 @@ namespace KeyDisplay
             bool docked = IsDocked(w);
             if (docked != _docked)
             {
-                try { DiagLog("pinned changed => docked=" + docked + " mode=" + w.GameBarDisplayMode + " pinned=" + w.Pinned); } catch { }
                 _docked = docked;
-                ApplyDocked();
+                try { DiagLog("pinned changed => docked=" + docked + " mode=" + w.GameBarDisplayMode + " pinned=" + w.Pinned); } catch { }
+                ApplyDockedOnUiThread();
+            }
+        }
+
+        // GameBarDisplayModeChanged/PinnedChanged 会在非 UI 线程回调（实测 0x8001010E），
+        // 界面更新必须投递到 UI 线程执行，否则直接触碰 UI 元素会抛"已为另一线程整理的接口"。
+        private void ApplyDockedOnUiThread()
+        {
+            try
+            {
+                Dispatcher.RunAsync(CoreDispatcherPriority.Normal, ApplyDocked);
+            }
+            catch
+            {
             }
         }
 
@@ -225,15 +239,32 @@ namespace KeyDisplay
             foreach (var kv in _keys) SetKey(kv.Value, false);
             foreach (var kv in _mouse) SetKey(kv.Value, false);
 
+            // 主题切换按钮：标签显示可切换到的主题，自身配色即该主题的预览
+            ThemeToggleBtnText.Text = _dark ? "\u767d" : "\u9ed1";   // 白 / 黑
+            if (_dark)
+            {
+                ThemeToggleBtn.Background = _lightDefaultBg;
+                ThemeToggleBtn.BorderBrush = _lightBorder;
+                ThemeToggleBtnText.Foreground = _lightDefaultFg;
+            }
+            else
+            {
+                ThemeToggleBtn.Background = _darkDefaultBg;
+                ThemeToggleBtn.BorderBrush = _darkBorder;
+                ThemeToggleBtnText.Foreground = _darkDefaultFg;
+            }
+
             if (_docked)
             {
-                // Game Bar 关闭、仅固定组件叠加显示时：隐藏面板背景/边框与状态字，只留按键
+                // Game Bar 关闭、仅固定组件叠加显示时：隐藏面板背景/边框、主题按钮与状态字，只留按键
                 RootPanel.Background = _transparent;
                 RootPanel.BorderBrush = _transparent;
+                ThemeToggleBtn.Visibility = Visibility.Collapsed;
                 StatusText.Visibility = Visibility.Collapsed;
             }
             else
             {
+                ThemeToggleBtn.Visibility = Visibility.Visible;
                 StatusText.Visibility = Visibility.Visible;
             }
 
@@ -300,37 +331,10 @@ namespace KeyDisplay
             MouseDot.Visibility = Visibility.Visible;
         }
 
-        private void Root_RightTapped(object sender, RightTappedRoutedEventArgs e)
-        {
-            ThemeItem.IsChecked = _dark;
-            ThemeItem.Text = _dark
-                ? "\u5207\u6362\u4e3a\u4eae\u8272\u6a21\u5f0f"   // 切换为亮色模式
-                : "\u5207\u6362\u4e3a\u6697\u8272\u6a21\u5f0f";  // 切换为暗色模式
-            var flyout = (MenuFlyout)Resources["WidgetMenu"];
-            flyout.ShowAt(RootPanel, e.GetPosition(RootPanel));
-        }
-
-        private void ThemeItem_Click(object sender, RoutedEventArgs e)
+        private void ThemeToggle_Click(object sender, TappedRoutedEventArgs e)
         {
             _dark = !_dark;
             ApplyTheme();
-        }
-
-        private async void StartCompanion_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                await Launcher.LaunchUriAsync(new Uri("keydisplay://start"));
-            }
-            catch
-            {
-            }
-        }
-
-        private void CloseWidget_Click(object sender, RoutedEventArgs e)
-        {
-            var app = Application.Current as App;
-            if (app != null) app.CloseWidget();
         }
 
         private static void DiagLog(string msg)

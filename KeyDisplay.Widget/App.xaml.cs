@@ -23,6 +23,17 @@ namespace KeyDisplay
             Instance = this;
             this.InitializeComponent();
             this.Suspending += OnSuspending;
+            // 兜底诊断：任何未处理异常记录到 diag.txt（不阻止进程崩溃，仅留证据）
+            this.UnhandledException += (s, e) =>
+            {
+                try
+                {
+                    DiagLog("unhandled: " + e.Exception.GetType().Name + " " + e.Message);
+                }
+                catch
+                {
+                }
+            };
         }
 
         public void CloseWidget()

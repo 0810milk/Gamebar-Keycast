@@ -1,7 +1,8 @@
 # 已解决：固定组件后只显示按键（隐藏背景与黑白按钮）
 
-> 状态：**根因已定位并已修复（2026-08-16，两轮），待用户实测确认**。
-> 第一轮修复见文末「第 9 节」，第二轮（移除黑白按钮、修复退出闪退）见「第 10 节」。1–8 节为历史调查记录，保留备查。
+> 状态：**根因已定位并已修复（2026-08-16，三轮），待用户实测确认**。
+> 第一轮修复见「第 9 节」，第二轮（移除黑白按钮、修复退出闪退）见「第 10 节」，
+> 第三轮（事件封送 UI 线程、主题切换改回屏幕按钮）见「第 11 节」。1–8 节为历史调查记录，保留备查。
 
 ## 1. 需求（用户原话归纳）
 
@@ -193,3 +194,39 @@
   固定后退出 Game Bar → 只剩按键（背景/状态字隐藏）、**不再闪退关闭**；再次打开 → 面板回来。
 - 回读 diag.txt 应能首次看到 `bounds WxH` 行（证明 ApplyDocked 完整执行）与干净的
   `docked` 翻转序列。
+---
+
+## 11. 第三轮修复（2026-08-16，事件封送 UI 线程 + 主题切换改回屏幕按钮）
+
+### 用户反馈
+
+- 主题切换（右键菜单路径）**直接崩溃**；模式切换本身已不再闪退。
+
+### 取证
+
+- diag.txt：模式切换全部出现 `applytheme failed: ... 0x8001010E`（"应用程序调用一个已为另一线程整理的接口"）
+  —— 证明 `GameBarDisplayModeChanged`/`PinnedChanged` 在**非 UI 线程**回调，直接触碰 UI 元素即抛此错。
+- Windows 事件日志：**六次崩溃（含第一、二轮）签名完全一致** —— `Windows.UI.Xaml.dll` +
+  `0xc000027b`（未处理的 XAML stowed 异常）+ 同一偏移 `0x8f9cc3`，即每次都是"未处理 XAML 回调异常"终止进程。
+- 第一轮实测"切换主题没问题"用的是**屏幕上的黑白按钮**（Border+Tapped），本轮崩溃路径是**右键菜单**
+  （MenuFlyout，Game Bar 特殊宿主窗口内 PopUp 交互存在风险）→ 主题切换应改回屏幕控件。
+
+### 改动
+
+1. **`Widget1.xaml.cs`**：
+   - `OnGameBarDisplayModeChanged`/`OnPinnedChanged`：先在回调线程计算 `_docked`，界面更新统一走
+     `Dispatcher.RunAsync(CoreDispatcherPriority.Normal, ApplyDocked)` 封送到 UI 线程
+     （官方示例的标准写法），彻底消除 `0x8001010E` 跨线程 UI 访问；`ApplyDocked` 内仍保留 try-catch 兜底。
+   - 删除 `Root_RightTapped` / `ThemeItem_Click` 等全部菜单逻辑。
+   - 新增 `ThemeToggle_Click`（Border+Tapped，与第一轮验证可用的按钮同机制）。
+2. **`Widget1.xaml`**：删除 `MenuFlyout`/`RightTapped`；底部恢复**固定 42px 行**，
+   放一个**单一紧凑胶囊主题按钮**（44×26，标签显示可切换到的主题：暗色时显示"白"、亮色时显示"黑"，
+   自身配色即预览）。固定时隐藏。
+3. **`App.xaml.cs`**：增加 `Application.UnhandledException` 兜底日志（记录异常类型与消息到 diag.txt）。
+
+### 验证状态
+
+- 已重建 MSIX、签名、重装成功（`Status: Ok`），diag.txt 已清空。
+- **待用户实测**：Win+G 打开 → 面板+按键+状态字+右下角主题按钮（点按切换，不应崩溃）；
+  固定后退出 Game Bar → 只剩按键、不再闪退；再次打开 → 面板回来。
+- diag.txt 应不再出现 `applytheme failed` 行（事件已正确封送 UI 线程），并能看到 `bounds WxH` 与干净翻转序列。

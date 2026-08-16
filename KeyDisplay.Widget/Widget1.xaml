@@ -21,18 +21,16 @@
             <Setter Property="FontSize" Value="18"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
         </Style>
-        <MenuFlyout x:Key="WidgetMenu">
-            <ToggleMenuFlyoutItem x:Name="ThemeItem" Click="ThemeItem_Click"/>
-            <MenuFlyoutSeparator/>
-            <MenuFlyoutItem Text="启动数据采集" Click="StartCompanion_Click"/>
-            <MenuFlyoutItem Text="退出" Click="CloseWidget_Click"/>
-        </MenuFlyout>
     </Page.Resources>
 
-    <Grid Background="Transparent" RightTapped="Root_RightTapped">
+    <Grid Background="Transparent">
         <Border x:Name="RootPanel" CornerRadius="10" BorderThickness="1" Padding="16">
             <Grid>
-                <StackPanel Orientation="Horizontal">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="42"/>
+                </Grid.RowDefinitions>
+                <StackPanel Grid.Row="0" Orientation="Horizontal">
                     <StackPanel Orientation="Vertical">
                         <!-- 第一行 Q W E R -->
                         <StackPanel Orientation="Horizontal">
@@ -108,6 +106,11 @@
                         </StackPanel>
                     </StackPanel>
                 </StackPanel>
+                <!-- 底部主题切换：单一紧凑胶囊按钮，标签显示可切换到的主题，点击即切换 -->
+                <Border x:Name="ThemeToggleBtn" Grid.Row="1" Width="44" Height="26" HorizontalAlignment="Right"
+                        CornerRadius="13" BorderThickness="1" Margin="0,8,0,0" Tapped="ThemeToggle_Click">
+                    <TextBlock x:Name="ThemeToggleBtnText" Text="白" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12" FontWeight="SemiBold"/>
+                </Border>
                 <TextBlock x:Name="StatusText" Text="" HorizontalAlignment="Right" VerticalAlignment="Top" FontSize="10" Opacity="0.6"/>
             </Grid>
         </Border>
