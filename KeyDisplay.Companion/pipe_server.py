@@ -14,13 +14,31 @@ from hooks import reconcile, sync_mouse_position
 from state import SNAPSHOT_SIZE
 
 
-def normalize_position(x, y, min_x, max_x, min_y, max_y, scale=1000):
-    """把坐标归一化到 0..scale（在给定活动范围内）；范围退化（单点）时返回中间值。"""
+def normalize_position(x, y, min_x, max_x, min_y, max_y,
+                       floor_x=0, floor_y=0, scale=1000):
+    """把坐标归一化到 0..scale（在给定活动范围内）；范围退化（单点）时返回中间值。
+
+    floor_x/floor_y：活动范围小于该值时，以当前位置为中心扩到该值再归一化。
+    防止两种严重伪影：
+    1) 光标静止时滑动窗口 min/max 朝当前位置收敛，冻结点被归一化后漂移（自行行走）；
+    2) 范围过小时微抖动被放大成满垫跑动。
+    """
     def norm(v, lo, hi):
         if hi <= lo:
             return scale // 2
         return max(0, min(scale, int((v - lo) * scale / (hi - lo))))
-    return norm(x, min_x, max_x), norm(y, min_y, max_y)
+
+    def window(v, lo, hi, floor):
+        span = hi - lo
+        if floor > 0 and span < floor:
+            center = v
+            lo = center - floor / 2
+            hi = center + floor / 2
+        return lo, hi
+
+    lo_x, hi_x = window(x, min_x, max_x, floor_x)
+    lo_y, hi_y = window(y, min_y, max_y, floor_y)
+    return norm(x, lo_x, hi_x), norm(y, lo_y, hi_y)
 
 PIPE_NAME = r"\\.\pipe\KeyDisplayState"
 
@@ -209,16 +227,34 @@ class PipeServer:
             time.sleep(self._interval)
 
     def _update_normalized(self, history, n_history):
-        """把当前 (mx,my) 追加进滑动窗口，计算活动范围并归一化到 ux/uy（0..1000）。"""
-        history.append((self._state.mx, self._state.my))
-        while len(history) > n_history:
-            history.popleft()
+        """把当前 (mx,my) 推进滑动窗口并归一化到 ux/uy（0..1000）。
+
+        静止（位置与上帧相同）时窗口冻结：不推进也不过期旧样本，
+        光标冻结时光标点完全静止，杜绝"窗口收敛导致的自行行走"。
+        floor 取屏幕尺寸的 10%：活动范围小于地板时以当前位置为中心锚定，
+        防止小范围移动时微抖动被放大成满垫跑动。
+        """
+        self._push_sample(history, self._state.mx, self._state.my, n_history)
         min_x = min(p[0] for p in history)
         max_x = max(p[0] for p in history)
         min_y = min(p[1] for p in history)
         max_y = max(p[1] for p in history)
+        floor_x = max(96.0, self._state.vw * 0.10)
+        floor_y = max(96.0, self._state.vh * 0.10)
         self._state.ux, self._state.uy = normalize_position(
-            self._state.mx, self._state.my, min_x, max_x, min_y, max_y)
+            self._state.mx, self._state.my, min_x, max_x, min_y, max_y,
+            floor_x, floor_y)
+
+    @staticmethod
+    def _push_sample(history, n_history, mx, my):
+        """样本推进滑动窗口；与末尾样本相同（静止）时不推进，避免窗口随时间收敛漂移。"""
+        cur = (mx, my)
+        if history and history[-1] == cur:
+            return False
+        history.append(cur)
+        while len(history) > n_history:
+            history.popleft()
+        return True
 
 
 class StopFlag:

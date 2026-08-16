@@ -60,6 +60,35 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(pipe_server.normalize_position(9999, 50, 100, 300, 0, 100),
                          (1000, 500))
 
+    def test_normalize_frozen_cursor_does_not_drift(self):
+        # 冻结光标时窗口也冻结（_push_sample 不推进）→ 归一化值不变；
+        # 若窗口被强制收敛，地板会把 span<floor 的窗口锚定在中心，值稳定在 500。
+        from collections import deque
+        h = deque([(100, 0), (300, 0), (400, 0)])
+        # 位置未变 → 不推进、不过期（窗口保持 [100,400]，ux 保持 1000 不变）
+        self.assertFalse(pipe_server.PipeServer._push_sample(h, 10, 400, 0))
+        self.assertEqual(list(h), [(100, 0), (300, 0), (400, 0)])
+        ux, _ = pipe_server.normalize_position(400, 0, 100, 400, 0, 100)
+        self.assertEqual(ux, 1000)
+        # 位置变化 → 推进，窗口随之更新
+        self.assertTrue(pipe_server.PipeServer._push_sample(h, 10, 401, 0))
+        self.assertEqual(len(h), 4)
+        # 即便窗口被人为收敛到 span<floor，地板锚定也让值稳定在 500（不漂移）
+        for lo, hi in [(380, 420), (400, 400)]:
+            ux2, _ = pipe_server.normalize_position(400, 400, lo, hi, 0, 100, 192.0, 96.0)
+            self.assertEqual(ux2, 500, "window=[%d,%d] 不应漂移" % (lo, hi))
+
+    def test_normalize_floor_damps_jitter(self):
+        # 微抖动 ±2px 在 192px 地板内只引起 ~1% 位移，不会被放大成满垫跑动
+        ux_a, _ = pipe_server.normalize_position(398, 0, 398, 402, 0, 100, 192.0, 96.0)
+        ux_b, _ = pipe_server.normalize_position(402, 0, 398, 402, 0, 100, 192.0, 96.0)
+        self.assertLessEqual(abs(ux_a - ux_b), 30)
+        # 活动范围大于地板时仍保持满行程自适应
+        ux_full, _ = pipe_server.normalize_position(100, 0, 100, 500, 0, 100, 192.0, 96.0)
+        self.assertEqual(ux_full, 0)
+        ux_full2, _ = pipe_server.normalize_position(500, 0, 100, 500, 0, 100, 192.0, 96.0)
+        self.assertEqual(ux_full2, 1000)
+
     def test_parse_rejects_short(self):
         self.assertIsNone(parse_snapshot(b"\x00" * 10))
 
