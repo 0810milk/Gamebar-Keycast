@@ -49,6 +49,8 @@ Root: HKCU; Subkey: "Software\Classes\keydisplay\DefaultIcon"; ValueType: string
 
 [Run]
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\install-msix.ps1"" -AppxPath ""{app}\appx\KeyDisplay.Widget_*.msix"" -CertPath ""{app}\cert\KeyDisplay.cer"" -CompanionExe ""{app}\{#MyAppExeName}"""; Flags: runhidden waituntilterminated; StatusMsg: "正在安装 Game Bar 小组件..."
+; 安装/更新完成后启动伴生进程（mutex 保证单实例），widget 无需重开即可连接
+Filename: "{app}\{#MyAppExeName}"; Flags: runhidden nowait; StatusMsg: "正在启动数据采集服务..."
 
 [UninstallRun]
 ; 注意：Inno 在 [UninstallRun] 之前会先删除文件，因此这里用内联命令（不依赖已删除的脚本）。

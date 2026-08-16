@@ -29,7 +29,19 @@ if ($LASTEXITCODE -ne 0) { throw "证书导入失败（错误码 $LASTEXITCODE�
 Write-Host "==> 2/4 安装/更新 APPX: $AppxPath"
 $existing = Get-AppxPackage -Name "KeyDisplay.Widget"
 if ($existing) {
-    Add-AppxPackage -Path $AppxPath -ForceApplicationShutdown
+    $incoming = (Get-AppxPackageManifest -Path $AppxPath).Package.Identity.Version
+    if ([version]$existing.Version -ge [version]$incoming) {
+        # 同版本/低版本无法直接 Add-AppxPackage（0x80073CFB），先移除旧包再安装，
+        # 否则脚本在此中断、后续协议注册与 config.json 都不会执行（覆盖更新失效）
+        Write-Host "现有 $($existing.Version)，目标 $incoming：先移除旧包"
+        Get-Process | Where-Object Name -like 'KeyDisplay.Widget*' |
+            Stop-Process -Force -ErrorAction SilentlyContinue
+        Remove-AppxPackage -Package $existing.PackageFullName
+        Add-AppxPackage -Path $AppxPath
+    }
+    else {
+        Add-AppxPackage -Path $AppxPath -ForceApplicationShutdown
+    }
 }
 else {
     Add-AppxPackage -Path $AppxPath
