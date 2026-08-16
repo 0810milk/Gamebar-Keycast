@@ -101,10 +101,10 @@
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                             <Border x:Name="MouseX1" Width="36" Height="36" CornerRadius="6" BorderThickness="1" Margin="0,0,6,0">
-                                <TextBlock x:Name="MouseX1Text" Style="{StaticResource KeyText}" FontSize="12" Text="侧1"/>
+                                <TextBlock x:Name="MouseX1Text" Style="{StaticResource KeyText}" FontSize="12" Text="侧下"/>
                             </Border>
                             <Border x:Name="MouseX2" Width="36" Height="36" CornerRadius="6" BorderThickness="1" Margin="0,0,0,0">
-                                <TextBlock x:Name="MouseX2Text" Style="{StaticResource KeyText}" FontSize="12" Text="侧2"/>
+                                <TextBlock x:Name="MouseX2Text" Style="{StaticResource KeyText}" FontSize="12" Text="侧上"/>
                             </Border>
                         </StackPanel>
                     </StackPanel>
