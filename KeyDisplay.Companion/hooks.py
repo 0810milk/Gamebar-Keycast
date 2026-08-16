@@ -3,6 +3,9 @@
 - 键盘：SetWindowsHookEx(WH_KEYBOARD_LL)  采集 Q/W/E/R/A/S/D/F + 修饰键 + 空格
 - 鼠标：SetWindowsHookEx(WH_MOUSE_LL)    采集左右/中/侧键 与 屏幕坐标
 - 键位状态同时以 GetAsyncKeyState 兜底校准，避免事件丢失导致的漂移
+- 独占全屏游戏会用原始输入（RAWINPUT）接管鼠标并隐藏光标，此时
+  WH_MOUSE_LL 不再产生 WM_MOUSEMOVE；通过 RegisterRawInputDevices 收
+  增量，光标隐藏时累计、可见时以 GetCursorPos 校准绝对坐标
 """
 import ctypes
 import ctypes.wintypes as wt
@@ -29,6 +32,15 @@ WM_XBUTTONDOWN = 0x020B
 WM_XBUTTONUP = 0x020C
 
 LLKHF_UP = 0x80
+
+# 原始输入（RAWINPUT）
+WM_INPUT = 0x00FF
+RID_INPUT = 0x10000003
+RIM_TYPEMOUSE = 0
+MOUSE_MOVE_ABSOLUTE = 0x1
+RIDEV_INPUTSINK = 0x00000100
+HWND_MESSAGE = ctypes.c_void_p(-3).value
+CURSOR_SHOWING = 0x00000001
 
 # 按键虚拟键码（左右修饰键统一映射到同一标签）
 VK = {"Q": 0x51, "W": 0x57, "E": 0x45, "R": 0x52,
@@ -75,6 +87,44 @@ class MSG(ctypes.Structure):
                 ("time", wt.DWORD), ("pt", POINT)]
 
 
+class RAWINPUTDEVICE(ctypes.Structure):
+    _fields_ = [("usUsagePage", wt.USHORT), ("usUsage", wt.USHORT),
+                ("dwFlags", wt.DWORD), ("hwndTarget", wt.HWND)]
+
+
+class RAWINPUTHEADER(ctypes.Structure):
+    _fields_ = [("dwType", wt.DWORD), ("dwSize", wt.DWORD),
+                ("hDevice", ctypes.c_void_p), ("wParam", wt.WPARAM)]
+
+
+class RAWMOUSE(ctypes.Structure):
+    _fields_ = [("usFlags", wt.USHORT), ("ulButtons", wt.ULONG),
+                ("ulRawButtons", wt.ULONG), ("lLastX", ctypes.c_long),
+                ("lLastY", ctypes.c_long), ("ulExtraInformation", wt.ULONG)]
+
+
+class RAWINPUT(ctypes.Structure):
+    _fields_ = [("header", RAWINPUTHEADER), ("mouse", RAWMOUSE)]
+
+
+class CURSORINFO(ctypes.Structure):
+    _fields_ = [("cbSize", wt.DWORD), ("flags", wt.DWORD),
+                ("hCursor", ctypes.c_void_p), ("ptScreenPos", POINT)]
+
+
+WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_long, wt.HWND, wt.UINT,
+                             wt.WPARAM, wt.LPARAM)
+
+
+class WNDCLASSEXW(ctypes.Structure):
+    _fields_ = [("cbSize", wt.UINT), ("style", wt.UINT),
+                ("lpfnWndProc", WNDPROC), ("cbClsExtra", ctypes.c_int),
+                ("cbWndExtra", ctypes.c_int), ("hInstance", wt.HINSTANCE),
+                ("hIcon", ctypes.c_void_p), ("hCursor", ctypes.c_void_p),
+                ("hbrBackground", ctypes.c_void_p), ("lpszMenuName", wt.LPCWSTR),
+                ("lpszClassName", wt.LPCWSTR), ("hIconSm", ctypes.c_void_p)]
+
+
 # --- 钩子回调（需保持模块级引用，防止被 GC）-------------------------------
 user32.CallNextHookEx.argtypes = [wt.HHOOK, ctypes.c_int,
                                   wt.WPARAM, wt.LPARAM]
@@ -113,6 +163,53 @@ def _mouse_proc(n_code, w_param, l_param):
     return user32.CallNextHookEx(None, n_code, w_param, l_param)
 
 
+def _handle_raw_input(l_param):
+    """解析 WM_INPUT 鼠标原始数据。
+
+    光标可见时以 GetCursorPos 校准绝对坐标（精确）；隐藏时（独占全屏）
+    累计原始增量。
+    """
+    size = wt.UINT()
+    user32.GetRawInputData(l_param, RID_INPUT, None, ctypes.byref(size),
+                           ctypes.sizeof(RAWINPUTHEADER))
+    if not size.value:
+        return
+    buf = ctypes.create_string_buffer(size.value)
+    got = user32.GetRawInputData(l_param, RID_INPUT, buf, ctypes.byref(size),
+                                 ctypes.sizeof(RAWINPUTHEADER))
+    if got != size.value:
+        return
+    raw = ctypes.cast(buf, ctypes.POINTER(RAWINPUT)).contents
+    if raw.header.dwType != RIM_TYPEMOUSE:
+        return
+
+    ci = CURSORINFO()
+    ci.cbSize = ctypes.sizeof(CURSORINFO)
+    if user32.GetCursorInfo(ctypes.byref(ci)) and (ci.flags & CURSOR_SHOWING):
+        _state.mx, _state.my = ci.ptScreenPos.x, ci.ptScreenPos.y
+        return
+
+    if raw.mouse.usFlags & MOUSE_MOVE_ABSOLUTE:
+        # 极少数游戏用绝对坐标（0..65535，跨虚拟屏幕）
+        vw = _state.vw or 1920
+        vh = _state.vh or 1080
+        _state.mx = _state.vx + int(raw.mouse.lLastX * vw / 65535)
+        _state.my = _state.vy + int(raw.mouse.lLastY * vh / 65535)
+    else:
+        _state.mx += raw.mouse.lLastX
+        _state.my += raw.mouse.lLastY
+
+
+def _raw_wnd_proc(hwnd, msg, w_param, l_param):
+    if msg == WM_INPUT:
+        _handle_raw_input(l_param)
+        return 0
+    return user32.DefWindowProcW(hwnd, msg, w_param, l_param)
+
+
+_raw_wnd_cb = WNDPROC(_raw_wnd_proc)
+
+
 _keyboard_cb = HOOKPROC(_keyboard_proc)
 _mouse_cb = HOOKPROC(_mouse_proc)
 
@@ -149,6 +246,8 @@ def start_hooks(state, stop_event):
         raise OSError("无法安装全局输入钩子，错误码 %d"
                       % ctypes.get_last_error())
 
+    raw_hwnd = _setup_raw_input()
+
     msg = MSG()
     while not stop_event.is_set():
         ret = user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
@@ -159,7 +258,59 @@ def start_hooks(state, stop_event):
         user32.TranslateMessage(ctypes.byref(msg))
         user32.DispatchMessageW(ctypes.byref(msg))
 
+    if raw_hwnd:
+        user32.DestroyWindow(raw_hwnd)
+        user32.UnregisterClassW("KeyDisplayRawInput", None)
+
     if kb_hook:
         user32.UnhookWindowsHookEx(kb_hook)
     if ms_hook:
         user32.UnhookWindowsHookEx(ms_hook)
+
+
+def _setup_raw_input():
+    """创建消息窗口并注册鼠标原始输入；失败时静默返回 None（退化到钩子）。"""
+    user32.RegisterClassExW.argtypes = [ctypes.POINTER(WNDCLASSEXW)]
+    user32.RegisterClassExW.restype = wt.USHORT
+    user32.CreateWindowExW.argtypes = [
+        wt.DWORD, wt.LPCWSTR, wt.LPCWSTR, wt.DWORD,
+        ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+        wt.HWND, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+    user32.CreateWindowExW.restype = wt.HWND
+    user32.RegisterRawInputDevices.argtypes = [
+        ctypes.POINTER(RAWINPUTDEVICE), wt.UINT, wt.UINT]
+    user32.RegisterRawInputDevices.restype = wt.BOOL
+    user32.GetRawInputData.argtypes = [
+        ctypes.c_void_p, wt.UINT, ctypes.c_void_p,
+        ctypes.POINTER(wt.UINT), wt.UINT]
+    user32.GetRawInputData.restype = wt.UINT
+    user32.GetCursorInfo.argtypes = [ctypes.POINTER(CURSORINFO)]
+    user32.GetCursorInfo.restype = wt.BOOL
+    user32.DefWindowProcW.argtypes = [wt.HWND, wt.UINT, wt.WPARAM, wt.LPARAM]
+    user32.DefWindowProcW.restype = ctypes.c_long
+    user32.DestroyWindow.argtypes = [wt.HWND]
+    user32.DestroyWindow.restype = wt.BOOL
+    user32.UnregisterClassW.argtypes = [wt.LPCWSTR, wt.HINSTANCE]
+    user32.UnregisterClassW.restype = wt.BOOL
+
+    try:
+        cls = WNDCLASSEXW()
+        cls.cbSize = ctypes.sizeof(WNDCLASSEXW)
+        cls.lpfnWndProc = _raw_wnd_cb
+        cls.hInstance = kernel32.GetModuleHandleW(None)
+        cls.lpszClassName = "KeyDisplayRawInput"
+        if not user32.RegisterClassExW(ctypes.byref(cls)):
+            return None
+        hwnd = user32.CreateWindowExW(
+            0, "KeyDisplayRawInput", "", 0,
+            0, 0, 0, 0, HWND_MESSAGE, None, None, None)
+        if not hwnd:
+            return None
+        dev = RAWINPUTDEVICE(0x01, 0x02, RIDEV_INPUTSINK, hwnd)
+        if not user32.RegisterRawInputDevices(
+                ctypes.byref(dev), 1, ctypes.sizeof(RAWINPUTDEVICE)):
+            user32.DestroyWindow(hwnd)
+            return None
+        return hwnd
+    except Exception:
+        return None

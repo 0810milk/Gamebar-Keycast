@@ -55,6 +55,10 @@ C# 侧解析：`KeyDisplay.Widget\InputStateReader.cs`。
 - 键盘：`WH_KEYBOARD_LL`，VK→位映射；左右修饰键统一映射
   （LShift/RShift 均置 Shift 位）。
 - 鼠标：`WH_MOUSE_LL`，按下置位、抬起清零，`WM_MOUSEMOVE` 更新坐标。
+- 独占全屏：游戏用原始输入（RAWINPUT）接管鼠标并隐藏光标，LL 钩子不再产生
+  `WM_MOUSEMOVE`。伴生进程 `RegisterRawInputDevices`（`RIDEV_INPUTSINK`，
+  消息窗口收 `WM_INPUT`）：光标可见时用 `GetCursorPos` 校准绝对坐标，
+  隐藏时累计原始增量，保证全屏游戏中坐标仍实时更新。
 - 兜底校准：每帧 `GetAsyncKeyState` 核对实际按下状态（`reconcile()`），
   覆盖钩子漏事件场景（如按住期间切前台）。
 - 已知限制：自动化注入的模拟键盘（SendInput）不触发 LL 钩子，
