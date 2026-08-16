@@ -33,6 +33,18 @@ namespace KeyDisplay
         private double _padW = 80;               // 鼠标垫当前宽高（按屏幕纵横比动态计算）
         private double _padH = 80;
         private DateTime _lastDotLog = DateTime.MinValue;  // 点状态日志节流（每秒一条）
+
+        // BongoCat 同款光标平滑：目标点仍按绝对屏幕坐标计算，但用帧率无关的
+        // 指数插值追赶（alpha=1-0.75^(dt/16.67)），到位(<0.5px)即吸附停止。
+        private const double CursorDampingDecay = 0.75;
+        private readonly System.Diagnostics.Stopwatch _frameClock = System.Diagnostics.Stopwatch.StartNew();
+        private long _lastFrameTicks = -1;
+        private double _smoothX = -1;   // 平滑后的垫面坐标；-1 = 尚无初始位置
+        private double _smoothY = -1;
+        private double _targetX;
+        private double _targetY;
+        private bool _hasSmoothTarget;
+
         private bool _dark = true;
         private bool _docked;
         private XboxGameBarWidget _widget;   // 本实例自己的 widget（由 App 导航传入），不用共享 App.Widget
@@ -295,7 +307,7 @@ namespace KeyDisplay
             if (tb != null) tb.Foreground = fg;
         }
 
-        // 每 UI 帧触发；数据帧序号未变化时跳过重绘（高帧率下空闲时零开销）
+        // 每 UI 帧触发；数据帧序号未变化时跳过按键重绘（高帧率下空闲时零开销）
         private void OnRendering(object sender, object e)
         {
             var snap = _latest;
@@ -306,51 +318,84 @@ namespace KeyDisplay
                     _lastSeq = uint.MaxValue;
                     StatusText.Text = "\u672a\u8fde\u63a5"; // 未连接
                 }
+                _hasSmoothTarget = false;
                 return;
             }
-            if (snap.Seq == _lastSeq) return;
-            _lastSeq = snap.Seq;
-            StatusText.Text = "";
-
-            for (int i = 0; i < KeyNames.Length; i++)
+            if (snap.Seq != _lastSeq)
             {
-                bool down = (snap.Keys & (1 << i)) != 0;
-                Border b;
-                if (_keys.TryGetValue(KeyNames[i], out b)) SetKey(b, down);
+                _lastSeq = snap.Seq;
+                StatusText.Text = "";
+
+                for (int i = 0; i < KeyNames.Length; i++)
+                {
+                    bool down = (snap.Keys & (1 << i)) != 0;
+                    Border b;
+                    if (_keys.TryGetValue(KeyNames[i], out b)) SetKey(b, down);
+                }
+
+                bool l = (snap.Mouse & 1) != 0;
+                bool r = (snap.Mouse & 2) != 0;
+                bool m = (snap.Mouse & 4) != 0;
+                bool x1 = (snap.Mouse & 8) != 0;
+                bool x2 = (snap.Mouse & 16) != 0;
+                SetKey(_mouse["L"], l);
+                SetKey(_mouse["R"], r);
+                SetKey(_mouse["M"], m);
+                SetKey(_mouse["X1"], x1);
+                SetKey(_mouse["X2"], x2);
+
+                UpdatePadSize(snap.VsW, snap.VsH);
+                // 目标点：绝对屏幕坐标 → 垫面位置（点 = 屏幕的真实镜像）
+                double vw = snap.VsW > 0 ? snap.VsW : 1920;
+                double vh = snap.VsH > 0 ? snap.VsH : 1080;
+                double tx = ((snap.MouseX - snap.VsX) / vw) * _padW;
+                double ty = ((snap.MouseY - snap.VsY) / vh) * _padH;
+                tx = Math.Max(0.0, Math.Min(_padW - 10.0, tx));
+                ty = Math.Max(0.0, Math.Min(_padH - 10.0, ty));
+                _targetX = tx;
+                _targetY = ty;
+                // 尚无初始位置（首帧）时直接就位，避免点从角落飞过来
+                if (_smoothX < 0) { _smoothX = tx; _smoothY = ty; }
+                _hasSmoothTarget = true;
+                _lastFrameTicks = -1;   // 静止后首个动画帧用默认帧间隔，平滑起步
+
+                // 点状态监控（每秒一条）：目标点与平滑点
+                if ((DateTime.Now - _lastDotLog).TotalSeconds >= 1.0)
+                {
+                    _lastDotLog = DateTime.Now;
+                    DiagLog("dot mx=" + snap.MouseX + " my=" + snap.MouseY
+                            + " pad=" + (int)_padW + "x" + (int)_padH
+                            + " tgt=" + (int)tx + "," + (int)ty
+                            + " sm=" + (int)_smoothX + "," + (int)_smoothY);
+                }
             }
 
-            bool l = (snap.Mouse & 1) != 0;
-            bool r = (snap.Mouse & 2) != 0;
-            bool m = (snap.Mouse & 4) != 0;
-            bool x1 = (snap.Mouse & 8) != 0;
-            bool x2 = (snap.Mouse & 16) != 0;
-            SetKey(_mouse["L"], l);
-            SetKey(_mouse["R"], r);
-            SetKey(_mouse["M"], m);
-            SetKey(_mouse["X1"], x1);
-            SetKey(_mouse["X2"], x2);
-
-            UpdatePadSize(snap.VsW, snap.VsH);
-            // 绝对屏幕坐标 → 垫面位置（点 = 屏幕的真实镜像）
-            double vw = snap.VsW > 0 ? snap.VsW : 1920;
-            double vh = snap.VsH > 0 ? snap.VsH : 1080;
-            double px = ((snap.MouseX - snap.VsX) / vw) * _padW;
-            double py = ((snap.MouseY - snap.VsY) / vh) * _padH;
-            px = Math.Max(0.0, Math.Min(_padW - 10.0, px));
-            py = Math.Max(0.0, Math.Min(_padH - 10.0, py));
-            Canvas.SetLeft(MouseDot, px);
-            Canvas.SetTop(MouseDot, py);
+            // 平滑追赶（BongoCat 同款指数插值，帧率无关；静止到位后零开销）
+            if (!_hasSmoothTarget) return;
+            long now = _frameClock.ElapsedTicks;
+            double dtMs = _lastFrameTicks < 0
+                ? 16.7
+                : (now - _lastFrameTicks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            _lastFrameTicks = now;
+            double alpha = 1.0 - Math.Pow(CursorDampingDecay, dtMs / (1000.0 / 60.0));
+            double nx = _smoothX + (_targetX - _smoothX) * alpha;
+            double ny = _smoothY + (_targetY - _smoothY) * alpha;
+            double dx = _targetX - nx;
+            double dy = _targetY - ny;
+            if (dx * dx + dy * dy < 0.25)   // 距目标 < 0.5px：吸附到位并停止
+            {
+                _smoothX = _targetX;
+                _smoothY = _targetY;
+                _hasSmoothTarget = false;
+            }
+            else
+            {
+                _smoothX = nx;
+                _smoothY = ny;
+            }
+            Canvas.SetLeft(MouseDot, _smoothX);
+            Canvas.SetTop(MouseDot, _smoothY);
             MouseDot.Visibility = Visibility.Visible;
-
-            // 点渲染状态监控（每秒一条）：屏幕坐标、垫尺寸、点位置与可见性
-            if ((DateTime.Now - _lastDotLog).TotalSeconds >= 1.0)
-            {
-                _lastDotLog = DateTime.Now;
-                DiagLog("dot mx=" + snap.MouseX + " my=" + snap.MouseY
-                        + " pad=" + (int)_padW + "x" + (int)_padH
-                        + " pos=" + (int)px + "," + (int)py
-                        + " vis=" + (MouseDot.Visibility == Visibility.Visible ? 1 : 0));
-            }
         }
 
         // 鼠标垫尺寸跟随屏幕纵横比：随帧下发的 vs_w/vs_h 就是鼠标坐标的映射基准，
