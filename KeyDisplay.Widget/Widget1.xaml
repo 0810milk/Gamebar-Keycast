@@ -62,7 +62,7 @@
                                 <TextBlock x:Name="KeyFText" Style="{StaticResource KeyText}" Text="F"/>
                             </Border>
                         </StackPanel>
-                        <!-- 第三行 Shift Ctrl Alt Space -->
+                        <!-- 第三行 Shift Ctrl Alt -->
                         <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                             <Border x:Name="KeyShift" Width="68" Style="{StaticResource KeyBorder}">
                                 <TextBlock x:Name="KeyShiftText" Style="{StaticResource KeyText}" FontSize="13" Text="Shift"/>
@@ -70,9 +70,12 @@
                             <Border x:Name="KeyCtrl" Width="68" Style="{StaticResource KeyBorder}">
                                 <TextBlock x:Name="KeyCtrlText" Style="{StaticResource KeyText}" FontSize="13" Text="Ctrl"/>
                             </Border>
-                            <Border x:Name="KeyAlt" Width="68" Style="{StaticResource KeyBorder}">
+                            <Border x:Name="KeyAlt" Width="68" Style="{StaticResource KeyBorder}" Margin="0,0,0,0">
                                 <TextBlock x:Name="KeyAltText" Style="{StaticResource KeyText}" FontSize="13" Text="Alt"/>
                             </Border>
+                        </StackPanel>
+                        <!-- 第四行 空格（单独一行，标准键盘式底部空格） -->
+                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                             <Border x:Name="KeySpace" Width="176" Style="{StaticResource KeyBorder}" Margin="0,0,0,0">
                                 <TextBlock x:Name="KeySpaceText" Style="{StaticResource KeyText}" FontSize="13" Text="空格"/>
                             </Border>
