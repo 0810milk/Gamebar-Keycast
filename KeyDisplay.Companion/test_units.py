@@ -60,6 +60,28 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(pipe_server.normalize_position(9999, 50, 100, 300, 0, 100),
                          (1000, 500))
 
+    def test_update_normalized_end_to_end(self):
+        # 回归：_update_normalized 的窗口推进参数顺序错误会崩溃/产出错误归一化。
+        from collections import deque
+        st = InputState()
+        st.vw, st.vh = 1920, 1080
+        ps = pipe_server.PipeServer.__new__(pipe_server.PipeServer)
+        ps._state = st
+        h = deque()
+        # 单点 → 退化 → 中心
+        st.mx, st.my = 400, 300
+        ps._update_normalized(h, 10)
+        self.assertEqual((st.ux, st.uy), (500, 500))
+        # 窗口 [100,400] 内 x=400 → 1000（满行程）
+        st.mx, st.my = 100, 300
+        ps._update_normalized(h, 10)
+        st.mx, st.my = 400, 300
+        ps._update_normalized(h, 10)
+        self.assertEqual(st.ux, 1000)
+        # 静止不推进：窗口不变，归一化值不变（不漂移）
+        ps._update_normalized(h, 10)
+        self.assertEqual(st.ux, 1000)
+
     def test_normalize_frozen_cursor_does_not_drift(self):
         # 冻结光标时窗口也冻结（_push_sample 不推进）→ 归一化值不变；
         # 若窗口被强制收敛，地板会把 span<floor 的窗口锚定在中心，值稳定在 500。

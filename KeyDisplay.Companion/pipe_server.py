@@ -234,7 +234,9 @@ class PipeServer:
         floor 取屏幕尺寸的 10%：活动范围小于地板时以当前位置为中心锚定，
         防止小范围移动时微抖动被放大成满垫跑动。
         """
-        self._push_sample(history, self._state.mx, self._state.my, n_history)
+        self._push_sample(history, n_history, self._state.mx, self._state.my)
+        if not history:
+            return
         min_x = min(p[0] for p in history)
         max_x = max(p[0] for p in history)
         min_y = min(p[1] for p in history)

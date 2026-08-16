@@ -413,6 +413,35 @@
 
 ---
 
+## 19. 修复伴生进程崩溃导致鼠标点不显示（2026-08-16）
+
+### 现象
+
+修复"自行行走"后，鼠标垫上的点完全不显示了。
+
+### 根因
+
+`pipe_server.py` 调用 `_push_sample(history, mx, my, n_history)` 与函数签名
+`_push_sample(history, n_history, mx, my)` **参数顺序不匹配**：`n_history` 收到的是
+鼠标坐标（多显示器时可为负），`while len(history) > n_history` 把窗口清空 →
+`min()` 对空序列抛 ValueError → 泵线程崩溃 → 管道服务器死亡 → widget 收不到帧
+（diag 连续 `err=2`），鼠标点从未出现。单测直接调用 helper 用了正确顺序，未覆盖到
+真实调用路径，故未拦截。
+
+### 修复
+
+- 调用改为 `_push_sample(history, n_history, self._state.mx, self._state.my)`；
+- `_update_normalized` 增加 `if not history: return` 防御；
+- 新增端到端回归用例 `test_update_normalized_end_to_end`（直接驱动 `_update_normalized`，
+  覆盖单点退化/满行程/静止不漂移），20 项单测全过。
+
+### 验证
+
+- 新伴生 EXE 已重建部署，widget 已重连（diag `connected` 14:46:59）；
+  `Setup.exe` 已重建、桌面备份已刷新（14:47）。
+
+---
+
 ## 16. 键盘布局：空格键移到第四行（2026-08-16）
 
 用户指正：空格键应放**第四行**（单独一行，标准键盘式底部空格），按键尺寸不变
