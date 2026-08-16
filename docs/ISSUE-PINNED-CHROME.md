@@ -463,6 +463,45 @@
 
 ---
 
+## 21. 日志监控 + 多客户端管道修复"没有位置显示"（2026-08-16）
+
+### 现象与取证
+
+用户反馈"光标没有位置显示"。diag.txt 显示该 widget 实例 **8 分钟连续
+`CreateFileW failed err=231`（管道忙）从未连上** —— 管道单客户端（nMaxInstances=1）
+被残留 widget 实例占住，新实例收不到任何帧 → 点不显示（状态"未连接"）。
+
+### 改动
+
+1. **日志监控（用户要求）**：
+   - 新增 `KeyDisplay.Companion/debuglog.py`：写入 `pipe-debug.log`（exe 同目录），
+     不依赖 stdout 重定向，`Start-Process` 启动也可靠落盘。
+   - `hooks.py`：原生输入计数（`_raw_count` 已处理 / `_raw_skip` 限频跳过）、
+     光标可见性切换日志（`[raw] cursor visible/hidden`）、坐标来源标记
+     （`sync`=GetCursorPos / `acc`=增量累计 / `abs`=绝对原始坐标）、
+     隐藏态增量日志（每次进入隐藏记前 20 条）。
+   - `pipe_server.py` 泵循环：每 0.5s 一条摘要
+     `[pump] fps=.. raw=.. skip=.. src=.. vis=.. mx=.. my=.. ux=.. uy=..`；
+     客户端连接/断开日志。
+   - `Widget1.xaml.cs`：diag.txt 每秒一条 `dot ux=.. uy=.. pad=WxH pos=x,y vis=0/1`。
+2. **多客户端管道（根因修复）**：`_make_pipe` 实例数 1 → `PIPE_UNLIMITED_INSTANCES`，
+   `run()` 每接受一个客户端创建一个管道实例并起独立推送线程（`_pump` 持有句柄生命周期）。
+   每个 widget 实例都能连上，err=231 不再出现。
+
+### 验证
+
+- 21 项单测全过；`test_client.py` 双客户端同时连接成功（伴生日志两条
+  `client connected`/`disconnected`，无 231）；泵摘要 fps≈216、`src=sync`、
+  静止光标 `ux=500 uy=500`（冻结窗口不漂移）。
+- 新伴生 EXE + widget MSIX 已部署重装；`Setup.exe` 已重建、桌面备份已刷新（15:52）。
+
+### 日志位置
+
+- 伴生进程：`用户测试\KeyDisplay\pipe-debug.log`
+- 小组件：`%LOCALAPPDATA%\Packages\KeyDisplay.Widget_hdjf4fqmxxv8g\LocalState\diag.txt`
+
+---
+
 ## 16. 键盘布局：空格键移到第四行（2026-08-16）
 
 用户指正：空格键应放**第四行**（单独一行，标准键盘式底部空格），按键尺寸不变

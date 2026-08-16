@@ -10,7 +10,9 @@ import threading
 import time
 from collections import deque
 
-from hooks import reconcile, sync_mouse_position
+import debuglog
+import hooks
+from hooks import reconcile, sync_mouse_position, raw_stats
 from state import SNAPSHOT_SIZE
 
 
@@ -130,7 +132,8 @@ def _make_pipe(sec_attr):
     handle = kernel32.CreateNamedPipeW(
         PIPE_NAME, PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
         PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
-        1, BUFFER_SIZE, BUFFER_SIZE, 0, ctypes.byref(sec_attr))
+        PIPE_UNLIMITED_INSTANCES, BUFFER_SIZE, BUFFER_SIZE, 0,
+        ctypes.byref(sec_attr))
     return handle
 
 
@@ -149,7 +152,12 @@ class PipeServer:
         return self._connected
 
     def run(self):
-        """循环：创建管道 → 等待连接（可中断）→ 按 60Hz 推送快照。"""
+        """接受客户端循环：每来一个客户端创建一个管道实例并起独立推送线程。
+
+        多客户端（PIPE_UNLIMITED_INSTANCES）—— Game Bar 会给同一小组件创建多个
+        widget 实例（每次打开/固定都会新建），单客户端模型会让后续实例连不上
+        （err=231），导致"没有位置显示"。
+        """
         while not self._stop.is_set():
             handle = _make_pipe(self._sec)
             if handle == INVALID_HANDLE_VALUE:
@@ -157,14 +165,7 @@ class PipeServer:
                 continue
             if not self._connect(handle):
                 continue
-            self._connected = True
-            print("PIPE: client connected", flush=True)
-            try:
-                self._pump(handle)
-            finally:
-                kernel32.CloseHandle(handle)
-                self._connected = False
-                print("PIPE: client disconnected", flush=True)
+            threading.Thread(target=self._pump, args=(handle,), daemon=True).start()
 
     def _connect(self, handle):
         ov = OVERLAPPED()
@@ -200,14 +201,25 @@ class PipeServer:
         return True
 
     def _pump(self, handle):
+        """为单个客户端推送快照；客户端断开或停止时退出并关闭句柄。"""
         kernel32.WriteFile.argtypes = [ctypes.c_void_p, ctypes.c_void_p,
                                        wt.DWORD, ctypes.POINTER(wt.DWORD), ctypes.c_void_p]
         kernel32.WriteFile.restype = wt.BOOL
+        debuglog.log("[pipe] client connected")
+        try:
+            self._pump_loop(handle)
+        finally:
+            kernel32.CloseHandle(handle)
+            debuglog.log("[pipe] client disconnected")
+
+    def _pump_loop(self, handle):
         user32 = ctypes.WinDLL("user32", use_last_error=True)
         # 活动范围滑动窗口：最近 N 帧（约 1.5 秒）的鼠标坐标 min/max，
         # 归一化后无论光标被限制在屏幕哪个子区域，点都能走满鼠标垫并触边
         n_history = max(1, int(round(1.5 / self._interval)))
         history = deque()
+        frames = 0
+        summary_at = time.monotonic()
         while not self._stop.is_set():
             reconcile(self._state)
             self._state.vx = user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
@@ -224,6 +236,21 @@ class PipeServer:
             if not kernel32.WriteFile(handle, buf, SNAPSHOT_SIZE,
                                       ctypes.byref(written), None):
                 return  # 客户端断开，返回等待重新连接
+            frames += 1
+            # 每 0.5s 记一条坐标链路摘要（原生输入/限频/坐标来源/归一化值）
+            now = time.monotonic()
+            if now - summary_at >= 0.5:
+                proc, skip, src = raw_stats()
+                fps = frames / max(now - summary_at, 1e-6)
+                vis = "1" if hooks._cursor_visible() else "0"
+                debuglog.log(
+                    "[pump] fps=%.0f raw=%d skip=%d src=%s vis=%s "
+                    "mx=%d my=%d ux=%d uy=%d" % (
+                        fps, proc, skip, src, vis,
+                        self._state.mx, self._state.my,
+                        self._state.ux, self._state.uy))
+                summary_at = now
+                frames = 0
             time.sleep(self._interval)
 
     def _update_normalized(self, history, n_history):

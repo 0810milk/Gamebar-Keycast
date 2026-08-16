@@ -32,6 +32,7 @@ namespace KeyDisplay
         private uint _lastSeq = uint.MaxValue;   // 已渲染的帧序号；uint.MaxValue 强制首帧渲染
         private double _padW = 80;               // 鼠标垫当前宽高（按屏幕纵横比动态计算）
         private double _padH = 80;
+        private DateTime _lastDotLog = DateTime.MinValue;  // 点状态日志节流（每秒一条）
         private bool _dark = true;
         private bool _docked;
         private XboxGameBarWidget _widget;   // 本实例自己的 widget（由 App 导航传入），不用共享 App.Widget
@@ -339,6 +340,16 @@ namespace KeyDisplay
             Canvas.SetLeft(MouseDot, px);
             Canvas.SetTop(MouseDot, py);
             MouseDot.Visibility = Visibility.Visible;
+
+            // 点渲染状态监控（每秒一条）：ux/uy、垫尺寸、点坐标与可见性
+            if ((DateTime.Now - _lastDotLog).TotalSeconds >= 1.0)
+            {
+                _lastDotLog = DateTime.Now;
+                DiagLog("dot ux=" + snap.Ux + " uy=" + snap.Uy
+                        + " pad=" + (int)_padW + "x" + (int)_padH
+                        + " pos=" + (int)px + "," + (int)py
+                        + " vis=" + (MouseDot.Visibility == Visibility.Visible ? 1 : 0));
+            }
         }
 
         // 鼠标垫尺寸跟随屏幕纵横比：随帧下发的 vs_w/vs_h 就是鼠标坐标的映射基准，

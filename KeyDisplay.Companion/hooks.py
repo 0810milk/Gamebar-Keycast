@@ -11,6 +11,7 @@ import ctypes
 import ctypes.wintypes as wt
 import time
 
+import debuglog
 from state import KEY_ORDER
 
 # --- Win32 常量 -----------------------------------------------------------
@@ -49,6 +50,18 @@ CURSOR_SHOWING = 0x00000001
 # 限频不影响触边/比例。先按需求取 500，可调。
 RAW_REPORT_LIMIT = 500.0
 _last_raw_ts = 0.0
+
+# --- 原生输入/坐标链路监控计数（供 pipe-debug.log 周期摘要读取）---
+_raw_count = 0        # 已处理的 WM_INPUT 事件数
+_raw_skip = 0         # 被限频跳过的事件数
+_coord_src = "none"   # 最近一次坐标来源：sync(GetCursorPos)/acc(增量累计)/abs(绝对原始坐标)
+_cursor_hidden = None  # 最近一次可见性判定（None=未知）
+_hidden_delta_logged = 0  # 进入隐藏状态后已记录的增量条数（防刷屏）
+
+
+def raw_stats():
+    """返回 (已处理数, 跳过数, 坐标来源)，供泵周期日志清零。"""
+    return _raw_count, _raw_skip, _coord_src
 
 # 按键虚拟键码（左右修饰键统一映射到同一标签）
 VK = {"Q": 0x51, "W": 0x57, "E": 0x45, "R": 0x52,
@@ -127,12 +140,22 @@ user32.GetCursorPos.restype = wt.BOOL
 
 
 def _cursor_visible():
-    """光标是否可见；GetCursorInfo 失败时按可见处理（尽力用绝对坐标）。"""
+    """光标是否可见；GetCursorInfo 失败时按可见处理（尽力用绝对坐标）。
+
+    记录可见性切换（进入/退出游戏隐藏状态），便于监控日志判断坐标链路。
+    """
+    global _cursor_hidden, _hidden_delta_logged
     ci = CURSORINFO()
     ci.cbSize = ctypes.sizeof(CURSORINFO)
-    if not user32.GetCursorInfo(ctypes.byref(ci)):
-        return True
-    return bool(ci.flags & CURSOR_SHOWING)
+    visible = True
+    if user32.GetCursorInfo(ctypes.byref(ci)):
+        visible = bool(ci.flags & CURSOR_SHOWING)
+    if _cursor_hidden is not None and visible != _cursor_hidden:
+        debuglog.log("[raw] cursor %s" % ("visible" if visible else "hidden"))
+        if not visible:
+            _hidden_delta_logged = 0  # 每次进入隐藏状态重置增量日志计数
+    _cursor_hidden = visible
+    return visible
 
 
 def _read_cursor_position():
@@ -150,10 +173,12 @@ def sync_mouse_position(state):
     RAWINPUT 增量累计维护（见 _handle_raw_input）。任何时刻只有一个
     坐标来源生效，避免两个来源互相覆写造成坐标在两位置间振荡。
     """
+    global _coord_src
     if not _cursor_visible():
         return
     pos = _read_cursor_position()
     if pos is not None:
+        _coord_src = "sync"
         state.mx, state.my = pos
 
 
@@ -214,11 +239,13 @@ def _handle_raw_input(l_param):
     原始输入只负责光标隐藏（独占全屏游戏）时的增量累计；两个来源不会同时写入。
     处理频率限制在 RAW_REPORT_LIMIT（500Hz），跳过超限事件以降低 CPU 开销。
     """
-    global _last_raw_ts
+    global _last_raw_ts, _raw_count, _raw_skip, _coord_src, _hidden_delta_logged
     now = time.monotonic()
     if now - _last_raw_ts < 1.0 / RAW_REPORT_LIMIT:
+        _raw_skip += 1
         return
     _last_raw_ts = now
+    _raw_count += 1
 
     size = wt.UINT()
     user32.GetRawInputData(l_param, RID_INPUT, None, ctypes.byref(size),
@@ -240,13 +267,21 @@ def _handle_raw_input(l_param):
 
     if raw.mouse.usFlags & MOUSE_MOVE_ABSOLUTE:
         # 极少数游戏用绝对坐标（0..65535，跨虚拟屏幕）
+        _coord_src = "abs"
         vw = _state.vw or 1920
         vh = _state.vh or 1080
         _state.mx = _state.vx + int(raw.mouse.lLastX * vw / 65535)
         _state.my = _state.vy + int(raw.mouse.lLastY * vh / 65535)
     else:
+        _coord_src = "acc"
         _state.mx += raw.mouse.lLastX
         _state.my += raw.mouse.lLastY
+        # 隐藏态增量日志：每次进入隐藏只记前 20 条，防刷屏
+        if _hidden_delta_logged < 20:
+            _hidden_delta_logged += 1
+            debuglog.log("[raw] delta %+d,%+d mx=%d my=%d"
+                         % (raw.mouse.lLastX, raw.mouse.lLastY,
+                            _state.mx, _state.my))
 
 
 def _raw_wnd_proc(hwnd, msg, w_param, l_param):
