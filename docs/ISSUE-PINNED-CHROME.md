@@ -230,3 +230,34 @@
 - **待用户实测**：Win+G 打开 → 面板+按键+状态字+右下角主题按钮（点按切换，不应崩溃）；
   固定后退出 Game Bar → 只剩按键、不再闪退；再次打开 → 面板回来。
 - diag.txt 应不再出现 `applytheme failed` 行（事件已正确封送 UI 线程），并能看到 `bounds WxH` 与干净翻转序列。
+
+---
+
+## 12. 伴生进程修复（2026-08-16，鼠标点在两个位置间疯狂闪现）
+
+### 现象
+
+鼠标移动时（尤指光标被隐藏/抑制的场景，如游戏），小组件鼠标垫上的鼠标点在两个位置间反复振荡闪现。
+
+### 根因（hooks.py 双坐标源冲突）
+
+- WH_MOUSE_LL 钩子在每个 `WM_MOUSEMOVE` 上**无条件**用 `ms.pt` 覆写绝对坐标；
+- RAWINPUT 路径在**光标隐藏时**改为累计增量（`mx += lLastX`）；
+- 光标隐藏时两条路径同时生效：LL 把坐标打回旧位置，RAWINPUT 又在旧值上累加增量
+  → 坐标反复在两个位置间跳动（"查询 GetCursorInfo 并修改坐标"即该内部逻辑）。
+  全屏独占场景下 LL 通常不产生 WM_MOUSEMOVE（原 6bda7da 修复的前提），
+  但无边框/窗口化全屏、光标被抑制（CURSOR_SUPPRESSED）等场景仍会触发。
+
+### 修复（KeyDisplay.Companion/hooks.py）
+
+- 抽出 `_cursor_visible()`：GetCursorInfo 失败时按可见处理（尽力用绝对坐标）；
+- `_mouse_proc` 的 `WM_MOUSEMOVE` 仅在光标可见时校准绝对坐标；
+- `_handle_raw_input` 同样改走 `_cursor_visible()`，可见时用 `GetCursorPos` 校准，
+  隐藏时累计增量 —— 两条路径语义一致，任何时刻只有一个坐标来源生效。
+- `test_units.py` 适配（mock `_cursor_visible`）并新增"光标隐藏不覆写坐标"用例，
+  15 项单测全过。已重建 `KeyDisplayCompanion.exe` 并部署替换运行中的实例
+  （`用户测试\KeyDisplay\KeyDisplayCompanion.exe`），widget 已重连（diag `connected`）。
+
+### 验证状态
+
+- 待用户实测：游戏中/光标隐藏时移动鼠标，鼠标点应平滑跟随，不再双位置闪烁。

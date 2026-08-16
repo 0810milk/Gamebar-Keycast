@@ -111,8 +111,26 @@ class HookMappingTests(unittest.TestCase):
         self.assertTrue(hooks._state.mouse & (1 << MOUSE_ORDER.index("X2")))
 
     def test_mouse_move_updates_position(self):
-        self._ms(hooks.WM_MOUSEMOVE, x=321, y=654)
-        self.assertEqual((hooks._state.mx, hooks._state.my), (321, 654))
+        # 光标可见时 WM_MOUSEMOVE 以绝对坐标校准
+        real = hooks._cursor_visible
+        hooks._cursor_visible = lambda: True
+        try:
+            self._ms(hooks.WM_MOUSEMOVE, x=321, y=654)
+            self.assertEqual((hooks._state.mx, hooks._state.my), (321, 654))
+        finally:
+            hooks._cursor_visible = real
+
+    def test_mouse_move_hidden_cursor_keeps_position(self):
+        # 光标隐藏（游戏）时 WM_MOUSEMOVE 不得覆写坐标，
+        # 坐标由 RAWINPUT 累计增量维护，避免两个来源互相打架导致振荡
+        hooks._state.mx, hooks._state.my = 100, 200
+        real = hooks._cursor_visible
+        hooks._cursor_visible = lambda: False
+        try:
+            self._ms(hooks.WM_MOUSEMOVE, x=321, y=654)
+            self.assertEqual((hooks._state.mx, hooks._state.my), (100, 200))
+        finally:
+            hooks._cursor_visible = real
 
 
 class PipeServerTests(unittest.TestCase):

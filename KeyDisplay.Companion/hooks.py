@@ -112,6 +112,26 @@ class CURSORINFO(ctypes.Structure):
                 ("hCursor", ctypes.c_void_p), ("ptScreenPos", POINT)]
 
 
+user32.GetCursorInfo.argtypes = [ctypes.POINTER(CURSORINFO)]
+user32.GetCursorInfo.restype = wt.BOOL
+user32.GetCursorPos.argtypes = [ctypes.POINTER(POINT)]
+user32.GetCursorPos.restype = wt.BOOL
+
+
+def _cursor_visible():
+    """光标是否可见；GetCursorInfo 失败时按可见处理（尽力用绝对坐标）。
+
+    可见时坐标以 GetCursorPos / 钩子事件坐标校准；隐藏或抑制时（游戏）
+    坐标由 RAWINPUT 累计增量维护。两个来源不能同时生效，否则坐标会在
+    两个位置间反复振荡（鼠标点疯狂闪现）。
+    """
+    ci = CURSORINFO()
+    ci.cbSize = ctypes.sizeof(CURSORINFO)
+    if not user32.GetCursorInfo(ctypes.byref(ci)):
+        return True
+    return bool(ci.flags & CURSOR_SHOWING)
+
+
 WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_long, wt.HWND, wt.UINT,
                              wt.WPARAM, wt.LPARAM)
 
@@ -146,7 +166,10 @@ def _mouse_proc(n_code, w_param, l_param):
     if n_code >= 0:
         ms = ctypes.cast(l_param, ctypes.POINTER(MSLLHOOKSTRUCT)).contents
         if w_param == WM_MOUSEMOVE:
-            _state.mx, _state.my = ms.pt.x, ms.pt.y
+            # 光标可见时才以绝对坐标校准；隐藏时坐标由 RAWINPUT 累计维护，
+            # 这里若继续覆写会把累计结果打回旧位置，造成坐标在两位置间振荡。
+            if _cursor_visible():
+                _state.mx, _state.my = ms.pt.x, ms.pt.y
         else:
             for name, (down_msg, up_msg) in MOUSE_MSGS.items():
                 if w_param == down_msg:
@@ -183,10 +206,10 @@ def _handle_raw_input(l_param):
     if raw.header.dwType != RIM_TYPEMOUSE:
         return
 
-    ci = CURSORINFO()
-    ci.cbSize = ctypes.sizeof(CURSORINFO)
-    if user32.GetCursorInfo(ctypes.byref(ci)) and (ci.flags & CURSOR_SHOWING):
-        _state.mx, _state.my = ci.ptScreenPos.x, ci.ptScreenPos.y
+    if _cursor_visible():
+        pt = POINT()
+        if user32.GetCursorPos(ctypes.byref(pt)):
+            _state.mx, _state.my = pt.x, pt.y
         return
 
     if raw.mouse.usFlags & MOUSE_MOVE_ABSOLUTE:
