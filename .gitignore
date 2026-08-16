@@ -8,6 +8,8 @@ cert/
 
 # 伴生进程运行时
 KeyDisplay.Companion/config.json
+KeyDisplay.Companion/pipe-debug.log
+KeyDisplay.Companion/pipe-debug.log.err
 
 # UWP 构建产物
 KeyDisplay.Widget/bin/

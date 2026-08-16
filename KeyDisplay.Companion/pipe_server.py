@@ -68,8 +68,12 @@ def _derive_package_sid(package_family_name):
 
 
 def _security_attributes(package_family_name=None):
-    """构造允许 Everyone + Owner + 可选包 SID 访问的安全属性。"""
-    sddl = "D:(A;;GA;;;WD)(A;;GA;;;OW)(A;;GA;;;BU)"
+    """构造允许 Everyone + Owner + 可选包 SID 访问的安全属性。
+
+    UWP/AppContainer 令牌即使含 Everyone 组，也仍被 DACL 拒绝访问，
+    必须显式授予 "ALL APPLICATION PACKAGES" (S-1-15-2-1) 或具体包 SID。
+    """
+    sddl = "D:(A;;GA;;;WD)(A;;GA;;;OW)(A;;GA;;;BU)(A;;GA;;;S-1-15-2-1)"
     if package_family_name:
         sid = _derive_package_sid(package_family_name)
         if sid:
@@ -124,11 +128,13 @@ class PipeServer:
             if not self._connect(handle):
                 continue
             self._connected = True
+            print("PIPE: client connected", flush=True)
             try:
                 self._pump(handle)
             finally:
                 kernel32.CloseHandle(handle)
                 self._connected = False
+                print("PIPE: client disconnected", flush=True)
 
     def _connect(self, handle):
         ov = OVERLAPPED()

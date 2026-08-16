@@ -1,8 +1,10 @@
 using System;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Win32.SafeHandles;
+using Windows.Storage;
 
 namespace KeyDisplay
 {
@@ -35,6 +37,7 @@ namespace KeyDisplay
         public void Start()
         {
             if (_task != null) return;
+            Log("reader start");
             _task = Task.Run(() => RunLoopAsync(_cts.Token));
         }
 
@@ -66,11 +69,14 @@ namespace KeyDisplay
 
                     if (handle.ToInt64() == NativeMethods.INVALID_HANDLE_VALUE)
                     {
+                        int err = Marshal.GetLastWin32Error();
+                        Log("CreateFileW failed err=" + err);
                         // 伴生进程尚未启动，稍后重试
                         await Task.Delay(2000, ct).ConfigureAwait(false);
                         continue;
                     }
 
+                    Log("connected");
                     using (var stream = new FileStream(new SafeFileHandle(handle, true), FileAccess.Read))
                     {
                         var buf = new byte[36];
@@ -104,6 +110,19 @@ namespace KeyDisplay
 
                 try { await Task.Delay(500, ct).ConfigureAwait(false); }
                 catch (OperationCanceledException) { break; }
+            }
+        }
+
+        private static void Log(string msg)
+        {
+            try
+            {
+                var dir = ApplicationData.Current.LocalFolder.Path;
+                File.AppendAllText(Path.Combine(dir, "diag.txt"),
+                    DateTime.Now.ToString("HH:mm:ss.fff") + " " + msg + "\r\n");
+            }
+            catch
+            {
             }
         }
 
