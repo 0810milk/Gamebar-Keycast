@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using Microsoft.Gaming.XboxGameBar;
 using Windows.Foundation;
 using Windows.Storage;
@@ -50,6 +51,20 @@ namespace KeyDisplay
         private XboxGameBarWidget _widget;   // 本实例自己的 widget（由 App 导航传入），不用共享 App.Widget
         private static bool s_companionLaunched;
 
+        // 布局自定义：边缘/四角拖拽缩放（窗口式），鼠标垫不参与；默认锁定。
+        // 注意：不设置 PointerCursor（沙箱内原生线程会因 CoreWindow 光标赋值抛 NRE 卡死闪退），
+        // 改用边缘悬停时边框高亮作为视觉提示。
+        private const double EdgeHit = 8.0;          // 判定为"边缘"的指针距离（px）
+        private const double MinKeyW = 20, MinKeyH = 20;
+        private const string LayoutPrefix = "Layout_";
+        private bool _layoutLocked = true;           // true=锁定（不可调整），默认开
+        private Border _dragKey;                     // 当前拖拽中的按键
+        private string _dragMode;                    // l/r/t/b/tl/tr/bl/br
+        private double _dragStartX, _dragStartY;
+        private double _dragStartW, _dragStartH;
+        private double _dragStartML, _dragStartMT;
+        private Border _hoverKey;                    // 当前边缘悬停高亮的按键
+
         // 暗色主题画刷
         private readonly SolidColorBrush _darkDefaultBg = new SolidColorBrush(Colors.Black);
         private readonly SolidColorBrush _darkDefaultFg = new SolidColorBrush(Colors.White);
@@ -78,8 +93,15 @@ namespace KeyDisplay
             _keys["Q"] = KeyQ; _keys["W"] = KeyW; _keys["E"] = KeyE; _keys["R"] = KeyR;
             _keys["A"] = KeyA; _keys["S"] = KeyS; _keys["D"] = KeyD; _keys["F"] = KeyF;
             _keys["Shift"] = KeyShift; _keys["Ctrl"] = KeyCtrl; _keys["Alt"] = KeyAlt; _keys["Space"] = KeySpace;
-            _mouse["L"] = MouseL; _mouse["M"] = MouseM; _mouse["R"] = MouseR;
+            _mouse["L"] = MouseL; _mouse["M"] = MouseM; _mouse["MR"] = MouseR;   // MR：避免与键盘 R 的 Layout_R 冲突
             _mouse["X1"] = MouseX1; _mouse["X2"] = MouseX2;
+
+            // 布局自定义：所有按键/鼠标键附加指针处理（边缘/四角拖拽缩放），鼠标垫不参与
+            foreach (var kv in _keys) AttachResize(kv.Value);
+            foreach (var kv in _mouse) AttachResize(kv.Value);
+            RestoreLayout();
+            object layoutLock = ApplicationData.Current.LocalSettings.Values["LayoutLocked"];
+            _layoutLocked = (layoutLock is bool lb) ? lb : true;
 
             object theme = ApplicationData.Current.LocalSettings.Values["Theme"];
             _dark = (theme is string s && s == "light") ? false : true;
@@ -254,34 +276,17 @@ namespace KeyDisplay
             foreach (var kv in _keys) SetKey(kv.Value, false);
             foreach (var kv in _mouse) SetKey(kv.Value, false);
 
-            // 主题切换按钮：标签显示可切换到的主题，自身配色即该主题的预览
-            ThemeToggleBtnText.Text = _dark ? "\u767d" : "\u9ed1";   // 白 / 黑
-            if (_dark)
-            {
-                ThemeToggleBtn.Background = _lightDefaultBg;
-                ThemeToggleBtn.BorderBrush = _lightBorder;
-                ThemeToggleBtnText.Foreground = _lightDefaultFg;
-            }
-            else
-            {
-                ThemeToggleBtn.Background = _darkDefaultBg;
-                ThemeToggleBtn.BorderBrush = _darkBorder;
-                ThemeToggleBtnText.Foreground = _darkDefaultFg;
-            }
-
             if (_docked)
             {
                 // Game Bar 关闭、仅固定组件叠加显示时：隐藏面板背景/边框、工具条按钮、状态字与设置，只留按键
                 RootPanel.Background = _transparent;
                 RootPanel.BorderBrush = _transparent;
-                ThemeToggleBtn.Visibility = Visibility.Collapsed;
                 SettingsBtn.Visibility = Visibility.Collapsed;
                 SettingsPanel.Visibility = Visibility.Collapsed;
                 StatusText.Visibility = Visibility.Collapsed;
             }
             else
             {
-                ThemeToggleBtn.Visibility = Visibility.Visible;
                 SettingsBtn.Visibility = Visibility.Visible;
                 StatusText.Visibility = Visibility.Visible;
             }
@@ -344,7 +349,7 @@ namespace KeyDisplay
                 bool x1 = (snap.Mouse & 8) != 0;
                 bool x2 = (snap.Mouse & 16) != 0;
                 SetKey(_mouse["L"], l);
-                SetKey(_mouse["R"], r);
+                SetKey(_mouse["MR"], r);
                 SetKey(_mouse["M"], m);
                 SetKey(_mouse["X1"], x1);
                 SetKey(_mouse["X2"], x2);
@@ -430,32 +435,34 @@ namespace KeyDisplay
             if (h < MinH) { double f = MinH / h; h = MinH; w *= f; }
         }
 
-        private void ThemeToggle_Click(object sender, TappedRoutedEventArgs e)
-        {
-            _dark = !_dark;
-            ApplyTheme();
-        }
-
-        // 设置子菜单配色：菜单框、标题、主题行、关闭按钮都随当前主题刷新
+        // 设置子菜单配色：菜单框、标题、主题行、锁定行、关闭按钮都随当前主题刷新
         private void ApplySettingsColors()
         {
             SettingsMenu.Background = _dark ? _darkPanel : _lightPanel;
             SettingsMenu.BorderBrush = _dark ? _darkBorder : _lightBorder;
             SettingsTitle.Foreground = _dark ? _darkDefaultFg : _lightDefaultFg;
             SettingsThemeLabel.Foreground = _dark ? _darkDefaultFg : _lightDefaultFg;
+            SettingsLockLabel.Foreground = _dark ? _darkDefaultFg : _lightDefaultFg;
 
             SettingsThemeText.Text = _dark ? "\u767d" : "\u9ed1";   // 白 / 黑
+            SettingsLockText.Text = _layoutLocked ? "\u5f00" : "\u5173";   // 开 / 关
             if (_dark)
             {
                 SettingsThemeBtn.Background = _lightDefaultBg;
                 SettingsThemeBtn.BorderBrush = _lightBorder;
                 SettingsThemeText.Foreground = _lightDefaultFg;
+                SettingsLockBtn.Background = _darkDefaultBg;
+                SettingsLockBtn.BorderBrush = _darkBorder;
+                SettingsLockText.Foreground = _darkDefaultFg;
                 SettingsCloseBtn.Background = _darkDefaultBg;
                 SettingsCloseBtn.BorderBrush = _darkBorder;
                 SettingsCloseText.Foreground = _darkDefaultFg;
                 SettingsTestBtn.Background = _darkDefaultBg;
                 SettingsTestBtn.BorderBrush = _darkBorder;
                 SettingsTestText.Foreground = _darkDefaultFg;
+                SettingsResetBtn.Background = _darkDefaultBg;
+                SettingsResetBtn.BorderBrush = _darkBorder;
+                SettingsResetText.Foreground = _darkDefaultFg;
                 SettingsBtnIcon.Foreground = _darkDefaultFg;
             }
             else
@@ -463,12 +470,18 @@ namespace KeyDisplay
                 SettingsThemeBtn.Background = _darkDefaultBg;
                 SettingsThemeBtn.BorderBrush = _darkBorder;
                 SettingsThemeText.Foreground = _darkDefaultFg;
+                SettingsLockBtn.Background = _lightDefaultBg;
+                SettingsLockBtn.BorderBrush = _lightBorder;
+                SettingsLockText.Foreground = _lightDefaultFg;
                 SettingsCloseBtn.Background = _lightDefaultBg;
                 SettingsCloseBtn.BorderBrush = _lightBorder;
                 SettingsCloseText.Foreground = _lightDefaultFg;
                 SettingsTestBtn.Background = _lightDefaultBg;
                 SettingsTestBtn.BorderBrush = _lightBorder;
                 SettingsTestText.Foreground = _lightDefaultFg;
+                SettingsResetBtn.Background = _lightDefaultBg;
+                SettingsResetBtn.BorderBrush = _lightBorder;
+                SettingsResetText.Foreground = _lightDefaultFg;
                 SettingsBtnIcon.Foreground = _lightDefaultFg;
             }
         }
@@ -530,6 +543,245 @@ namespace KeyDisplay
         private void SettingsTest_Click(object sender, TappedRoutedEventArgs e)
         {
             DiagLog("test button clicked theme=" + (_dark ? "dark" : "light"));
+        }
+
+        // 重置按键布局按钮：按下反色（点击反馈），松开恢复主题色
+        private void SettingsReset_Pressed(object sender, PointerRoutedEventArgs e)
+        {
+            SettingsResetBtn.Background = _dark ? _darkPressedBg : _lightPressedBg;
+            SettingsResetBtn.BorderBrush = _dark ? _darkPressedBg : _lightPressedBg;
+            SettingsResetText.Foreground = _dark ? _darkPressedFg : _lightPressedFg;
+        }
+
+        private void SettingsReset_Released(object sender, PointerRoutedEventArgs e)
+        {
+            ApplySettingsColors();
+        }
+
+        private void SettingsReset_Exited(object sender, PointerRoutedEventArgs e)
+        {
+            ApplySettingsColors();
+        }
+
+        // 重置按键布局：全部按键/鼠标键恢复默认尺寸位置，并清除已保存的自定义布局
+        private void SettingsReset_Click(object sender, TappedRoutedEventArgs e)
+        {
+            ResetKeyLayout("Q", KeyQ, 52, 48, new Thickness(0, 0, 6, 0));
+            ResetKeyLayout("W", KeyW, 52, 48, new Thickness(0, 0, 6, 0));
+            ResetKeyLayout("E", KeyE, 52, 48, new Thickness(0, 0, 6, 0));
+            ResetKeyLayout("R", KeyR, 52, 48, new Thickness(0, 0, 0, 0));
+            ResetKeyLayout("A", KeyA, 52, 48, new Thickness(0, 0, 6, 0));
+            ResetKeyLayout("S", KeyS, 52, 48, new Thickness(0, 0, 6, 0));
+            ResetKeyLayout("D", KeyD, 52, 48, new Thickness(0, 0, 6, 0));
+            ResetKeyLayout("F", KeyF, 52, 48, new Thickness(0, 0, 0, 0));
+            ResetKeyLayout("Shift", KeyShift, 68, 48, new Thickness(0, 0, 6, 0));
+            ResetKeyLayout("Ctrl", KeyCtrl, 68, 48, new Thickness(0, 0, 6, 0));
+            ResetKeyLayout("Alt", KeyAlt, 68, 48, new Thickness(0, 0, 0, 0));
+            ResetKeyLayout("Space", KeySpace, 176, 48, new Thickness(0, 0, 0, 0));
+            ResetKeyLayout("L", MouseL, 36, 36, new Thickness(0, 0, 6, 0));
+            ResetKeyLayout("M", MouseM, 36, 36, new Thickness(0, 0, 6, 0));
+            ResetKeyLayout("MR", MouseR, 36, 36, new Thickness(0, 0, 0, 0));
+            ResetKeyLayout("X1", MouseX1, 36, 36, new Thickness(0, 0, 6, 0));
+            ResetKeyLayout("X2", MouseX2, 36, 36, new Thickness(0, 0, 0, 0));
+            ClearHover();
+            DiagLog("layout reset");
+        }
+
+        // 恢复单个按键默认尺寸并写入默认布局（写值而非删除：LocalSettings 的 Remove 不一定立即落盘，写默认值保证重启后也是默认）
+        private void ResetKeyLayout(string name, Border b, double w, double h, Thickness m)
+        {
+            b.Width = w;
+            b.Height = h;
+            b.Margin = m;
+            ApplicationData.Current.LocalSettings.Values[LayoutPrefix + name] =
+                ((int)w) + ";" + ((int)h) + ";" + ((int)m.Left) + ";" + ((int)m.Top);
+        }
+
+        // 锁定布局开关：开=按键不可调整（默认），关=可拖动边缘/四角缩放
+        private void SettingsLock_Click(object sender, TappedRoutedEventArgs e)
+        {
+            _layoutLocked = !_layoutLocked;
+            ApplicationData.Current.LocalSettings.Values["LayoutLocked"] = _layoutLocked;
+            if (!_layoutLocked) ClearHover();
+            ApplySettingsColors();
+            DiagLog("layout lock=" + (_layoutLocked ? "on" : "off"));
+        }
+
+        // 给按键附加指针处理并让内层文字不拦截指针（Border 直接收事件）
+        private void AttachResize(Border b)
+        {
+            var tb = b.Child as TextBlock;
+            if (tb != null) tb.IsHitTestVisible = false;
+            b.PointerPressed += Key_PointerPressed;
+            b.PointerMoved += Key_PointerMoved;
+            b.PointerReleased += Key_PointerReleased;
+            b.PointerExited += Key_PointerExited;
+            b.PointerCaptureLost += Key_PointerCaptureLost;
+        }
+
+        // 判定指针是否在按键边缘/四角（8px 阈值），返回模式 l/r/t/b/tl/tr/bl/br
+        private string HitTestEdge(Border b, Point pt)
+        {
+            double w = b.Width;
+            if (double.IsNaN(w)) w = b.ActualWidth;
+            double h = b.Height;
+            if (double.IsNaN(h)) h = b.ActualHeight;
+            bool left = pt.X <= EdgeHit, right = pt.X >= w - EdgeHit;
+            bool top = pt.Y <= EdgeHit, bottom = pt.Y >= h - EdgeHit;
+            if (left && top) return "tl";
+            if (right && top) return "tr";
+            if (left && bottom) return "bl";
+            if (right && bottom) return "br";
+            if (left) return "l";
+            if (right) return "r";
+            if (top) return "t";
+            if (bottom) return "b";
+            return null;
+        }
+
+        // 边缘悬停提示：边框高亮（纯 XAML 属性，沙箱安全；不碰 CoreWindow 光标）
+        private void SetHover(Border b)
+        {
+            if (_hoverKey == b) return;
+            ClearHover();
+            _hoverKey = b;
+            b.BorderBrush = _dark ? _darkDefaultFg : _darkDefaultBg;
+        }
+
+        private void ClearHover()
+        {
+            if (_hoverKey == null) return;
+            _hoverKey.BorderBrush = _dark ? _darkBorder : _lightBorder;
+            _hoverKey = null;
+        }
+
+        // 按下：落在边缘/四角则开始拖拽并捕获指针
+        private void Key_PointerPressed(object sender, PointerRoutedEventArgs e)
+        {
+            if (_layoutLocked) return;
+            var b = sender as Border;
+            if (b == null) return;
+            string mode = HitTestEdge(b, e.GetCurrentPoint(b).Position);
+            if (mode == null) return;
+            _dragKey = b;
+            _dragMode = mode;
+            _dragStartX = e.GetCurrentPoint(null).Position.X;
+            _dragStartY = e.GetCurrentPoint(null).Position.Y;
+            _dragStartW = b.Width;
+            _dragStartH = b.Height;
+            _dragStartML = b.Margin.Left;
+            _dragStartMT = b.Margin.Top;
+            try { b.CapturePointer(e.Pointer); } catch { }
+            e.Handled = true;
+        }
+
+        // 移动：拖拽中实时缩放；未拖拽且解锁时更新边缘高亮
+        private void Key_PointerMoved(object sender, PointerRoutedEventArgs e)
+        {
+            var b = sender as Border;
+            if (b == null) return;
+            if (_dragKey != null)
+            {
+                var key = _dragKey;   // 捕获期间 CaptureLost 可能已把 _dragKey 置空，用局部变量
+                if (b != key) return;
+                double dx = e.GetCurrentPoint(null).Position.X - _dragStartX;
+                double dy = e.GetCurrentPoint(null).Position.Y - _dragStartY;
+                double w = _dragStartW, h = _dragStartH, ml = _dragStartML, mt = _dragStartMT;
+                if (_dragMode.Contains("l"))
+                {
+                    w = Math.Max(MinKeyW, _dragStartW - dx);
+                    ml = (_dragStartML + _dragStartW) - w;   // 保持右缘不动
+                }
+                if (_dragMode.Contains("r")) w = Math.Max(MinKeyW, _dragStartW + dx);
+                if (_dragMode.Contains("t"))
+                {
+                    h = Math.Max(MinKeyH, _dragStartH - dy);
+                    mt = (_dragStartMT + _dragStartH) - h;   // 保持下缘不动
+                }
+                if (_dragMode.Contains("b")) h = Math.Max(MinKeyH, _dragStartH + dy);
+                key.Width = w;
+                key.Height = h;
+                key.Margin = new Thickness(ml, mt, key.Margin.Right, key.Margin.Bottom);
+                return;
+            }
+            if (_layoutLocked) return;
+            if (HitTestEdge(b, e.GetCurrentPoint(b).Position) != null) SetHover(b);
+            else ClearHover();
+        }
+
+        // 松开：结束拖拽并持久化布局
+        private void Key_PointerReleased(object sender, PointerRoutedEventArgs e)
+        {
+            if (_dragKey == null) return;
+            var key = _dragKey;   // 释放捕获会同步触发 CaptureLost 置空 _dragKey，先存局部变量
+            try { key.ReleasePointerCapture(e.Pointer); } catch { }
+            DiagLog("layout resize " + NameOf(key)
+                    + " w=" + (int)key.Width + " h=" + (int)key.Height
+                    + " ml=" + (int)key.Margin.Left + " mt=" + (int)key.Margin.Top);
+            _dragKey = null;
+            _dragMode = null;
+            SaveLayout();
+        }
+
+        private void Key_PointerExited(object sender, PointerRoutedEventArgs e)
+        {
+            if (_dragKey != null) return;
+            ClearHover();
+        }
+
+        private void Key_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
+        {
+            _dragKey = null;
+            _dragMode = null;
+        }
+
+        private string NameOf(Border b)
+        {
+            foreach (var kv in _keys) if (kv.Value == b) return kv.Key;
+            foreach (var kv in _mouse) if (kv.Value == b) return kv.Key;
+            return "?";
+        }
+
+        // 布局持久化：每个按键存 "宽;高;左边距;上边距"（边距用于左/上缘拖动后的定位）
+        private void SaveLayout()
+        {
+            foreach (var kv in _keys) SaveKeyLayout(kv.Key, kv.Value);
+            foreach (var kv in _mouse) SaveKeyLayout(kv.Key, kv.Value);
+        }
+
+        private void SaveKeyLayout(string name, Border b)
+        {
+            ApplicationData.Current.LocalSettings.Values[LayoutPrefix + name] =
+                ((int)b.Width) + ";" + ((int)b.Height) + ";"
+                + ((int)b.Margin.Left) + ";" + ((int)b.Margin.Top);
+        }
+
+        private void RestoreLayout()
+        {
+            foreach (var kv in _keys) RestoreKeyLayout(kv.Key, kv.Value);
+            foreach (var kv in _mouse) RestoreKeyLayout(kv.Key, kv.Value);
+        }
+
+        private void RestoreKeyLayout(string name, Border b)
+        {
+            try
+            {
+                var s = ApplicationData.Current.LocalSettings.Values[LayoutPrefix + name] as string;
+                if (s == null) return;
+                var parts = s.Split(';');
+                if (parts.Length != 4) return;
+                double w = double.Parse(parts[0], CultureInfo.InvariantCulture);
+                double h = double.Parse(parts[1], CultureInfo.InvariantCulture);
+                double ml = double.Parse(parts[2], CultureInfo.InvariantCulture);
+                double mt = double.Parse(parts[3], CultureInfo.InvariantCulture);
+                if (w < MinKeyW || h < MinKeyH) return;
+                b.Width = w;
+                b.Height = h;
+                b.Margin = new Thickness(ml, mt, b.Margin.Right, b.Margin.Bottom);
+            }
+            catch
+            {
+            }
         }
 
         private static void DiagLog(string msg)

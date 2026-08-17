@@ -109,16 +109,12 @@
                         </StackPanel>
                     </StackPanel>
                 </StackPanel>
-                <!-- 底部工具条：设置图标 + 主题切换胶囊按钮（右对齐） -->
+                <!-- 底部工具条：设置图标（右对齐） -->
                 <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
                     <Border x:Name="SettingsBtn" Width="44" Height="26" CornerRadius="13" BorderThickness="1"
-                            Margin="0,0,8,0" Tapped="Settings_Click">
+                            Tapped="Settings_Click">
                         <TextBlock x:Name="SettingsBtnIcon" Text="&#x2699;" FontFamily="Segoe UI Symbol"
                                    HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="14"/>
-                    </Border>
-                    <Border x:Name="ThemeToggleBtn" Width="44" Height="26" CornerRadius="13" BorderThickness="1"
-                            Tapped="ThemeToggle_Click">
-                        <TextBlock x:Name="ThemeToggleBtnText" Text="白" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12" FontWeight="SemiBold"/>
                     </Border>
                 </StackPanel>
                 <TextBlock x:Name="StatusText" Text="" HorizontalAlignment="Right" VerticalAlignment="Top" FontSize="10" Opacity="0.6"/>
@@ -137,12 +133,26 @@
                                     <TextBlock x:Name="SettingsThemeText" Text="白" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="11"/>
                                 </Border>
                             </Grid>
+                            <Grid Margin="0,12,0,0">
+                                <TextBlock x:Name="SettingsLockLabel" Text="锁定布局" FontSize="13" VerticalAlignment="Center"/>
+                                <Border x:Name="SettingsLockBtn" Width="44" Height="22" CornerRadius="11"
+                                        BorderThickness="1" HorizontalAlignment="Right" Tapped="SettingsLock_Click">
+                                    <TextBlock x:Name="SettingsLockText" Text="开" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="11"/>
+                                </Border>
+                            </Grid>
                             <Border x:Name="SettingsTestBtn" Height="26" CornerRadius="6" BorderThickness="1"
                                     Margin="0,12,0,0" Tapped="SettingsTest_Click"
                                     PointerPressed="SettingsTest_Pressed"
                                     PointerReleased="SettingsTest_Released"
                                     PointerExited="SettingsTest_Exited">
                                 <TextBlock x:Name="SettingsTestText" Text="测试按钮" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
+                            </Border>
+                            <Border x:Name="SettingsResetBtn" Height="26" CornerRadius="6" BorderThickness="1"
+                                    Margin="0,12,0,0" Tapped="SettingsReset_Click"
+                                    PointerPressed="SettingsReset_Pressed"
+                                    PointerReleased="SettingsReset_Released"
+                                    PointerExited="SettingsReset_Exited">
+                                <TextBlock x:Name="SettingsResetText" Text="重置按键布局" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
                             </Border>
                             <Border x:Name="SettingsCloseBtn" Height="26" CornerRadius="6" BorderThickness="1"
                                     Margin="0,12,0,0" Tapped="SettingsClose_Click">

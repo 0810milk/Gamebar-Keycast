@@ -22,3 +22,7 @@ KeyDisplay.Widget/Generated Files/
 
 # 本地用户测试安装目录
 用户测试/
+
+# 工具生成目录
+.mimosa/
+.zcode/

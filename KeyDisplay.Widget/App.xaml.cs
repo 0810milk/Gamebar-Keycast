@@ -28,7 +28,7 @@ namespace KeyDisplay
             {
                 try
                 {
-                    DiagLog("unhandled: " + e.Exception.GetType().Name + " " + e.Message);
+                    DiagLog("unhandled: " + e.Exception.ToString());
                 }
                 catch
                 {

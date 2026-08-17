@@ -11,8 +11,8 @@
 ; 卸载流程：内联 PowerShell 移除 UWP 包与证书，Inno 负责删除文件与注册表。
 
 #define MyAppName "按键显示"
-; 版本号与 VERSION.md 保持一致（当前 0.2.0 beta），发布时同步修改
-#define MyAppVersion "0.2.0"
+; 版本号与 VERSION.md 保持一致（当前 0.3.0 beta），发布时同步修改
+#define MyAppVersion "0.3.0"
 #define MyAppPublisher "KeyDisplay"
 #define MyAppExeName "KeyDisplayCompanion.exe"
 
