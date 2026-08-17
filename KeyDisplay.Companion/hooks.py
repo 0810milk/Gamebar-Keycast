@@ -286,6 +286,8 @@ def _keyboard_proc(n_code, w_param, l_param):
     if n_code >= 0:
         kb = ctypes.cast(l_param, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
         down = w_param in (WM_KEYDOWN, WM_SYSKEYDOWN)
+        # v3：任意 VK 直接写入 256 位位图（widget 无法自行查键，需伴生进程全量采集）
+        _state.set_vk(kb.vkCode, down)
         for name, vk in VK.items():
             if kb.vkCode == vk or kb.vkCode == VK_RIGHT.get(name, -1):
                 _state.set_key(name, down)
@@ -386,11 +388,18 @@ def _get_async_key_state(vk):
 
 
 def reconcile(state):
-    """兜底校准：以 GetAsyncKeyState 为准刷新所有按键状态。"""
+    """兜底校准：以 GetAsyncKeyState 为准刷新所有按键状态。
+
+    保留原有 12 键 + 5 鼠标键逻辑，并追加 v3 的 256 VK 位图校准：
+    遍历 0..255 把当前真实按下状态同步进 state.extra，避免钩子事件
+    丢失导致的位图漂移（桌面进程，无沙箱限制，可直接调用）。
+    """
     for name in KEY_ORDER:
         state.set_key(name, _get_async_key_state(VK[name]))
     for name, vk in MOUSE_VK.items():
         state.set_mouse(name, _get_async_key_state(vk))
+    for vk in range(256):
+        state.set_vk(vk, _get_async_key_state(vk))
 
 
 def start_hooks(state, stop_event):

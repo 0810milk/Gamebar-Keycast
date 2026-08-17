@@ -30,8 +30,9 @@
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="42"/>
                 </Grid.RowDefinitions>
-                <StackPanel Grid.Row="0" Orientation="Horizontal">
-                    <StackPanel Orientation="Vertical">
+                <StackPanel Grid.Row="0" Orientation="Vertical">
+                    <StackPanel Orientation="Horizontal">
+                        <StackPanel Orientation="Vertical">
                         <!-- 第一行 Q W E R -->
                         <StackPanel Orientation="Horizontal">
                             <Border x:Name="KeyQ" Width="52" Style="{StaticResource KeyBorder}">
@@ -109,6 +110,9 @@
                         </StackPanel>
                     </StackPanel>
                 </StackPanel>
+                <!-- 自定义按键区：由"自定义控件"菜单从 87 配列布局添加的按键（动态创建、按名去重、持久化恢复） -->
+                <StackPanel x:Name="CustomKeysPanel" Orientation="Horizontal" Margin="0,8,0,0" Visibility="Collapsed"/>
+                </StackPanel>
                 <!-- 底部工具条：设置图标（右对齐） -->
                 <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
                     <Border x:Name="SettingsBtn" Width="44" Height="26" CornerRadius="13" BorderThickness="1"
@@ -118,7 +122,7 @@
                     </Border>
                 </StackPanel>
                 <TextBlock x:Name="StatusText" Text="" HorizontalAlignment="Right" VerticalAlignment="Top" FontSize="10" Opacity="0.6"/>
-                <!-- 设置子菜单覆盖层：点击设置图标展开，点遮罩或关闭按钮收起（不用系统 Flyout，避免 Game Bar 宿主崩溃） -->
+                <!-- 设置子菜单覆盖层：点击设置图标展开，点遮罩收起（不用系统 Flyout，避免 Game Bar 宿主崩溃） -->
                 <Grid x:Name="SettingsPanel" Grid.RowSpan="2" Visibility="Collapsed" Background="#40000000"
                       Tapped="SettingsPanel_Tapped">
                     <Border x:Name="SettingsMenu" Width="190" CornerRadius="8" BorderThickness="1"
@@ -133,31 +137,178 @@
                                     <TextBlock x:Name="SettingsThemeText" Text="白" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="11"/>
                                 </Border>
                             </Grid>
+                            <Border x:Name="LockKeyBtn" Height="26" CornerRadius="6" BorderThickness="1"
+                                    Margin="0,12,0,0" Tapped="LockKey_Click">
+                                <TextBlock x:Name="LockKeyText" Text="自定义控件" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+                <!-- 二级控件菜单覆盖层：从设置面板的"自定义控件"按键弹出；点遮罩/关闭按钮收起（与 SettingsPanel 同一覆盖层网格，保证两菜单位置对齐） -->
+                <Grid x:Name="LockPanel" Grid.RowSpan="2" Visibility="Collapsed" Background="#40000000"
+                      Tapped="LockPanel_Tapped">
+                    <Border x:Name="LockMenu" Width="610" CornerRadius="8" BorderThickness="1"
+                            HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,8,44"
+                            Tapped="LockMenu_Tapped">
+                        <StackPanel Padding="12">
+                            <TextBlock x:Name="LockMenuTitle" Text="添加控件" FontSize="14" FontWeight="SemiBold"/>
                             <Grid Margin="0,12,0,0">
-                                <TextBlock x:Name="SettingsLockLabel" Text="锁定布局" FontSize="13" VerticalAlignment="Center"/>
-                                <Border x:Name="SettingsLockBtn" Width="44" Height="22" CornerRadius="11"
-                                        BorderThickness="1" HorizontalAlignment="Right" Tapped="SettingsLock_Click">
-                                    <TextBlock x:Name="SettingsLockText" Text="开" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="11"/>
+                                <TextBlock x:Name="LockSwitchLabel" Text="锁定布局" FontSize="13" VerticalAlignment="Center"/>
+                                <Border x:Name="LockSwitchBtn" Width="44" Height="22" CornerRadius="11"
+                                        BorderThickness="1" HorizontalAlignment="Right" Tapped="LockSwitch_Click">
+                                    <TextBlock x:Name="LockSwitchText" Text="开" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="11"/>
                                 </Border>
                             </Grid>
-                            <Border x:Name="SettingsTestBtn" Height="26" CornerRadius="6" BorderThickness="1"
-                                    Margin="0,12,0,0" Tapped="SettingsTest_Click"
-                                    PointerPressed="SettingsTest_Pressed"
-                                    PointerReleased="SettingsTest_Released"
-                                    PointerExited="SettingsTest_Exited">
-                                <TextBlock x:Name="SettingsTestText" Text="测试按钮" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
+                            <!-- 键盘折叠开关：点击展开/折叠下方 87 配列键盘布局（初始折叠） -->
+                            <Grid x:Name="KeyPickerToggle" Margin="0,12,0,0" Tapped="KeyPickerToggle_Click">
+                                <TextBlock x:Name="KeyPickerToggleText" Text="按键" FontSize="13" VerticalAlignment="Center"/>
+                                <TextBlock x:Name="KeyPickerToggleArrow" Text="&#x25BC;" FontSize="18" HorizontalAlignment="Right" VerticalAlignment="Center" FontFamily="Segoe UI Symbol"/>
+                            </Grid>
+                            <!-- 87 配列键盘布局（TKL）：点击任意键 = 添加该键为自定义按键（Tag 记录键名）
+                                 菜单宽 610 可能超过组件默认窗宽，加横向滚动保证所有键可达 -->
+                            <ScrollViewer x:Name="KeyPickerScroll" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" MaxHeight="230" Margin="0,10,0,0">
+                                <StackPanel>
+                                    <!-- 功能行：Esc | F1-F12 | PrtSc ScrLk Pause -->
+                                    <StackPanel Orientation="Horizontal">
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="Esc" Tapped="AddKeyFromLayout_Click"><TextBlock Text="Esc" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="6,2,2,2" Tag="F1" Tapped="AddKeyFromLayout_Click"><TextBlock Text="F1" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="F2" Tapped="AddKeyFromLayout_Click"><TextBlock Text="F2" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="F3" Tapped="AddKeyFromLayout_Click"><TextBlock Text="F3" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="F4" Tapped="AddKeyFromLayout_Click"><TextBlock Text="F4" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="F5" Tapped="AddKeyFromLayout_Click"><TextBlock Text="F5" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="F6" Tapped="AddKeyFromLayout_Click"><TextBlock Text="F6" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="F7" Tapped="AddKeyFromLayout_Click"><TextBlock Text="F7" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="F8" Tapped="AddKeyFromLayout_Click"><TextBlock Text="F8" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="F9" Tapped="AddKeyFromLayout_Click"><TextBlock Text="F9" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="F10" Tapped="AddKeyFromLayout_Click"><TextBlock Text="F10" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="F11" Tapped="AddKeyFromLayout_Click"><TextBlock Text="F11" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="F12" Tapped="AddKeyFromLayout_Click"><TextBlock Text="F12" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="38" Height="26" CornerRadius="4" BorderThickness="1" Margin="6,2,2,2" Tag="PrtSc" Tapped="AddKeyFromLayout_Click"><TextBlock Text="PrtSc" FontSize="9" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="38" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="ScrLk" Tapped="AddKeyFromLayout_Click"><TextBlock Text="ScrLk" FontSize="9" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="38" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="Pause" Tapped="AddKeyFromLayout_Click"><TextBlock Text="Pause" FontSize="9" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                    </StackPanel>
+                                    <!-- 数字行：` 1 2 3 4 5 6 7 8 9 0 - = Backspace -->
+                                    <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="`" Tapped="AddKeyFromLayout_Click"><TextBlock Text="`" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="1" Tapped="AddKeyFromLayout_Click"><TextBlock Text="1" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="2" Tapped="AddKeyFromLayout_Click"><TextBlock Text="2" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="3" Tapped="AddKeyFromLayout_Click"><TextBlock Text="3" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="4" Tapped="AddKeyFromLayout_Click"><TextBlock Text="4" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="5" Tapped="AddKeyFromLayout_Click"><TextBlock Text="5" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="6" Tapped="AddKeyFromLayout_Click"><TextBlock Text="6" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="7" Tapped="AddKeyFromLayout_Click"><TextBlock Text="7" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="8" Tapped="AddKeyFromLayout_Click"><TextBlock Text="8" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="9" Tapped="AddKeyFromLayout_Click"><TextBlock Text="9" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="0" Tapped="AddKeyFromLayout_Click"><TextBlock Text="0" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="-" Tapped="AddKeyFromLayout_Click"><TextBlock Text="-" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="=" Tapped="AddKeyFromLayout_Click"><TextBlock Text="=" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="52" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="Backspace" Tapped="AddKeyFromLayout_Click"><TextBlock Text="Backspace" FontSize="9" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                    </StackPanel>
+                                    <!-- 主行1：Tab Q W E R T Y U I O P [ ] \ -->
+                                    <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                        <Border Width="52" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="Tab" Tapped="AddKeyFromLayout_Click"><TextBlock Text="Tab" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="Q" Tapped="AddKeyFromLayout_Click"><TextBlock Text="Q" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="W" Tapped="AddKeyFromLayout_Click"><TextBlock Text="W" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="E" Tapped="AddKeyFromLayout_Click"><TextBlock Text="E" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="R" Tapped="AddKeyFromLayout_Click"><TextBlock Text="R" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="T" Tapped="AddKeyFromLayout_Click"><TextBlock Text="T" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="Y" Tapped="AddKeyFromLayout_Click"><TextBlock Text="Y" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="U" Tapped="AddKeyFromLayout_Click"><TextBlock Text="U" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="I" Tapped="AddKeyFromLayout_Click"><TextBlock Text="I" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="O" Tapped="AddKeyFromLayout_Click"><TextBlock Text="O" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="P" Tapped="AddKeyFromLayout_Click"><TextBlock Text="P" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="[" Tapped="AddKeyFromLayout_Click"><TextBlock Text="[" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="]" Tapped="AddKeyFromLayout_Click"><TextBlock Text="]" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="\" Tapped="AddKeyFromLayout_Click"><TextBlock Text="\" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                    </StackPanel>
+                                    <!-- 主行2：Caps A S D F G H J K L ; ' Enter -->
+                                    <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                        <Border Width="52" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="Caps" Tapped="AddKeyFromLayout_Click"><TextBlock Text="Caps" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="A" Tapped="AddKeyFromLayout_Click"><TextBlock Text="A" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="S" Tapped="AddKeyFromLayout_Click"><TextBlock Text="S" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="D" Tapped="AddKeyFromLayout_Click"><TextBlock Text="D" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="F" Tapped="AddKeyFromLayout_Click"><TextBlock Text="F" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="G" Tapped="AddKeyFromLayout_Click"><TextBlock Text="G" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="H" Tapped="AddKeyFromLayout_Click"><TextBlock Text="H" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="J" Tapped="AddKeyFromLayout_Click"><TextBlock Text="J" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="K" Tapped="AddKeyFromLayout_Click"><TextBlock Text="K" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="L" Tapped="AddKeyFromLayout_Click"><TextBlock Text="L" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag=";" Tapped="AddKeyFromLayout_Click"><TextBlock Text=";" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="'" Tapped="AddKeyFromLayout_Click"><TextBlock Text="'" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="52" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="Enter" Tapped="AddKeyFromLayout_Click"><TextBlock Text="Enter" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                    </StackPanel>
+                                    <!-- 主行3：左Shift Z X C V B N M , . / 右Shift -->
+                                    <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                        <Border Width="68" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="左Shift" Tapped="AddKeyFromLayout_Click"><TextBlock Text="左Shift" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="Z" Tapped="AddKeyFromLayout_Click"><TextBlock Text="Z" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="X" Tapped="AddKeyFromLayout_Click"><TextBlock Text="X" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="C" Tapped="AddKeyFromLayout_Click"><TextBlock Text="C" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="V" Tapped="AddKeyFromLayout_Click"><TextBlock Text="V" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="B" Tapped="AddKeyFromLayout_Click"><TextBlock Text="B" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="N" Tapped="AddKeyFromLayout_Click"><TextBlock Text="N" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="M" Tapped="AddKeyFromLayout_Click"><TextBlock Text="M" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="," Tapped="AddKeyFromLayout_Click"><TextBlock Text="," FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="." Tapped="AddKeyFromLayout_Click"><TextBlock Text="." FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="/" Tapped="AddKeyFromLayout_Click"><TextBlock Text="/" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="68" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="右Shift" Tapped="AddKeyFromLayout_Click"><TextBlock Text="右Shift" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                    </StackPanel>
+                                    <!-- 空格行：左Ctrl 左Win 左Alt Space 右Alt 右Win Menu 右Ctrl -->
+                                    <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                        <Border Width="44" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="左Ctrl" Tapped="AddKeyFromLayout_Click"><TextBlock Text="左Ctrl" FontSize="9" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="44" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="左Win" Tapped="AddKeyFromLayout_Click"><TextBlock Text="左Win" FontSize="9" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="44" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="左Alt" Tapped="AddKeyFromLayout_Click"><TextBlock Text="左Alt" FontSize="9" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="120" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="Space" Tapped="AddKeyFromLayout_Click"><TextBlock Text="Space" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="44" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="右Alt" Tapped="AddKeyFromLayout_Click"><TextBlock Text="右Alt" FontSize="9" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="44" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="右Win" Tapped="AddKeyFromLayout_Click"><TextBlock Text="右Win" FontSize="9" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="44" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="Menu" Tapped="AddKeyFromLayout_Click"><TextBlock Text="Menu" FontSize="9" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="44" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="右Ctrl" Tapped="AddKeyFromLayout_Click"><TextBlock Text="右Ctrl" FontSize="9" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                    </StackPanel>
+                                    <!-- 编辑区：Ins Del Home End PgUp PgDn -->
+                                    <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="Ins" Tapped="AddKeyFromLayout_Click"><TextBlock Text="Ins" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="Del" Tapped="AddKeyFromLayout_Click"><TextBlock Text="Del" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="Home" Tapped="AddKeyFromLayout_Click"><TextBlock Text="Home" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="End" Tapped="AddKeyFromLayout_Click"><TextBlock Text="End" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="PgUp" Tapped="AddKeyFromLayout_Click"><TextBlock Text="PgUp" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="PgDn" Tapped="AddKeyFromLayout_Click"><TextBlock Text="PgDn" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                    </StackPanel>
+                                    <!-- 方向键：↑ ↓ ← → -->
+                                    <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="↑" Tapped="AddKeyFromLayout_Click"><TextBlock Text="↑" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="↓" Tapped="AddKeyFromLayout_Click"><TextBlock Text="↓" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="←" Tapped="AddKeyFromLayout_Click"><TextBlock Text="←" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="→" Tapped="AddKeyFromLayout_Click"><TextBlock Text="→" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                    </StackPanel>
+                                </StackPanel>
+                            </ScrollViewer>
+                            <Border x:Name="LockResetBtn" Height="26" CornerRadius="6" BorderThickness="1"
+                                    Margin="0,12,0,0" Tapped="LockReset_Click">
+                                <TextBlock x:Name="LockResetText" Text="重置按键布局" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
                             </Border>
-                            <Border x:Name="SettingsResetBtn" Height="26" CornerRadius="6" BorderThickness="1"
-                                    Margin="0,12,0,0" Tapped="SettingsReset_Click"
-                                    PointerPressed="SettingsReset_Pressed"
-                                    PointerReleased="SettingsReset_Released"
-                                    PointerExited="SettingsReset_Exited">
-                                <TextBlock x:Name="SettingsResetText" Text="重置按键布局" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
+                            <Border x:Name="LockCloseBtn" Height="26" CornerRadius="6" BorderThickness="1"
+                                    Margin="0,12,0,0" Tapped="LockClose_Click">
+                                <TextBlock x:Name="LockCloseText" Text="关闭" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
                             </Border>
-                            <Border x:Name="SettingsCloseBtn" Height="26" CornerRadius="6" BorderThickness="1"
-                                    Margin="0,12,0,0" Tapped="SettingsClose_Click">
-                                <TextBlock x:Name="SettingsCloseText" Text="关闭" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
-                            </Border>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+                <!-- 删除确认框覆盖层：右键自定义键弹出；确认/取消/点遮罩关闭 -->
+                <Grid x:Name="DeleteConfirmPanel" Grid.RowSpan="2" Visibility="Collapsed" Background="#40000000"
+                      Tapped="DeleteConfirmPanel_Tapped">
+                    <Border x:Name="DeleteConfirmBox" Width="210" CornerRadius="8" BorderThickness="1"
+                            HorizontalAlignment="Center" VerticalAlignment="Center" Tapped="LockMenu_Tapped">
+                        <StackPanel Padding="14">
+                            <TextBlock x:Name="DeleteConfirmText" Text="" FontSize="13" HorizontalAlignment="Center"/>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,16,0,0">
+                                <Border x:Name="DeleteConfirmYes" Width="64" Height="26" CornerRadius="6" BorderThickness="1"
+                                        Tapped="DeleteConfirmYes_Click">
+                                    <TextBlock x:Name="DeleteConfirmYesText" Text="确认" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border x:Name="DeleteConfirmNo" Width="64" Height="26" CornerRadius="6" BorderThickness="1"
+                                        Margin="12,0,0,0" Tapped="DeleteConfirmNo_Click">
+                                    <TextBlock x:Name="DeleteConfirmNoText" Text="取消" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </StackPanel>
                         </StackPanel>
                     </Border>
                 </Grid>

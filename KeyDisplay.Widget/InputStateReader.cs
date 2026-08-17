@@ -9,7 +9,8 @@ using Windows.Storage;
 namespace KeyDisplay
 {
     /// <summary>
-    /// 一份 36 字节输入快照。
+    /// 一份输入快照。协议 v3 为 68 字节（尾部 32 字节 = 256 位 VK 位图）；
+    /// 兼容 v2 的 36 字节旧快照（ExtraKeys 为 null，自定义键降级为仅显示）。
     /// </summary>
     public sealed class InputSnapshot
     {
@@ -22,6 +23,8 @@ namespace KeyDisplay
         public int VsW;
         public int VsH;
         public uint Seq;     // 帧序号，用于判断数据是否变化（未变化时跳过重绘）
+        public byte[] ExtraKeys;   // 协议 v3：32 字节 = 256 位 VK 位图，按虚拟键码直接索引；
+                                   // v2 旧快照为 null（自定义键降级为仅显示）
     }
 
     /// <summary>
@@ -96,22 +99,19 @@ namespace KeyDisplay
                     }
                     using (var stream = new FileStream(new SafeFileHandle(handle, true), FileAccess.Read))
                     {
-                        var buf = new byte[36];
+                        var buf = new byte[68];
                         while (!ct.IsCancellationRequested)
                         {
-                            int offset = 0;
-                            while (offset < buf.Length)
-                            {
-                                int n = await stream.ReadAsync(buf, offset, buf.Length - offset, ct).ConfigureAwait(false);
-                                if (n == 0) break;
-                                offset += n;
-                            }
-                            if (offset < buf.Length) break; // 管道断开，重连
+                            // 消息模式下一次 ReadAsync 即一条完整消息（缓冲区 >= 消息长度时）。
+                            // 兼容协议 v2（36 字节）与 v3（68 字节）：按实际读到的长度分派，
+                            // 非 KDSP 开头或长度 < 36 一律丢弃（防错位解析）。
+                            int n = await stream.ReadAsync(buf, 0, buf.Length, ct).ConfigureAwait(false);
+                            if (n == 0) break; // 管道断开，重连
 
-                            if (buf[0] == (byte)'K' && buf[1] == (byte)'D' &&
+                            if (n >= 36 && buf[0] == (byte)'K' && buf[1] == (byte)'D' &&
                                 buf[2] == (byte)'S' && buf[3] == (byte)'P')
                             {
-                                var snap = Parse(buf);
+                                var snap = Parse(buf, n);
                                 Snapshot?.Invoke(this, snap);
                             }
                         }
@@ -143,9 +143,9 @@ namespace KeyDisplay
             }
         }
 
-        private static InputSnapshot Parse(byte[] b)
+        private static InputSnapshot Parse(byte[] b, int len)
         {
-            return new InputSnapshot
+            var snap = new InputSnapshot
             {
                 Keys = (ushort)(b[5] | (b[6] << 8)),
                 Mouse = b[7],
@@ -157,6 +157,14 @@ namespace KeyDisplay
                 VsH = BitConverter.ToInt32(b, 28),
                 Seq = BitConverter.ToUInt32(b, 32)
             };
+            // 协议 v3：b[36..68] = 32 字节 256 位 VK 位图（小端，位 = (extra[vk>>3]>>(vk&7))&1）。
+            // 长度 < 68（v2 旧快照）时 ExtraKeys 保持 null，调用方降级为仅显示，不崩溃。
+            if (len >= 68)
+            {
+                snap.ExtraKeys = new byte[32];
+                Buffer.BlockCopy(b, 36, snap.ExtraKeys, 0, 32);
+            }
+            return snap;
         }
     }
 }

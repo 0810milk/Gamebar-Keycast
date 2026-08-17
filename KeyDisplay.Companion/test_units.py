@@ -36,6 +36,8 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual((snap["mx"], snap["my"], snap["seq"]), (1234, -56, 7))
         self.assertEqual((snap["vx"], snap["vy"], snap["vw"], snap["vh"]),
                          (-1920, 0, 3840, 1080))
+        self.assertIn("extra", snap)
+        self.assertEqual(len(snap["extra"]), 32)
 
     def test_serialize_sizes(self):
         st = InputState()
@@ -146,6 +148,69 @@ class SnapshotTests(unittest.TestCase):
         st.set_key("Space", True)
         self.assertEqual(st.keys, (1 << 1) | (1 << 11))
 
+    def test_set_vk_roundtrip(self):
+        # v3：256 VK 位图按 vk>>3 索引字节、vk&7 索引位；置位/复位往返
+        def bit(vk):
+            return (vk >> 3, 1 << (vk & 7))
+
+        st = InputState()
+        for vk in (0x51, 0x70):  # 'Q' 与 'F1'
+            b, m = bit(vk)
+            self.assertEqual(st.extra[b] & m, 0)   # 初始松开
+            st.set_vk(vk, True)
+            self.assertEqual(st.extra[b] & m, m)   # 按下置位
+        b, m = bit(0x51)
+        st.set_vk(0x51, False)
+        self.assertEqual(st.extra[b] & m, 0)       # 松开复位
+        b2, m2 = bit(0x70)
+        self.assertEqual(st.extra[b2] & m2, m2)    # 另一键不受影响
+        st.set_vk(0x70, False)
+        self.assertEqual(st.extra[b2] & m2, 0)
+
+    def test_set_vk_bounds_and_clamp(self):
+        st = InputState()
+        st.set_vk(0, True)      # VK 0 → 字节 0 位 0
+        self.assertEqual(st.extra[0] & 1, 1)
+        st.set_vk(255, True)    # VK 255 → 字节 31 位 7
+        self.assertEqual(st.extra[31] & 0x80, 0x80)
+        st.set_vk(256, True)    # 越界截断 → 等价于 VK 0
+        self.assertEqual(st.extra[0] & 1, 1)
+        self.assertEqual(st.extra[31] & 0x80, 0x80)  # 高位不受影响
+
+    def test_serialize_length_is_68(self):
+        st = InputState()
+        st.set_vk(0x51, True)
+        self.assertEqual(len(st.serialize()), 68)
+        self.assertEqual(len(st.serialize()), SNAPSHOT_SIZE)
+
+    def test_parse_extra_preserved(self):
+        st = InputState()
+        st.set_vk(0x51, True)   # 'Q'
+        st.set_vk(0x70, True)   # 'F1'
+        st.set_vk(0x9C, True)   # 高位区
+        blob = st.serialize()
+        snap = parse_snapshot(blob)
+        self.assertIsNotNone(snap)
+        self.assertEqual(snap["extra"], bytes(st.extra))
+        self.assertEqual(len(snap["extra"]), 32)
+        for vk in (0x51, 0x70, 0x9C):
+            self.assertTrue(snap["extra"][vk >> 3] & (1 << (vk & 7)),
+                            "VK 0x%02X 位未在解析结果中置位" % vk)
+
+    def test_v3_snapshot_parseable(self):
+        st = InputState()
+        st.set_vk(0x41, True)   # 'A'
+        blob = st.serialize()
+        self.assertEqual(blob[:4], MAGIC)
+        self.assertEqual(blob[4], VERSION)      # version 字段 = 3
+        self.assertEqual(len(blob), 68)
+        snap = parse_snapshot(blob)
+        self.assertIsNotNone(snap)
+        self.assertEqual(snap["seq"], st.seq)
+        # 旧 v2 快照（36 字节，无 extra）必须被拒绝（ver 不匹配）
+        v2 = struct.pack("<4sBHBiiiiiiI", MAGIC, 2, 0, 0, 0, 0, 0, 0, 1920, 1080, 0)
+        self.assertIsNone(parse_snapshot(v2))
+
 
 class HookMappingTests(unittest.TestCase):
     def setUp(self):
@@ -237,7 +302,7 @@ class PipeServerTests(unittest.TestCase):
     def test_derive_package_sid_no_crash(self):
         self.assertIsNone(pipe_server._derive_package_sid("__nonexistent__"))
 
-    def test_snapshot_is_36_bytes(self):
+    def test_snapshot_is_68_bytes(self):
         st = InputState()
         self.assertEqual(len(st.serialize()), SNAPSHOT_SIZE)
 
