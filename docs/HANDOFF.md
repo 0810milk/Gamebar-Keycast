@@ -1,7 +1,8 @@
 # 交接文档（给下一个 Agent / 新维护者）—— 完整版
 
 > 本文件是**唯一权威交接入口**。请从头读到尾再动代码。
-> 配套：`docs/ARCHITECTURE.md`（架构细节）、`docs/BUILD.md`、`docs/INSTALL.md`、
+> 配套：`docs/AGENT-PROCESS.md`（**多 Agent 协作流程，权威，每轮任务必读**）、
+> `docs/ARCHITECTURE.md`（架构细节）、`docs/BUILD.md`、`docs/INSTALL.md`、
 > `docs/ISSUE-PINNED-CHROME.md`（全部历史问题的调查与修复记录，1–25 节）、`VERSION.md`（版本登记）。
 > **当前最新交接事项：0.3.x 自定义布局（拖拽缩放）+ 光标悬停反馈任务，见第 14 节。**
 > ⚠️ **工作区有未提交改动**（5 个文件：代码 `KeyDisplay.Widget/Widget1.xaml.cs` + README/VERSION/HANDOFF/ISSUE 文档），
@@ -30,6 +31,8 @@
 
 工作纪律：
 - 与用户用中文交流；用户是独立开发者，习惯小步迭代。
+- **每轮任务走 `docs/AGENT-PROCESS.md` 闭环**：需求 → 验收标准确认 → 拆解派发 → 集成自检 →
+  构建 + 弹测试窗口 → 用户验收；测试窗口验收是强制环节，不得跳过。
 - 任何功能/修复改动后：跑 KeyDisplay.Companion 单测 → 重建两端 →
   签名重装 → 验证 → 递增版本号（VERSION.md + README + setup.iss 三处同步）→
   重建 Setup.exe → 刷新桌面备份 → 复制到 release/<版本>/ → git commit（源码+安装包成对）。
