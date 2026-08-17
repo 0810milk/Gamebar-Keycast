@@ -1,6 +1,6 @@
-﻿# 按键显示 —— Game Bar 键盘鼠标状态小组件
+# 按键显示 —— Game Bar 键盘鼠标状态小组件
 
-> 当前版本：**0.2.0 beta**，版本登记见 [VERSION.md](VERSION.md)。
+> 当前版本：**0.3.1 beta**，版本登记见 [VERSION.md](VERSION.md)。
 
 在 Windows Game Bar（`Win+G`）中实时显示键盘与鼠标操作状态的小组件：
 
@@ -74,7 +74,9 @@ python -m unittest test_units -v
 
 ## 已知环境限制
 
-- 本仓库开发环境无法编译 UWP/MSIX（无 VS/.NET SDK），`KeyDisplay.Widget` 为可交付源码，
-  需在装有 Visual Studio（含 UWP 工作负载）与 Windows SDK 的机器上构建。
+- 构建需 Visual Studio BuildTools（含 UWP 工作负载）与 Windows SDK；vswhere 在本机识别不到 MSBuild，
+  需直连 `C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\MSBuild.exe`
+  （见 docs/HANDOFF.md 第 6 节命令）。
 - 自动化注入的模拟键盘输入（SendInput）不会触发全局钩子（系统注入丢弃），
   需物理按键实测键盘链路；鼠标链路已用真实输入验证通过。
+- 小组件的指针 hover 事件（PointerMoved）无法用注入式鼠标移动触发，需真人真实鼠标悬停验证。

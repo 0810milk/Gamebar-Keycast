@@ -2,7 +2,10 @@
 
 > 本文件是**唯一权威交接入口**。请从头读到尾再动代码。
 > 配套：`docs/ARCHITECTURE.md`（架构细节）、`docs/BUILD.md`、`docs/INSTALL.md`、
-> `docs/ISSUE-PINNED-CHROME.md`（全部历史问题的调查与修复记录，1–24 节）、`VERSION.md`（版本登记）。
+> `docs/ISSUE-PINNED-CHROME.md`（全部历史问题的调查与修复记录，1–25 节）、`VERSION.md`（版本登记）。
+> **当前最新交接事项：0.3.x 自定义布局（拖拽缩放）+ 光标悬停反馈任务，见第 14 节。**
+> ⚠️ **工作区有未提交改动**（5 个文件：代码 `KeyDisplay.Widget/Widget1.xaml.cs` + README/VERSION/HANDOFF/ISSUE 文档），
+> 由「0.3.1 收尾任务」统一处理（清理临时日志 → 真人验证光标 → 提交 → 发布），接手先看第 14.7 节。
 
 ---
 
@@ -13,10 +16,17 @@
 （Python 伴生进程采集输入 → 命名管道 → UWP C# 小组件渲染）。
 
 开始前必读（按顺序）：
-1. docs/HANDOFF.md（本文件，完整交接：架构/流程/易踩坑/发布规则）
-2. docs/ISSUE-PINNED-CHROME.md（全部历史 bug 与修复记录，重点第 9~24 节）
-3. VERSION.md（版本登记与发布规则）
+1. docs/HANDOFF.md（本文件，完整交接：架构/流程/易踩坑/发布规则；第 14 节是最近一次任务的专项交接）
+2. docs/ISSUE-PINNED-CHROME.md（全部历史 bug 与修复记录，重点第 9~25 节）
+3. VERSION.md（版本登记与发布规则；含"进行中任务"小节）
 4. docs/ARCHITECTURE.md + docs/BUILD.md + docs/INSTALL.md
+
+接手第一步（重要）：
+- 先 `git status` 看未提交改动。当前有 5 个文件：Widget1.xaml.cs 的光标悬停功能（临时 DiagLog 已清理，
+  且已修 4 个问题：同键内模式去重、CaptureLost 光标兜底、过期注释、无用参数），
+  以及 README/VERSION/HANDOFF/ISSUE 文档改动，由「0.3.1 收尾任务」统一处理
+  （清理临时日志 → 真人验证光标 → 提交 → 发布），详见第 14 节（若该节已完成则无此条）。
+- 确认 widget 布局锁定状态（Settings → 锁开关；当前测试态为解锁）。
 
 工作纪律：
 - 与用户用中文交流；用户是独立开发者，习惯小步迭代。
@@ -40,7 +50,7 @@ Windows Game Bar（`Win+G`）里的键盘/鼠标状态显示小组件：
   + 鼠标垫（点实时定位，平滑跟手）。
 - 支持暗/亮主题（右下角胶囊按钮切换）；固定后退出 Game Bar 只留按键。
 - `Setup.exe`（Inno Setup）一键安装 + 控制面板卸载，支持覆盖更新。
-- **当前版本：0.1.0 beta**（见 `VERSION.md`）。
+- **当前版本：0.3.1 beta**（见 `VERSION.md`）。
 
 ---
 
@@ -59,7 +69,8 @@ KeyDisplayCompanion（Python，桌面，无窗口，单实例 mutex）
 KeyDisplay.Widget（UWP C#，Game Bar 沙箱）
   App.xaml.cs            协议激活 ms-gamebarwidget → XboxGameBarWidget（实例私有）
   Widget1.xaml(.cs)      UI；CompositionTarget.Rendering 渲染（跟随显示器刷新率）；
-                          鼠标点 BongoCat 同款指数插值平滑；固定态复合判定
+                          鼠标点 BongoCat 同款指数插值平滑；固定态复合判定；
+                          0.3.x 布局自定义（边缘/四角拖拽缩放+锁定+持久化+重置+光标悬停，见第 14 节）
   InputStateReader.cs    CreateFileW + FileStream（MESSAGE 读模式）读 36B 帧
   NativeMethods.cs       P/Invoke（CreateFileW / SetNamedPipeHandleState）
 ```
@@ -89,12 +100,18 @@ KeyDisplay.Widget（UWP C#，Game Bar 沙箱）
 
 ---
 
-## 4. 当前状态（0.1.0 beta）
+## 4. 当前状态（0.3.1 beta）
 
 功能全部可用：键盘 12 键 + 鼠标 5 键 + 鼠标垫（按屏幕比例缩放 + 点平滑跟手）、
 黑白主题（胶囊按钮）、固定后只留按键、240Hz 推送 + 跟随刷新率渲染、
 游戏内校准缩放 + 屏幕钳制、多客户端管道、覆盖更新（同版本先移除再装）、
 日志监控、500Hz 输入限频。
+
+**0.3.0 新增**：自定义布局（按键边缘/四角拖拽缩放 + 锁定开关默认开 + 布局持久化 +
+设置菜单"重置按键布局"按钮）、修复拖拽释放闪退、修复鼠标右键与键盘 R 布局互相覆盖。
+
+**0.3.1 新增（2026-08-17 发布）**：按键边缘悬停光标反馈（Size 光标，见第 14 节）；
+同键同模式去重修复；CaptureLost 异常丢捕获兜底恢复默认光标。
 
 ---
 
@@ -129,6 +146,8 @@ $ISCC = 'C:\Users\恐龙milk\AppData\Local\Programs\Inno Setup 6\ISCC.exe'
   /p:UapAppxPackageBuildMode=SideloadOnly /p:AppxPackageSigningEnabled=false `
   /p:VisualStudioVersion=17.0 /v:m
 # 产物：KeyDisplay.Widget\AppPackages\KeyDisplay.Widget_1.0.0.0_x64_Test\KeyDisplay.Widget_1.0.0.0_x64.msix
+# 注意：build-msix.ps1 里用 vswhere 找 MSBuild 在本机会失败（找不到），
+#       已改用手动直连 $MSB 构建 + 手动 signtool 签名（见 6.3）。
 ```
 
 ### 6.2 构建伴生进程（改 Python 后）
@@ -246,6 +265,22 @@ cd KeyDisplay.Companion; python -m unittest test_units -v   # 当前 21 项
 19. **MSBuild**：vswhere 在本机找不到，必须直连路径 + `/p:VisualStudioVersion=17.0`。
 20. **中文路径**：PS5.1 处理中文路径注意编码；git bash 里 echo 中文/含括号文本会被解析（用单引号）。
 
+### 本次任务实战（光标 + 布局，第 14 节）
+21. **UWP 元素级光标属性当前工程不可用**：`FrameworkElement.ProtectedCursor`、`UIElement.InputCursor`
+    编译报 CS1061（元数据不可见）；唯一可用且稳定的是 `CoreWindow.GetForCurrentThread().PointerCursor`，
+    全程 try/catch 静默降级。**注意**：0.3.0 曾因"CoreWindow.PointerCursor 导致拖拽闪退"移除过一次，
+    当时的根因是拖拽释放的 NRE（CaptureLost 竞态），与光标赋值本身无关；本次重新启用已验证安全。
+22. **注入式鼠标移动（SendInput/mouse_event/SetCursorPos）不会触发 UWP 的 PointerMoved（hover）**：
+    只能触发 Tapped（点击合成）。hover 验证**必须真人真实鼠标悬停**。
+23. **读全局光标用 `GetCursorInfo`（返回 hCursor）**，别用 `GetCursor()`（返回当前线程光标，误导）。
+    标准句柄：ARROW=65539、IBeam=65541、SIZENWSE=65549、SIZENESW=65551、SIZEWE=65553、
+    SIZENS=65555、Hand=LoadCursor(32512/32642/32643/32644/32645/32649)。
+24. **自动化点击合成**：`SetCursorPos`（精确定位，逻辑坐标）+ SendInput 相对 `down/up`（dx=0,dy=0）
+    可稳定触发 UWP Tapped；`SendInput` ABSOLUTE 移动在本机无效（r=1 但光标不动）。
+25. **PowerShell 5.1 脚本**：.ps1 按 ANSI 读 → 中文字面量（含中文路径）会损坏，用 `$env:USERPROFILE` 拼路径；
+    C# `Add-Type` 里用 System.Drawing 需 `Add-Type -AssemblyName System.Drawing` 且仍可能编译失败，
+    建议纯 P/Invoke（GetPixel/GetCursorInfo）或用 System.Windows.Forms（PowerShell 层）。
+
 ---
 
 ## 10. 调试与日志解读
@@ -281,6 +316,9 @@ cd KeyDisplay.Companion; python -m unittest test_units -v   # 当前 21 项
 4. **0.0.1~0.0.4 历史安装包未归档**（构建时被覆盖）；需要可 checkout 对应 commit 重建。
 5. **Mimosa 全量安全审计未跑完**（提交钩子一直提示"扫描不完整"），属可选事项。
 6. **卸载/重装后 theme 偏好会重置**（LocalSettings 随包删除，属已知小问题）。
+7. **不要重新引入元素级光标属性**（`InputCursor`/`ProtectedCursor`），当前工程编译不过，用 CoreWindow.PointerCursor。
+8. **不要把鼠标垫（Pad）加入拖拽缩放**：布局自定义只作用于 12 个按键 Border，鼠标垫尺寸自适应屏幕，
+   参与拖拽会破坏校准逻辑（见第 2 节坐标路径）。
 
 ---
 
@@ -291,3 +329,114 @@ cd KeyDisplay.Companion; python -m unittest test_units -v   # 当前 21 项
 - 用户会反复做 Agent 接管——**每次工作结束把变更写入 docs/ISSUE-PINNED-CHROME.md**
   （新增小节）和/或 VERSION.md，保持交接文档不过时。
 - 有方案分歧时给推荐 + 权衡，不罗列；能自主做的小事直接做。
+
+---
+
+## 14. 专项交接：0.3.x 自定义布局（拖拽缩放）+ 光标悬停反馈（最近一次任务）
+
+> 本节覆盖 0.3.0（已发布）与 0.3.1（已发布）两阶段。**接手先读本节约 2 分钟，能省一小时。**
+
+### 14.1 需求与验收标准
+
+- **0.3.0（已发布，commit d52a991）**：解锁布局后，可拖拽 12 个按键的**边缘/四角**实时缩放
+  （l/r/t/b/tl/tr/bl/br 八种模式，窗口拉放式）；`Shift/Ctrl/Alt/空格` 等按键互不覆盖；
+  布局持久化；设置菜单"重置按键布局"恢复默认；**锁定开关默认开**。
+- **0.3.1（已发布，2026-08-17）**：悬停在按键边缘/四角时，系统光标变为对应的"拉放窗口"光标
+  （l/r→SizeWestEast，t/b→SizeNorthSouth，tl/br→SizeNorthwestSoutheast，
+  tr/bl→SizeNortheastSouthwest）；锁定状态/离开边缘/拖拽结束恢复默认光标；保留边框高亮提示。
+
+### 14.2 代码位置（全部在 `KeyDisplay.Widget/Widget1.xaml.cs`）
+
+| 方法 / 字段 | 行号（以当前工作区为准） | 作用 |
+|---|---|---|
+| `EdgeHit=8.0`、`MinKeyW/H=20` | 约 L60 | 边缘判定距离、最小尺寸 |
+| `_layoutLocked=true`（默认开） | L61 | 锁定开关（持久化到 LocalSettings `LayoutLocked`） |
+| `_dragKey/_dragMode/_dragStart*` | L62~66 | 拖拽状态 |
+| `_hoverKey`、`_curCursorType` | L67~68 | 悬停高亮键 + 当前光标类型 |
+| `SettingsLock_Click` | ~L603 | 切换锁定，**锁定/解锁都 ClearHover**（防残留 Size 光标） |
+| `ResetKeyLayout`/`Reset_Click` | ~L569~601 | 重置按键布局并持久化 |
+| `AttachResize` | ~L613 | 为 12 个按键 Border 挂 PointerPressed/Moved/Released/Exited/CaptureLost |
+| `HitTestEdge(Border, Point)` | ~L625 | 返回 l/r/t/b/tl/tr/bl/br 或 null |
+| `ApplyCursor(string mode)` | L646 | **0.3.1 核心**：CoreWindow.PointerCursor 赋值（临时 DiagLog 已清理） |
+| `SetHover(b, mode)` / `ClearHover()` | L685 / L694 | 边框高亮 + 光标联动 |
+| `Key_PointerPressed` | ~L705 | 边缘按下开始拖拽并 SetCursor |
+| `Key_PointerMoved` | ~L726 | 拖拽实时缩放；未拖拽时 hover 判定（**拖拽分支先 return，不抢 hover**） |
+| `Key_PointerReleased` | ~L759 | 结束拖拽、恢复光标、SaveLayout |
+| `Key_PointerCaptureLost` | ~L779 | 清拖拽态（**曾 NRE 闪退的根因处**） |
+
+### 14.3 0.3.0 的闪退修复（重要，勿回退）
+
+- **症状**：调整控件后卡死闪退。
+- **根因**：`Key_PointerReleased` 里 `_dragKey.ReleasePointerCapture(e.Pointer)` 会**同步**触发
+  `Key_PointerCaptureLost` → 把 `_dragKey` 置 null → 下一行 `_dragKey.Width` 抛 NRE。
+- **修复**：先存局部变量 `var key = _dragKey;` 再用；`Key_PointerMoved` 拖拽分支同样存局部变量。
+- 0.3.0 曾在注释里写"CoreWindow.PointerCursor 引发闪退"而把光标赋值整体移除——**该结论是误判**，
+  真正根因是上述 NRE。0.3.1 已安全重新启用 CoreWindow.PointerCursor（全程 try/catch）。
+
+### 14.4 布局持久化
+
+- 键：`Layout_<名字>`（如 `Layout_Q`），值 `<w>|<h>|<ml>|<mt>`（宽度|高度|左边距|上边距），
+  存 `ApplicationData.Current.LocalSettings`；锁定开关键 `LayoutLocked`。
+- `SaveLayout()`/`RestoreLayout()` 与 `SaveKeyLayout/RestoreKeyLayout` 配套；重启后 `OnLoaded → RestoreLayout`。
+
+### 14.5 验证状态（截至交接时）
+
+- ✅ 0.3.0 全流程已验证（拖拽/锁定/持久化/重置/防覆盖），已发布并归档 `release/0.3.0-beta/`。
+- ✅ 0.3.1 hover 触发验证：**真人真实鼠标**悬停 Q 键边缘 → diag.txt 出现
+  `cursor set mode=r cw=True` + `cursor applied ok`，八种边缘模式均触发，赋值无异常。
+- ⬜ **未完成（需用户真人操作）**：悬停时读取全局光标（`GetCursorInfo`）确认显示为 Size 光标（如 hCursor=65553=SIZEWE）。
+  此前自动化脚本（注入移动）读到的都是 ARROW，那是因为**注入移动不触发 hover**（见坑 22 / ISSUE 第 25 节），
+  需真人悬停后立即读取。
+- ✅ **已完成**：清理 `ApplyCursor` 中 3 处临时 `DiagLog`，保留 try/catch 降级（2026-08-17 收尾任务）。
+- ✅ **已完成（收尾时补修）**：`SetHover` 去重改为"同键同模式"（边缘→角落光标可更新）；`Key_PointerCaptureLost`
+  增加恢复默认光标；类头过期注释修正（元素级属性 CS1061 不可用，用 CoreWindow.PointerCursor）；
+  `ApplyCursor` 移除无用参数 `Border b`。
+- ✅ **已完成**：git commit + 发布 0.3.1 beta（三处版本号同步 + 重建 Setup + 归档 `release/0.3.1-beta/`）。
+- ⚠️ 测试后 widget 布局处于**解锁**状态（`LayoutLocked=false` 已持久化）；若正式发布希望默认锁定，
+  需在验证后重新打开锁定开关（或改默认值）。
+
+### 14.6 光标功能实现细节（0.3.1）
+
+- 光标 API 选定：`CoreWindow.GetForCurrentThread().PointerCursor`。
+  `FrameworkElement.ProtectedCursor`/`UIElement.InputCursor` 在当前工程元数据不可见（CS1061），已放弃。
+- 去重：`_curCursorType` 记录上次类型，相同直接 return（避免反复赋值抖动）。
+- 恢复：`mode==null` 或 `_layoutLocked` 时赋 `PointerCursor = null`（回系统默认）。
+- 触发路径：`PointerMoved`（未拖拽、未锁定）→ `HitTestEdge` → `SetHover`；
+  `PointerPressed`（边缘）→ 直接 `ApplyCursor` 进入拖拽；`PointerReleased` → 恢复默认。
+- `SettingsLock_Click` 无论锁定/解锁都 `ClearHover()`，防止切锁定时残留 Size 光标。
+
+### 14.7 未提交改动清单（git diff 摘要，d52a991 → 当前）
+
+工作区共 **5 个文件**（`git diff --stat`：**272 插入 / 13 删除**），由「0.3.1 收尾任务」统一处理：
+
+`KeyDisplay.Widget/Widget1.xaml.cs`（+59/-6，光标功能，临时 DiagLog 已清理）：
+- 新增字段 `_curCursorType`、`_hoverMode`（同键同模式去重用）；
+- 新增 `ApplyCursor(string mode)`（临时 DiagLog 已清理，catch 静默降级）；
+- `SetHover(Border)` → `SetHover(Border, string mode)`，去重条件加 `_hoverMode == mode`；
+- `ClearHover()` 增加恢复光标并清 `_hoverMode`；
+- `PointerPressed` 增加拖拽开始设光标；`PointerReleased` 增加松开恢复光标；
+- `Key_PointerCaptureLost` 增加恢复默认光标（异常丢捕获兜底）；
+- `SettingsLock_Click` 由"仅解锁时 ClearHover"改为"锁定/解锁都 ClearHover"；
+- `PointerMoved` hover 分支传 mode；
+- 类头过期注释修正（元素级属性 CS1061 不可用，用 CoreWindow.PointerCursor）；`ApplyCursor` 移除无用参数 `Border b`。
+
+文档与版本文件（随 0.3.1 收尾同步更新）：
+- `README.md`（+5/-3）：顶部版本行同步 0.3.0 beta；「已知环境限制」小节更新构建说明 + hover 验证限制；
+- `VERSION.md`（+19）：新增「进行中任务（未发布）」小节登记 0.3.1 光标悬停反馈；
+- `docs/HANDOFF.md`（+137/-5）：本文件（第 14 节专项交接等）同步；
+- `docs/ISSUE-PINNED-CHROME.md`（+57）：新增第 25 节（光标悬停验证难点）。
+
+> 收尾流程（已完成，2026-08-17）：清理 3 处临时 DiagLog → 补修 4 个代码问题 → 编译验证（MSIX 产出）→
+> 三处版本号同步 0.3.1 beta → 重建 Setup → 归档 release/0.3.1-beta → 提交。
+> 提交：`git commit -am "0.3.1 beta：按键边缘悬停显示系统 Size 光标（拉放提示），悬停高亮联动；清理诊断日志"`。
+
+### 14.8 自动化验证脚本（临时，可复用）
+
+在 `C:\Users\恐龙milk\AppData\Local\Temp\opencode\`：
+- `curinfo.ps1`：SetCursorPos 定位 + SendInput 相对移动（dx=0 点击合成不在此）→ `GetCursorInfo` 读全局光标。
+- `pixcheck2.ps1`：纯 P/Invoke `GetPixel` 采样屏幕像素（验证 hover 边框高亮是否触发）。
+- 关键坐标（独立窗口下）：内容区物理 (424,145) 1800×1350；Q 键右缘逻辑 (352,138)、Q 中心逻辑 (326,138)、
+  底部逻辑 (326,161)、左上角逻辑 (301,115)；缩放 1.5（逻辑↔物理）。
+- ⚠️ 注入式移动**不能**触发 hover（坑 22），以上脚本只能用于像素/光标读取，hover 触发必须真人。
+
+---

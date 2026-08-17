@@ -52,8 +52,9 @@ namespace KeyDisplay
         private static bool s_companionLaunched;
 
         // 布局自定义：边缘/四角拖拽缩放（窗口式），鼠标垫不参与；默认锁定。
-        // 注意：不设置 PointerCursor（沙箱内原生线程会因 CoreWindow 光标赋值抛 NRE 卡死闪退），
-        // 改用边缘悬停时边框高亮作为视觉提示。
+        // 光标：悬停/拖拽边缘时用 CoreWindow.PointerCursor 映射成 Size 光标（拉放窗口那种），
+        // 元素级 InputCursor/ProtectedCursor 在当前工程元数据不可见（编译 CS1061）；全部 try/catch 静默降级，
+        // 边缘悬停仍配合边框高亮作为视觉提示。
         private const double EdgeHit = 8.0;          // 判定为"边缘"的指针距离（px）
         private const double MinKeyW = 20, MinKeyH = 20;
         private const string LayoutPrefix = "Layout_";
@@ -64,6 +65,8 @@ namespace KeyDisplay
         private double _dragStartW, _dragStartH;
         private double _dragStartML, _dragStartMT;
         private Border _hoverKey;                    // 当前边缘悬停高亮的按键
+        private string _hoverMode;                   // 当前悬停的边缘模式（l/r/t/b/tl/tr/bl/br，null=无）
+        private CoreCursorType? _curCursorType;      // 当前生效的全局光标类型（null=系统默认）
 
         // 暗色主题画刷
         private readonly SolidColorBrush _darkDefaultBg = new SolidColorBrush(Colors.Black);
@@ -602,7 +605,7 @@ namespace KeyDisplay
         {
             _layoutLocked = !_layoutLocked;
             ApplicationData.Current.LocalSettings.Values["LayoutLocked"] = _layoutLocked;
-            if (!_layoutLocked) ClearHover();
+            ClearHover();   // 锁定/解锁都重置高亮与光标，避免残留 Size 光标
             ApplySettingsColors();
             DiagLog("layout lock=" + (_layoutLocked ? "on" : "off"));
         }
@@ -639,20 +642,64 @@ namespace KeyDisplay
             return null;
         }
 
-        // 边缘悬停提示：边框高亮（纯 XAML 属性，沙箱安全；不碰 CoreWindow 光标）
-        private void SetHover(Border b)
+        // 按边缘模式映射系统光标（拉放窗口样式）；null/锁定=恢复默认光标。
+        // 用 CoreWindow.PointerCursor（稳定 UWP API；元素级 InputCursor/ProtectedCursor 在当前工程元数据不可见）。
+        private void ApplyCursor(string mode)
         {
-            if (_hoverKey == b) return;
+            try
+            {
+                CoreCursorType? target = null;
+                if (!_layoutLocked && mode != null)
+                {
+                    switch (mode)
+                    {
+                        case "l":
+                        case "r":
+                            target = CoreCursorType.SizeWestEast;
+                            break;
+                        case "t":
+                        case "b":
+                            target = CoreCursorType.SizeNorthSouth;
+                            break;
+                        case "tl":
+                        case "br":
+                            target = CoreCursorType.SizeNorthwestSoutheast;
+                            break;
+                        case "tr":
+                        case "bl":
+                            target = CoreCursorType.SizeNortheastSouthwest;
+                            break;
+                        default:
+                            target = CoreCursorType.Hand;
+                            break;
+                    }
+                }
+                if (target == _curCursorType) return;
+                _curCursorType = target;
+                var cw = CoreWindow.GetForCurrentThread();
+                if (cw != null) cw.PointerCursor = target == null ? null : new CoreCursor(target.Value, 0);
+            }
+            catch { /* 静默降级 */ }
+        }
+
+        // 边缘悬停提示：边框高亮（纯 XAML 属性，沙箱安全；不碰 CoreWindow 光标）
+        private void SetHover(Border b, string mode)
+        {
+            if (_hoverKey == b && _hoverMode == mode) return;   // 同键同模式才去重；边缘→角落需更新光标
             ClearHover();
             _hoverKey = b;
+            _hoverMode = mode;
             b.BorderBrush = _dark ? _darkDefaultFg : _darkDefaultBg;
+            ApplyCursor(mode);
         }
 
         private void ClearHover()
         {
             if (_hoverKey == null) return;
             _hoverKey.BorderBrush = _dark ? _darkBorder : _lightBorder;
+            ApplyCursor(null);
             _hoverKey = null;
+            _hoverMode = null;
         }
 
         // 按下：落在边缘/四角则开始拖拽并捕获指针
@@ -663,6 +710,7 @@ namespace KeyDisplay
             if (b == null) return;
             string mode = HitTestEdge(b, e.GetCurrentPoint(b).Position);
             if (mode == null) return;
+            ApplyCursor(mode);
             _dragKey = b;
             _dragMode = mode;
             _dragStartX = e.GetCurrentPoint(null).Position.X;
@@ -705,7 +753,8 @@ namespace KeyDisplay
                 return;
             }
             if (_layoutLocked) return;
-            if (HitTestEdge(b, e.GetCurrentPoint(b).Position) != null) SetHover(b);
+            var mode = HitTestEdge(b, e.GetCurrentPoint(b).Position);
+            if (mode != null) SetHover(b, mode);
             else ClearHover();
         }
 
@@ -720,6 +769,7 @@ namespace KeyDisplay
                     + " ml=" + (int)key.Margin.Left + " mt=" + (int)key.Margin.Top);
             _dragKey = null;
             _dragMode = null;
+            ApplyCursor(null);   // 松开后恢复默认光标
             SaveLayout();
         }
 
@@ -733,6 +783,7 @@ namespace KeyDisplay
         {
             _dragKey = null;
             _dragMode = null;
+            ApplyCursor(null);   // 异常丢捕获（失焦/窗口切换）也恢复默认光标，避免 Size 光标残留
         }
 
         private string NameOf(Border b)

@@ -578,3 +578,62 @@
 
 协议位序（KEY_ORDER）与渲染无关，无需改动。widget 已重建/签名/重装，
 `Setup.exe` 已重建、桌面备份已刷新。
+
+---
+
+## 24. 修复"调整控件后卡死闪退"：拖拽释放 CaptureLost 竞态 NRE（2026-08-17）
+
+### 现象
+
+0.3.0 开发中，解锁布局后拖拽按键边缘/四角，释放鼠标后 widget 卡死闪退。
+
+### 根因
+
+`Key_PointerReleased` 中 `_dragKey.ReleasePointerCapture(e.Pointer)` 会**同步**触发
+`Key_PointerCaptureLost` → 回调里 `_dragKey = null` → 回到 Released 的下一行再访问
+`_dragKey.Width` 抛 `NullReferenceException`（on-released 路径未保护）。
+
+### 修复（`KeyDisplay.Widget/Widget1.xaml.cs`）
+
+- `Key_PointerReleased`：先用 `var key = _dragKey;` 存局部变量，后续都用 `key`；
+- `Key_PointerMoved` 拖拽分支同样先存局部变量；
+- 0.3.0 曾因此**误判**"CoreWindow.PointerCursor 沙箱内赋值引发闪退"而把光标赋值整体移除；
+  实际根因是上述 NRE。0.3.1 已安全重新启用 `CoreWindow.PointerCursor`（全程 try/catch）。
+
+### 验证
+
+- 拖拽/锁定/持久化/重置全流程通过；0.3.0 已发布并归档 `release/0.3.0-beta/`。
+
+---
+
+## 25. 光标悬停反馈的验证难点：注入式鼠标移动不触发 UWP PointerMoved（2026-08-17，进行中）
+
+### 背景
+
+0.3.1 目标：悬停按键边缘显示系统"拉放窗口"光标（SizeWestEast 等）。实现用
+`CoreWindow.GetForCurrentThread().PointerCursor`（元素级 `InputCursor`/`ProtectedCursor`
+在当前工程元数据不可见，CS1061，放弃）。
+
+### 自动化验证遇到的坑（重要，写自动化脚本前必读）
+
+1. **注入式移动不触发 hover**：`SetCursorPos` / `SendInput` 相对移动 / `mouse_event` ABSOLUTE
+   移动，都不会让 UWP 产生 `PointerMoved`（所以 hover 高亮与光标都不响应）。
+   只有**真人真实鼠标移动**能触发 hover。注入点击（`SetCursorPos` + SendInput 相对 down/up）
+   可稳定触发 Tapped（已用齿轮/锁定开关验证），但那是点击不是 hover。
+2. **读全局光标用 `GetCursorInfo`（hCursor），不是 `GetCursor()`**：
+   `GetCursor()` 返回当前线程光标，PowerShell 读永远是线程默认值（误导）；`GetCursorInfo`
+   返回鼠标所在位置的全局光标。标准句柄对照：ARROW=65539、IBeam=65541、SIZENWSE=65549、
+   SIZENESW=65551、SIZEWE=65553、SIZENS=65555。
+3. **像素采样验证 hover 高亮**：用纯 P/Invoke `GetPixel(GetDC(0), x, y)` 采样按键边框像素
+   （System.Drawing 在 Add-Type C# 里编译引用会失败，改用纯 P/Invoke 或 PowerShell 层）。
+
+### 当前状态
+
+- ✅ hover 触发已确认：真人悬停 Q 键边缘，diag.txt 出现 `cursor set mode=r cw=True` +
+  `cursor applied ok`，l/r/t/b 等模式均触发、赋值无异常；
+- ⬜ **未完成（需用户真人操作）**：最终确认悬停时全局光标实际显示为 Size 光标
+  （需真人悬停时读 GetCursorInfo；注入式移动不触发 UWP hover，见本节坑 1）；
+- ✅ **已完成**：清理 `ApplyCursor` 中 3 处临时 DiagLog（2026-08-17 收尾任务，保留 try/catch 静默降级）；
+- ✅ **已完成**：git commit + 发布 0.3.1 beta（三处版本号同步 + 重建 Setup + 归档 `release/0.3.1-beta/`）。
+
+> 完整交接与坐标信息见 `docs/HANDOFF.md` 第 14 节。
