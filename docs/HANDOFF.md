@@ -2,6 +2,7 @@
 
 > 本文件是**唯一权威交接入口**。请从头读到尾再动代码。
 > 配套：`docs/AGENT-PROCESS.md`（**多 Agent 协作流程，权威，每轮任务必读**）、
+> `docs/INHERIT.md`（**Agent 继承协议：主 Agent 卡顿/断联时的接班 4 步核对，v1.0**）、
 > `docs/ARCHITECTURE.md`（架构细节）、`docs/BUILD.md`、`docs/INSTALL.md`、
 > `docs/ISSUE-PINNED-CHROME.md`（全部历史问题的调查与修复记录，1–25 节）、`VERSION.md`（版本登记）。
 > **当前最新交接事项：0.4.0 自定义控件（按键添加器）—— 87 配列添加/长按移动/右键删除/协议 v3，见 VERSION.md「进行中任务」与第 14 节。**
