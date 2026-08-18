@@ -84,7 +84,7 @@ namespace KeyDisplay
         private Border _longPressKey;
         private Border _moveKey;                       // 当前移动模式中的按键
         private double _moveStartX, _moveStartY;       // 移动按下时的指针位置
-        private double _moveStartML, _moveStartMT;     // 移动按下时的 Margin 起点
+        private double _moveStartTX, _moveStartTY;     // 移动按下时的 TranslateTransform 偏移起点
         private Border _deleteConfirmKey;              // 待确认删除的自定义键（右键弹出）
         private Point _pressPointerRoot;               // 最近一次按下的根坐标（长按移动用）
 
@@ -401,6 +401,35 @@ namespace KeyDisplay
             }
         }
 
+        // 读取按键当前 TranslateTransform 偏移（无则视为 0）；out 参数返回 XY
+        private static void GetTransformXY(Border b, out double tx, out double ty)
+        {
+            var tt = b.RenderTransform as TranslateTransform;
+            tx = tt != null ? tt.X : 0;
+            ty = tt != null ? tt.Y : 0;
+        }
+
+        // 应用 TranslateTransform 偏移作为渲染变换（不影响布局流，用于移动位置表达）
+        private static void SetTransformXY(Border b, double tx, double ty)
+        {
+            b.RenderTransform = new TranslateTransform { X = tx, Y = ty };
+        }
+
+        // 缩放落位归一：把 Margin.Left/Top（缩放 l/t 边补偿）并入 transform（tx/ty += margin），并把 Margin.Left/Top 归零。
+        // 视觉位置不变（布局 margin + transform 等价归一到 transform），保证"位置"只有 transform 一个来源，避免与移动冲突。
+        private static void NormalizeTransformMargin(Border b)
+        {
+            double tx, ty;
+            GetTransformXY(b, out tx, out ty);
+            double ml = b.Margin.Left;
+            double mt = b.Margin.Top;
+            if (ml == 0 && mt == 0) { if (tx == 0 && ty == 0) return; SetTransformXY(b, tx, ty); return; }
+            tx += ml;
+            ty += mt;
+            b.Margin = new Thickness(0, 0, b.Margin.Right, b.Margin.Bottom);
+            SetTransformXY(b, tx, ty);
+        }
+
         // 每 UI 帧触发；数据帧序号未变化时跳过按键重绘（高帧率下空闲时零开销）
         private void OnRendering(object sender, object e)
         {
@@ -592,21 +621,23 @@ namespace KeyDisplay
             }
         }
 
-        // 鼠标垫自定义持久化：写 PadPos_left/top、PadW/H（InvariantCulture）、PadCustom_=1，并置 _padCustomized=true
+        // 鼠标垫自定义持久化：写 PadPos_left/top（=transform tx/ty）、PadW/H（InvariantCulture）、PadCustom_=1，并置 _padCustomized=true
         private void SavePadCustom()
         {
             _padCustomized = true;
+            double tx, ty;
+            GetTransformXY(MousePad, out tx, out ty);
             var v = ApplicationData.Current.LocalSettings.Values;
             v["PadCustom_"] = 1;
-            v["PadPos_left"] = MousePad.Margin.Left.ToString(CultureInfo.InvariantCulture);
-            v["PadPos_top"] = MousePad.Margin.Top.ToString(CultureInfo.InvariantCulture);
+            v["PadPos_left"] = tx.ToString(CultureInfo.InvariantCulture);
+            v["PadPos_top"] = ty.ToString(CultureInfo.InvariantCulture);
             v["PadW"] = MousePad.Width.ToString(CultureInfo.InvariantCulture);
             v["PadH"] = MousePad.Height.ToString(CultureInfo.InvariantCulture);
-            DiagLog("pad customized ml=" + (int)MousePad.Margin.Left + " mt=" + (int)MousePad.Margin.Top
+            DiagLog("pad customized tx=" + (int)tx + " ty=" + (int)ty
                     + " w=" + (int)MousePad.Width + " h=" + (int)MousePad.Height);
         }
 
-        // 启动恢复鼠标垫自定义：PadCustom_=1 时应用保存的 Margin/Width/Height 并置 _padCustomized=true；
+        // 启动恢复鼠标垫自定义：PadCustom_=1 时应用保存的 transform/Width/Height 并置 _padCustomized=true；
         // 否则保持自动跟随（_padCustomized=false）。
         private void RestorePadCustom()
         {
@@ -617,18 +648,19 @@ namespace KeyDisplay
                 if (pc == null) { _padCustomized = false; return; }
                 bool customized = (pc is bool b) ? b : (pc.ToString() == "1" || pc.ToString() == "True");
                 if (!customized) { _padCustomized = false; return; }
-                double ml = ReadSettingDouble(v, "PadPos_left", 0.0);
-                double mt = ReadSettingDouble(v, "PadPos_top", 0.0);
+                double tx = ReadSettingDouble(v, "PadPos_left", 0.0);
+                double ty = ReadSettingDouble(v, "PadPos_top", 0.0);
                 double w = ReadSettingDouble(v, "PadW", MousePad.Width);
                 double h = ReadSettingDouble(v, "PadH", MousePad.Height);
                 if (w < MinPadW || h < MinPadH) { _padCustomized = false; return; }
-                MousePad.Margin = new Thickness(ml, mt, 0, 0);
+                SetTransformXY(MousePad, tx, ty);
+                MousePad.Margin = new Thickness(0, 0, 0, 0);
                 MousePad.Width = w;
                 MousePad.Height = h;
                 _padW = w;   // 同步垫面尺寸变量，保证鼠标点映射基准与实际尺寸一致
                 _padH = h;
                 _padCustomized = true;
-                DiagLog("pad restored ml=" + (int)ml + " mt=" + (int)mt + " w=" + (int)w + " h=" + (int)h);
+                DiagLog("pad restored tx=" + (int)tx + " ty=" + (int)ty + " w=" + (int)w + " h=" + (int)h);
             }
             catch (Exception ex)
             {
@@ -843,6 +875,7 @@ namespace KeyDisplay
             padVals.Remove("PadH");
             _padCustomized = false;
             MousePad.Margin = new Thickness(0, 0, 0, 0);
+            MousePad.RenderTransform = null;   // 清 transform（恢复默认位置）
             RefreshPadAutoSize();
             ClearHover();
             DiagLog("layout reset (custom keys cleared: " + deadNames.Count + ")");
@@ -898,7 +931,7 @@ namespace KeyDisplay
             AttachResize(border);       // 复用拖拽缩放/hover/锁定/长按移动机制
             SetKey(border, false);      // 初始主题样式
             ApplicationData.Current.LocalSettings.Values["Custom_" + name] = "1";
-            // 移动位置持久化：若已存 CustomPos_<名>（left;top）则应用，否则写默认 (0,0)
+            // 移动位置持久化：若已存 CustomPos_<名>（tx;ty）则应用 transform，否则写默认 (0,0)
             string pos = ApplicationData.Current.LocalSettings.Values["CustomPos_" + name] as string;
             if (!string.IsNullOrEmpty(pos))
             {
@@ -909,7 +942,7 @@ namespace KeyDisplay
                     {
                         double pl = double.Parse(pp[0], CultureInfo.InvariantCulture);
                         double pt = double.Parse(pp[1], CultureInfo.InvariantCulture);
-                        border.Margin = new Thickness(pl, pt, 6, 0);   // 恢复时保留默认右间距 6
+                        SetTransformXY(border, pl, pt);   // 位置=transform，Margin 保持 (0,0,6,0) 布局间距
                     }
                 }
                 catch { }
@@ -1101,8 +1134,9 @@ namespace KeyDisplay
             b.Width = w;
             b.Height = h;
             b.Margin = m;
+            b.RenderTransform = null;   // 清 transform（恢复默认位置）
             ApplicationData.Current.LocalSettings.Values[LayoutPrefix + name] =
-                ((int)w) + ";" + ((int)h) + ";" + ((int)m.Left) + ";" + ((int)m.Top);
+                ((int)w) + ";" + ((int)h) + ";0;0";   // 位置=transform，归零
         }
 
         // 锁定布局开关共用逻辑（设置面板与二级锁定菜单的开关都走这里）：
@@ -1157,13 +1191,14 @@ namespace KeyDisplay
             if (b == null) return;
             if (_dragKey != null) return;   // 正在边缘缩放拖拽中，不进入移动模式
             if (_layoutLocked) return;      // 锁定布局时禁止移动控件（与缩放一致）
-            // 进入移动模式：记录起点（按下时的指针/边距），高亮提示（琥珀色边框）
+            // 进入移动模式：记录起点（按下时的指针/transform 偏移），高亮提示（琥珀色边框）
             _moveKey = b;
             if (b == MousePad) _padCustomized = true;   // 一旦开始移动鼠标垫即视为自定义，避免操作期间被自动跟随覆盖
             _moveStartX = _pressPointerRoot.X;
             _moveStartY = _pressPointerRoot.Y;
-            _moveStartML = b.Margin.Left;
-            _moveStartMT = b.Margin.Top;
+            var tt0 = b.RenderTransform as TranslateTransform;
+            _moveStartTX = tt0 != null ? tt0.X : 0;
+            _moveStartTY = tt0 != null ? tt0.Y : 0;
             // 记录起点视觉基准（SnapCanvas 坐标），供吸附计算反推被拖按键四边
             var baseRect = VisualRectOf(b);
             _moveBaseLeft = baseRect.X;
@@ -1345,16 +1380,16 @@ namespace KeyDisplay
                 if (b != key) return;
                 double dx = e.GetCurrentPoint(null).Position.X - _moveStartX;
                 double dy = e.GetCurrentPoint(null).Position.Y - _moveStartY;
-                // 自由位置（无吸附）作为候选，再按十字方向做边对边软吸附（水平/垂直轴独立）
-                double ml = _moveStartML + dx;
-                double mt = _moveStartMT + dy;
+                // 位置用 TranslateTransform 渲染变换表达（不写 Margin，避免 StackPanel 流式布局挤压兄弟元素）
+                double tx = _moveStartTX + dx;
+                double ty = _moveStartTY + dy;
                 double w = (key.ActualWidth > 0 ? key.ActualWidth : key.Width);
                 double h = (key.ActualHeight > 0 ? key.ActualHeight : key.Height);
-                // 被拖按键当前四边（SnapCanvas 坐标）：起点视觉基准 + Margin 位移增量（免布局刷新）
+                // 被拖按键当前四边（SnapCanvas 坐标）：起点视觉基准 + transform 位移增量（免布局刷新）
                 double[] ea = new double[4];
-                ea[0] = _moveBaseLeft + (ml - _moveStartML);
+                ea[0] = _moveBaseLeft + (tx - _moveStartTX);
                 ea[1] = ea[0] + w;
-                ea[2] = _moveBaseTop + (mt - _moveStartMT);
+                ea[2] = _moveBaseTop + (ty - _moveStartTY);
                 ea[3] = ea[2] + h;
                 var rects = CollectOtherRects(key);
                 var hitH = ComputeAxisSnap(true, ea, rects);
@@ -1362,9 +1397,9 @@ namespace KeyDisplay
                 // 滞回：未吸附 ≤8 触发、已吸附 ≤10 保持、>10 脱离；两轴独立，只修正吸附到的轴
                 bool snapH = hitH.Active && ShouldSnap(hitH.Delta, ref _snapActiveH);
                 bool snapV = hitV.Active && ShouldSnap(hitV.Delta, ref _snapActiveV);
-                if (snapH) ml += hitH.Delta;
-                if (snapV) mt += hitV.Delta;
-                key.Margin = new Thickness(ml, mt, key.Margin.Right, key.Margin.Bottom);
+                if (snapH) tx += hitH.Delta;
+                if (snapV) ty += hitV.Delta;
+                key.RenderTransform = new TranslateTransform { X = tx, Y = ty };
                 // 参考线分级显示（v2）：吸中=实线、8~40px=半透明虚线、>40px 或无候选=隐藏；每轴最近 1 条
                 UpdateSnapLine(0, false, hitH.LinePos, hitH.Active ? Math.Abs(hitH.Delta) : double.MaxValue, snapH);
                 UpdateSnapLine(1, true, hitV.LinePos, hitV.Active ? Math.Abs(hitV.Delta) : double.MaxValue, snapV);
@@ -1441,14 +1476,18 @@ namespace KeyDisplay
                     }
                     else if (_customKeys.ContainsKey(nm))
                     {
+                        var tt = key.RenderTransform as TranslateTransform;
+                        double tx = tt != null ? tt.X : 0;
+                        double ty = tt != null ? tt.Y : 0;
                         ApplicationData.Current.LocalSettings.Values["CustomPos_" + nm] =
-                            (int)key.Margin.Left + ";" + (int)key.Margin.Top;
+                            tx.ToString(CultureInfo.InvariantCulture) + ";" + ty.ToString(CultureInfo.InvariantCulture);
                     }
                     else
                     {
-                        SaveKeyLayout(nm, key);   // 默认键走现有 Layout_ 持久化
+                        SaveKeyLayout(nm, key);   // 默认键走现有 Layout_ 持久化（位置=transform）
                     }
-                    DiagLog("key moved " + nm + " ml=" + (int)key.Margin.Left + " mt=" + (int)key.Margin.Top);
+                    var tt2 = key.RenderTransform as TranslateTransform;
+                    DiagLog("key moved " + nm + " tx=" + (int)(tt2 != null ? tt2.X : 0) + " ty=" + (int)(tt2 != null ? tt2.Y : 0));
                 }
                 return;
             }
@@ -1464,13 +1503,16 @@ namespace KeyDisplay
             HideSnapLines();     // 缩放结束隐藏吸附参考线
             if (dragKey == MousePad)
             {
-                // 鼠标垫缩放落位：持久化并同步垫面尺寸变量（保证点映射基准 = 实际尺寸），不走 SaveLayout
+                // 鼠标垫缩放落位：归一 margin→transform 后持久化，并同步垫面尺寸变量（保证点映射基准 = 实际尺寸）
+                NormalizeTransformMargin(MousePad);
                 _padW = MousePad.Width;
                 _padH = MousePad.Height;
                 SavePadCustom();
             }
             else
             {
+                // 普通键缩放落位：归一 margin→transform（位置唯一来源 = transform），再持久化
+                NormalizeTransformMargin(dragKey);
                 SaveLayout();
             }
         }
@@ -1506,7 +1548,7 @@ namespace KeyDisplay
         private struct SnapHit
         {
             public bool Active;          // 本轴是否吸附
-            public double Delta;         // 修正量（加到被拖按键的 Margin.Left 或 Margin.Top）
+            public double Delta;         // 修正量（加到被拖按键的 transform.tx/ty 或 Margin.Left/Top）
             public double LinePos;       // 参考线贴齐位置（水平吸附=x，垂直吸附=y）
         }
 
@@ -1842,7 +1884,8 @@ namespace KeyDisplay
             return "?";
         }
 
-        // 布局持久化：每个按键存 "宽;高;左边距;上边距"（边距用于左/上缘拖动后的定位）
+        // 布局持久化：每个按键存 "宽;高;tx;ty"（位置=TranslateTransform 偏移，Margin 不再存位置）。
+        // 老数据 4 段格式 w;h;ml;mt 的 ml/mt 数值等价于 tx/ty，可直接兼容解读（无需迁移）。
         private void SaveLayout()
         {
             foreach (var kv in _keys) SaveKeyLayout(kv.Key, kv.Value);
@@ -1851,9 +1894,11 @@ namespace KeyDisplay
 
         private void SaveKeyLayout(string name, Border b)
         {
+            double tx, ty;
+            GetTransformXY(b, out tx, out ty);
             ApplicationData.Current.LocalSettings.Values[LayoutPrefix + name] =
                 ((int)b.Width) + ";" + ((int)b.Height) + ";"
-                + ((int)b.Margin.Left) + ";" + ((int)b.Margin.Top);
+                + tx.ToString(CultureInfo.InvariantCulture) + ";" + ty.ToString(CultureInfo.InvariantCulture);
         }
 
         private void RestoreLayout()
@@ -1872,12 +1917,13 @@ namespace KeyDisplay
                 if (parts.Length != 4) return;
                 double w = double.Parse(parts[0], CultureInfo.InvariantCulture);
                 double h = double.Parse(parts[1], CultureInfo.InvariantCulture);
-                double ml = double.Parse(parts[2], CultureInfo.InvariantCulture);
-                double mt = double.Parse(parts[3], CultureInfo.InvariantCulture);
+                double tx = double.Parse(parts[2], CultureInfo.InvariantCulture);
+                double ty = double.Parse(parts[3], CultureInfo.InvariantCulture);
                 if (w < MinKeyW || h < MinKeyH) return;
                 b.Width = w;
                 b.Height = h;
-                b.Margin = new Thickness(ml, mt, b.Margin.Right, b.Margin.Bottom);
+                SetTransformXY(b, tx, ty);
+                b.Margin = new Thickness(0, 0, b.Margin.Right, b.Margin.Bottom);   // 左/上归零（位置=transform），保留右/下布局间距
             }
             catch
             {
