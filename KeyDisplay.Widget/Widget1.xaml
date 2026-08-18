@@ -1,4 +1,4 @@
-<Page
+﻿<Page
     x:Class="KeyDisplay.Widget1"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -66,13 +66,13 @@
                         <!-- 第三行 Shift Ctrl Alt -->
                         <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                             <Border x:Name="KeyShift" Width="68" Style="{StaticResource KeyBorder}">
-                                <TextBlock x:Name="KeyShiftText" Style="{StaticResource KeyText}" FontSize="13" Text="Shift"/>
+                                <TextBlock x:Name="KeyShiftText" Style="{StaticResource KeyText}" FontSize="13" Text="左Shift"/>
                             </Border>
                             <Border x:Name="KeyCtrl" Width="68" Style="{StaticResource KeyBorder}">
-                                <TextBlock x:Name="KeyCtrlText" Style="{StaticResource KeyText}" FontSize="13" Text="Ctrl"/>
+                                <TextBlock x:Name="KeyCtrlText" Style="{StaticResource KeyText}" FontSize="13" Text="左Ctrl"/>
                             </Border>
                             <Border x:Name="KeyAlt" Width="68" Style="{StaticResource KeyBorder}" Margin="0,0,0,0">
-                                <TextBlock x:Name="KeyAltText" Style="{StaticResource KeyText}" FontSize="13" Text="Alt"/>
+                                <TextBlock x:Name="KeyAltText" Style="{StaticResource KeyText}" FontSize="13" Text="左Alt"/>
                             </Border>
                         </StackPanel>
                         <!-- 第四行 空格（单独一行，标准键盘式底部空格） -->
@@ -84,20 +84,31 @@
                     </StackPanel>
                     <!-- 鼠标区 -->
                     <StackPanel Orientation="Vertical" Margin="16,0,0,0">
-                        <Border x:Name="MousePad" Width="80" Height="80" CornerRadius="8" BorderThickness="1" Tag="Pad">
-                            <Canvas x:Name="MousePadCanvas">
-                                <Ellipse x:Name="MouseDot" Width="10" Height="10"/>
-                            </Canvas>
-                        </Border>
+                        <StackPanel Orientation="Horizontal">
+                            <Border x:Name="MousePad" Width="80" Height="80" CornerRadius="8" BorderThickness="1" Tag="Pad">
+                                <Canvas x:Name="MousePadCanvas">
+                                    <Ellipse x:Name="MouseDot" Width="10" Height="10"/>
+                                </Canvas>
+                            </Border>
+                            <!-- 滚轮键（0.7.0）：鼠标垫右侧，滚轮上/滚轮下（companion 经 VK 0x07/0x08 点亮 150ms） -->
+                            <StackPanel Orientation="Vertical" Margin="6,0,0,0">
+                                <Border x:Name="MouseWheelUp" Width="36" Height="36" CornerRadius="6" BorderThickness="1" Margin="0,0,0,6">
+                                    <TextBlock x:Name="MouseWheelUpText" Style="{StaticResource KeyText}" FontSize="10" Text="滚轮上" TextWrapping="Wrap" TextAlignment="Center"/>
+                                </Border>
+                                <Border x:Name="MouseWheelDown" Width="36" Height="36" CornerRadius="6" BorderThickness="1" Margin="0,0,0,0">
+                                    <TextBlock x:Name="MouseWheelDownText" Style="{StaticResource KeyText}" FontSize="10" Text="滚轮下" TextWrapping="Wrap" TextAlignment="Center"/>
+                                </Border>
+                            </StackPanel>
+                        </StackPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                             <Border x:Name="MouseL" Width="36" Height="36" CornerRadius="6" BorderThickness="1" Margin="0,0,6,0">
-                                <TextBlock x:Name="MouseLText" Style="{StaticResource KeyText}" FontSize="12" Text="左"/>
+                                <TextBlock x:Name="MouseLText" Style="{StaticResource KeyText}" FontSize="12" Text="左键"/>
                             </Border>
                             <Border x:Name="MouseM" Width="36" Height="36" CornerRadius="6" BorderThickness="1" Margin="0,0,6,0">
-                                <TextBlock x:Name="MouseMText" Style="{StaticResource KeyText}" FontSize="12" Text="中"/>
+                                <TextBlock x:Name="MouseMText" Style="{StaticResource KeyText}" FontSize="12" Text="中键"/>
                             </Border>
                             <Border x:Name="MouseR" Width="36" Height="36" CornerRadius="6" BorderThickness="1" Margin="0,0,0,0">
-                                <TextBlock x:Name="MouseRText" Style="{StaticResource KeyText}" FontSize="12" Text="右"/>
+                                <TextBlock x:Name="MouseRText" Style="{StaticResource KeyText}" FontSize="12" Text="右键"/>
                             </Border>
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
@@ -153,7 +164,8 @@
                                 <TextBlock x:Name="SettingsOpacityLabel" Text="透明度" FontSize="13" VerticalAlignment="Center"/>
                                 <Slider x:Name="OpacitySlider" Minimum="10" Maximum="100" Value="100"
                                         Width="108" HorizontalAlignment="Right" VerticalAlignment="Center"
-                                        ValueChanged="OpacitySlider_Changed"/>
+                                        ValueChanged="OpacitySlider_Changed"
+                                        PointerCaptureLost="OpacitySlider_DragCompleted"/>
                             </Grid>
                             <!-- 鼠标垫显示/隐藏开关：仅切 Visibility（不删除，位置/尺寸/transform 保留） -->
                             <Grid Margin="0,12,0,0">
@@ -167,6 +179,103 @@
                                     Margin="0,12,0,0" Tapped="LockKey_Click">
                                 <TextBlock x:Name="LockKeyText" Text="自定义控件" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
                             </Border>
+                            <!-- 用户预设入口：主题预设 / 布局预设（样式与 LockKeyBtn 一致，并排两列等宽） -->
+                            <Grid Margin="0,8,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Border x:Name="ThemePresetBtn" Grid.Column="0" Height="26" CornerRadius="6" BorderThickness="1"
+                                        Tapped="ThemePreset_Click">
+                                    <TextBlock x:Name="ThemePresetBtnText" Text="主题预设" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border x:Name="LayoutPresetBtn" Grid.Column="1" Height="26" CornerRadius="6" BorderThickness="1"
+                                        Margin="8,0,0,0" Tapped="LayoutPreset_Click">
+                                    <TextBlock x:Name="LayoutPresetBtnText" Text="布局预设" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+                <!-- 主题预设子菜单覆盖层：设置菜单"主题预设"入口弹出；点遮罩/关闭收起（与 SettingsPanel 同级覆盖层，不嵌套） -->
+                <Grid x:Name="ThemePresetPanel" Grid.RowSpan="2" Visibility="Collapsed" Background="#40000000"
+                      Tapped="ThemePresetPanel_Tapped">
+                    <Border x:Name="ThemePresetMenu" Width="260" CornerRadius="8" BorderThickness="1"
+                            HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,8,44"
+                            Tapped="ThemePresetMenu_Tapped">
+                        <StackPanel Padding="12">
+                            <!-- 标题行：左侧「主题预设」 -->
+                            <Grid>
+                                <TextBlock x:Name="ThemePresetTitle" Text="主题预设" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            </Grid>
+                            <!-- 错误/状态提示：空名/重名/保存失败等，初始隐藏 -->
+                            <TextBlock x:Name="ThemePresetMsg" FontSize="11" Foreground="#FFFF5050"
+                                       Visibility="Collapsed" Margin="0,8,0,0"/>
+                            <!-- 预设列表容器：动态项由 C# 添加 -->
+                            <StackPanel x:Name="ThemePresetList" Margin="0,8,0,0"/>
+                            <!-- 添加预设按钮：点击展开输入行 -->
+                            <Border x:Name="ThemePresetAddBtn" Height="26" CornerRadius="6" BorderThickness="1"
+                                    Margin="0,10,0,0" Tapped="ThemePresetAdd_Click">
+                                <TextBlock x:Name="ThemePresetAddText" Text="添加预设" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
+                            </Border>
+                            <!-- 预设名输入行：初始隐藏，点"添加预设"展开 -->
+                            <Grid x:Name="ThemePresetNameRow" Visibility="Collapsed" Margin="0,8,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="ThemePresetNameInput" Grid.Column="0" FontSize="12" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                <Border x:Name="ThemePresetSaveBtn" Grid.Column="1" Height="26" CornerRadius="6" BorderThickness="1"
+                                        Margin="0,0,8,0" Padding="12,0,12,0" Tapped="ThemePresetSave_Click">
+                                    <TextBlock x:Name="ThemePresetSaveText" Text="保存" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border x:Name="ThemePresetCancelBtn" Grid.Column="2" Height="26" CornerRadius="6" BorderThickness="1"
+                                        Padding="12,0,12,0" Tapped="ThemePresetCancel_Click">
+                                    <TextBlock x:Name="ThemePresetCancelText" Text="取消" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+                <!-- 布局预设子菜单覆盖层：设置菜单"布局预设"入口弹出；点遮罩/关闭收起（与 SettingsPanel 同级覆盖层，不嵌套） -->
+                <Grid x:Name="LayoutPresetPanel" Grid.RowSpan="2" Visibility="Collapsed" Background="#40000000"
+                      Tapped="LayoutPresetPanel_Tapped">
+                    <Border x:Name="LayoutPresetMenu" Width="260" CornerRadius="8" BorderThickness="1"
+                            HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,8,44"
+                            Tapped="LayoutPresetMenu_Tapped">
+                        <StackPanel Padding="12">
+                            <!-- 标题行：左侧「布局预设」 -->
+                            <Grid>
+                                <TextBlock x:Name="LayoutPresetTitle" Text="布局预设" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            </Grid>
+                            <!-- 错误/状态提示：空名/重名/保存失败等，初始隐藏 -->
+                            <TextBlock x:Name="LayoutPresetMsg" FontSize="11" Foreground="#FFFF5050"
+                                       Visibility="Collapsed" Margin="0,8,0,0"/>
+                            <!-- 预设列表容器：动态项由 C# 添加 -->
+                            <StackPanel x:Name="LayoutPresetList" Margin="0,8,0,0"/>
+                            <!-- 添加布局预设按钮：点击展开输入行 -->
+                            <Border x:Name="LayoutPresetAddBtn" Height="26" CornerRadius="6" BorderThickness="1"
+                                    Margin="0,10,0,0" Tapped="LayoutPresetAdd_Click">
+                                <TextBlock x:Name="LayoutPresetAddText" Text="添加布局预设" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
+                            </Border>
+                            <!-- 预设名输入行：初始隐藏，点"添加布局预设"展开 -->
+                            <Grid x:Name="LayoutPresetNameRow" Visibility="Collapsed" Margin="0,8,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="LayoutPresetNameInput" Grid.Column="0" FontSize="12" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                <Border x:Name="LayoutPresetSaveBtn" Grid.Column="1" Height="26" CornerRadius="6" BorderThickness="1"
+                                        Margin="0,0,8,0" Padding="12,0,12,0" Tapped="LayoutPresetSave_Click">
+                                    <TextBlock x:Name="LayoutPresetSaveText" Text="保存" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border x:Name="LayoutPresetCancelBtn" Grid.Column="2" Height="26" CornerRadius="6" BorderThickness="1"
+                                        Padding="12,0,12,0" Tapped="LayoutPresetCancel_Click">
+                                    <TextBlock x:Name="LayoutPresetCancelText" Text="取消" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
                         </StackPanel>
                     </Border>
                 </Grid>
@@ -447,7 +556,7 @@
                                         <Border Width="44" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="左Ctrl" Tapped="AddKeyFromLayout_Click"><TextBlock Text="左Ctrl" FontSize="9" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
                                         <Border Width="44" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="左Win" Tapped="AddKeyFromLayout_Click"><TextBlock Text="左Win" FontSize="9" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
                                         <Border Width="44" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="左Alt" Tapped="AddKeyFromLayout_Click"><TextBlock Text="左Alt" FontSize="9" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
-                                        <Border Width="120" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="Space" Tapped="AddKeyFromLayout_Click"><TextBlock Text="Space" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="120" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="Space" Tapped="AddKeyFromLayout_Click"><TextBlock Text="空格" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
                                         <Border Width="44" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="右Alt" Tapped="AddKeyFromLayout_Click"><TextBlock Text="右Alt" FontSize="9" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
                                         <Border Width="44" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="右Win" Tapped="AddKeyFromLayout_Click"><TextBlock Text="右Win" FontSize="9" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
                                         <Border Width="44" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="Menu" Tapped="AddKeyFromLayout_Click"><TextBlock Text="Menu" FontSize="9" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
@@ -468,6 +577,16 @@
                                         <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="↓" Tapped="AddKeyFromLayout_Click"><TextBlock Text="↓" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
                                         <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="←" Tapped="AddKeyFromLayout_Click"><TextBlock Text="←" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
                                         <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="→" Tapped="AddKeyFromLayout_Click"><TextBlock Text="→" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                    </StackPanel>
+                                    <!-- 鼠标区：左键 右键 中键 侧上 侧下 滚轮上 滚轮下 -->
+                                    <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                        <Border Width="44" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="左键" Tapped="AddKeyFromLayout_Click"><TextBlock Text="左键" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="44" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="右键" Tapped="AddKeyFromLayout_Click"><TextBlock Text="右键" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="44" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="中键" Tapped="AddKeyFromLayout_Click"><TextBlock Text="中键" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="44" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="侧上" Tapped="AddKeyFromLayout_Click"><TextBlock Text="侧上" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="44" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="侧下" Tapped="AddKeyFromLayout_Click"><TextBlock Text="侧下" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="44" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="滚轮上" Tapped="AddKeyFromLayout_Click"><TextBlock Text="滚轮上" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                        <Border Width="44" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="滚轮下" Tapped="AddKeyFromLayout_Click"><TextBlock Text="滚轮下" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
                                     </StackPanel>
                                 </StackPanel>
                             </ScrollViewer>

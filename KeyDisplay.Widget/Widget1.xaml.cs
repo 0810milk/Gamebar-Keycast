@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Threading.Tasks;
 using Microsoft.Gaming.XboxGameBar;
+using Windows.Data.Json;
 using Windows.Foundation;
 using Windows.Storage;
 using Windows.System;
@@ -163,6 +165,35 @@ namespace KeyDisplay
         private Color? _lastPickColor;         // 拖动中最后取色（释放时固化用，避免依赖拖动中不更新的 hex 框）
         private int _lastPickMs;               // 拖动节流时间戳（Environment.TickCount，ms）
 
+        // ===================== 用户预设（0.7.0）：主题预设 / 布局预设 =====================
+        // 数据落点 %LOCALAPPDATA%\KeyDisplay\presets.json（companion 中转存储，重装不丢），
+        // 经命名管道 CMD|GET_PRESETS / CMD|PUT_PRESETS 全量读写（详见 docs/TASK-0.7.0-presets.md §3/§4.2）。
+        private readonly List<PresetEntry> _themePresets = new List<PresetEntry>();
+        private readonly List<PresetEntry> _layoutPresets = new List<PresetEntry>();
+
+        /// <summary>一条用户预设（内存表示；JSON 序列化见 BuildPresetsJson / ParsePresetsJson）</summary>
+        private sealed class PresetEntry
+        {
+            public string Name;         // 预设名（去重、≤20 字符、过滤非法字符）
+            public string Type;         // "theme" / "layout"
+            public string SavedAt;      // ISO 时间字符串（DateTime.Now.ToString("s")）
+            public string Theme;        // 主题预设：应用时的主题态 dark/gray/light/pink/blue/custom
+            public string[] Colors;     // 主题预设：8 个 hex（索引 = CustomKeys 顺序：panel/border/keyBg/keyFg/pressedBg/pressedFg/pad/dot）
+            public bool LayoutLocked;   // 布局预设：LayoutLocked
+            public int KeyOpacity;      // 布局预设：KeyOpacity_（0~100）
+            public bool PadVisible;     // 布局预设：PadVisible_
+            public Dictionary<string, string> Keys;        // 布局预设：Layout_<键名> → 原始值串（"w;h;tx;ty"）
+            public Dictionary<string, KeyPos> CustomKeys;  // 布局预设：自定义键名 → 位置/尺寸
+            public List<string> DeletedKeys;               // 布局预设：Deleted_<键名> 的键名列表
+        }
+
+        /// <summary>布局预设中的自定义键：pos="tx;ty"（transform 偏移），size="w;h"（整型）</summary>
+        private sealed class KeyPos
+        {
+            public string Pos;
+            public string Size;
+        }
+
         // ===================== 主题配色查询（数据驱动，扩展性）=====================
         // 未来加第六种颜色：新增一个 _xxxXxx 画刷字段 + 在 P()/各语义方法的 blue 参数后追加，或改写成按主题名查字典表即可
 
@@ -312,6 +343,7 @@ namespace KeyDisplay
             CompositionTarget.Rendering += OnRendering;
             _modeTimer.Start();
             _reader.Start();
+            LoadPresetsAsync();   // 启动拉取用户预设（companion 未就绪则静默降级，不影响其他功能）
             TryStartCompanion();
         }
 
@@ -557,6 +589,14 @@ namespace KeyDisplay
                 if (_mouse.TryGetValue("M", out mL)) { if (mL != _moveKey) SetKey(mL, m); }
                 if (_mouse.TryGetValue("X1", out mL)) { if (mL != _moveKey) SetKey(mL, x1); }
                 if (_mouse.TryGetValue("X2", out mL)) { if (mL != _moveKey) SetKey(mL, x2); }
+                // 滚轮键（0.7.0）：非 Mouse 掩码，从 VK 位图读（0x07=滚轮上 0x08=滚轮下，companion 滚动后点亮 150ms）
+                if (snap.ExtraKeys != null)
+                {
+                    bool wUp = ((snap.ExtraKeys[0] >> 7) & 1) != 0;      // VK 0x07
+                    bool wDown = ((snap.ExtraKeys[1] >> 0) & 1) != 0;    // VK 0x08
+                    if (_mouse.TryGetValue("WheelDown", out mL)) { if (mL != _moveKey) SetKey(mL, wDown); }
+                    if (_mouse.TryGetValue("WheelUp", out mL)) { if (mL != _moveKey) SetKey(mL, wUp); }
+                }
 
                 UpdatePadSize(snap.VsW, snap.VsH);
                 // 目标点：绝对屏幕坐标 → 垫面位置（点 = 屏幕的真实镜像）
@@ -799,21 +839,23 @@ namespace KeyDisplay
             SettingsPadText.Text = _padVisible ? "\u663e\u793a" : "\u9690\u85cf";   // 显示 / 隐藏
             LockSwitchText.Text = _layoutLocked ? "\u5f00" : "\u5173";   // 开 / 关（锁定菜单开关，与设置面板逻辑同步）
 
-            // 反色按钮（主题切换 + 鼠标垫开关）：深色主题=亮胶囊，浅色主题=暗胶囊
-            SettingsThemeBtn.Background = InvertKeyBgB();
+            // 主题切换 + 鼠标垫开关按钮：跟随按键底/按键文字色（0.7.0 修复：此前反色，
+            // 修改"按键底"颜色选项时这两个按钮不变色）
+            SettingsThemeBtn.Background = KeyBgB();
             SettingsThemeBtn.BorderBrush = BorderB();
-            SettingsThemeText.Foreground = InvertKeyFgB();
-            SettingsPadBtn.Background = InvertKeyBgB();
+            SettingsThemeText.Foreground = KeyFgB();
+            SettingsPadBtn.Background = KeyBgB();
             SettingsPadBtn.BorderBrush = BorderB();
-            SettingsPadText.Foreground = InvertKeyFgB();
+            SettingsPadText.Foreground = KeyFgB();
             // 透明度滑条：轨道/滑块用主题文字色与边框色
             OpacitySlider.Foreground = KeyFgB();
             OpacitySlider.Background = BorderB();
 
-            // 主题颜色子菜单：「自定义」按钮（反色胶囊）、菜单配色 + 8 行目标输入框/颜色盘按钮
-            SettingsCustomBtn.Background = InvertKeyBgB();
+            // 主题颜色子菜单：「自定义」按钮跟随按键底/按键文字色（0.7.0 修复：此前反色，
+            // 修改"按键底"颜色选项时不变色）、菜单配色 + 8 行目标输入框/颜色盘按钮
+            SettingsCustomBtn.Background = KeyBgB();
             SettingsCustomBtn.BorderBrush = BorderB();
-            (SettingsCustomBtn.Child as TextBlock).Foreground = InvertKeyFgB();
+            (SettingsCustomBtn.Child as TextBlock).Foreground = KeyFgB();
             ThemeColorMenu.Background = PanelB();
             ThemeColorMenu.BorderBrush = BorderB();
             PickerMenu.Background = PanelB();
@@ -864,6 +906,23 @@ namespace KeyDisplay
             SettingsBtnText.Foreground = KeyFgB();
 
             ApplyPickerColors();
+
+            // 预设入口按钮/子菜单配色随主题与调色同步（0.7.0 修复：此前仅打开预设菜单时才刷新）
+            ApplyPresetMenuColors();
+
+            // 主题颜色子菜单可见时，hex 编号与调色盘实时同步当前生效色（0.7.0 修复：
+            // 切换主题/应用预设/调色固化都会经过本方法，保证编号与实际配色永不同步失真）
+            if (ThemeColorPanel.Visibility == Visibility.Visible)
+            {
+                for (int k = 0; k < 8; k++)
+                {
+                    _syncing = true;
+                    SlotInput(k).Text = ToHex(GetSlotDisplayColor(k));
+                    _syncing = false;
+                }
+                if (_activeSlot >= 0 && PickerMenu.Visibility == Visibility.Visible)
+                    SyncPickerToColor(GetSlotDisplayColor(_activeSlot));
+            }
         }
 
         // 87 配列布局键配色：遍历 KeyPickerScroll 内容里所有带 Tag 的键 Border，随主题刷新（与 LockMenu 系一致）
@@ -1016,6 +1075,8 @@ namespace KeyDisplay
             ResetKeyLayout("MR", MouseR, 36, 36, new Thickness(0, 0, 0, 0));
             ResetKeyLayout("X1", MouseX1, 36, 36, new Thickness(0, 0, 6, 0));
             ResetKeyLayout("X2", MouseX2, 36, 36, new Thickness(0, 0, 0, 0));
+            ResetKeyLayout("WheelUp", MouseWheelUp, 36, 36, new Thickness(0, 0, 0, 0));
+            ResetKeyLayout("WheelDown", MouseWheelDown, 36, 36, new Thickness(0, 0, 0, 0));
             // 重置 = 恢复到刚安装时的样子：删除全部自定义添加的按键（字典/面板/持久化），默认键恢复初始布局。
             // 绝不触碰主题（_theme/_light 及任何配色）——重置只处理按键布局与自定义键。
             var deadNames = new List<string>();
@@ -1224,6 +1285,13 @@ namespace KeyDisplay
                 case "\u5de6Alt": return 0xA4;     // 左Alt
                 case "\u53f3Alt": return 0xA5;     // 右Alt
                 case "Menu": return 0x5D;
+                case "\u5de6\u952e": return 0x01;   // 左键 (VK_LBUTTON)
+                case "\u53f3\u952e": return 0x02;   // 右键 (VK_RBUTTON)
+                case "\u4e2d\u952e": return 0x04;   // 中键 (VK_MBUTTON)
+                case "\u4fa7\u4e0a": return 0x05;   // 侧上 (VK_XBUTTON1)
+                case "\u4fa7\u4e0b": return 0x06;   // 侧下 (VK_XBUTTON2)
+                case "\u6eda\u8f6e\u4e0a": return 0x07;   // 滚轮上
+                case "\u6eda\u8f6e\u4e0b": return 0x08;   // 滚轮下
             }
             return -1;   // 未识别键名（如"触摸板"）→ 越界，渲染循环视为未按下，绝不抛异常
         }
@@ -1341,6 +1409,16 @@ namespace KeyDisplay
         {
             _keyOpacity = e.NewValue;
             ApplicationData.Current.LocalSettings.Values["KeyOpacity_"] = (int)e.NewValue;
+            ApplyKeyOpacity();
+        }
+
+        // 滑条拖动结束兜底（0.7.0）：Game Bar widget 里 ValueChanged 可能不被合成环境可靠触发，
+        // 拖动完成强制从滑条当前值应用一次，保证 bar 内调整透明度真实生效（测试窗口同样安全）
+        private void OpacitySlider_DragCompleted(object sender, object e)
+        {
+            if (OpacitySlider == null) return;
+            _keyOpacity = OpacitySlider.Value;
+            try { ApplicationData.Current.LocalSettings.Values["KeyOpacity_"] = (int)Math.Round(OpacitySlider.Value); } catch { }
             ApplyKeyOpacity();
         }
 
@@ -1555,11 +1633,9 @@ namespace KeyDisplay
         // 设置菜单"自定义"按钮：切到自定义主题并打开「主题颜色」子菜单
         private void CustomTheme_Click(object sender, TappedRoutedEventArgs e)
         {
-            _theme = "custom";
-            RefreshCustomBrushes();
-            ApplyTheme();
-            ApplySettingsColors();
-            // 同步 8 个 hex 输入框为当前显示值（重启后 custom 值也能正确显示，而非初始 #FF000000）
+            // 打开主题颜色子菜单：只查看/编辑 custom 配置，【不切换当前主题配色】
+            // （0.7.0 修复：此前打开即 _theme="custom"+ApplyTheme()，从蓝色等主题点开会整体变黑）
+            // 同步 8 个 hex 输入框为当前生效色：custom 态显示自定义配置，预设主题显示该主题色值
             for (int k = 0; k < 8; k++)
             {
                 _syncing = true;
@@ -2614,6 +2690,7 @@ namespace KeyDisplay
             _keys["Shift"] = KeyShift; _keys["Ctrl"] = KeyCtrl; _keys["Alt"] = KeyAlt; _keys["Space"] = KeySpace;
             _mouse["L"] = MouseL; _mouse["M"] = MouseM; _mouse["MR"] = MouseR;   // MR：避免与键盘 R 的 Layout_R 冲突
             _mouse["X1"] = MouseX1; _mouse["X2"] = MouseX2;
+            _mouse["WheelUp"] = MouseWheelUp; _mouse["WheelDown"] = MouseWheelDown;   // 0.7.0 滚轮上/下（VK 0x07/0x08）
         }
 
         // 删除一个默认键（内置 _keys/_mouse）：字典移除 + 清 Layout_ 持久化 + 记录 Deleted_ + Collapsed（不销毁，便于重置恢复）
@@ -2725,6 +2802,725 @@ namespace KeyDisplay
             {
                 _padVisible = true;
                 MousePad.Visibility = Visibility.Visible;
+            }
+        }
+
+        // ===================== 用户预设（0.7.0）：菜单交互 =====================
+
+        // 设置菜单入口：主题预设 → 打开主题预设子菜单（两预设子菜单互斥）
+        private void ThemePreset_Click(object sender, TappedRoutedEventArgs e)
+        {
+            LayoutPresetPanel.Visibility = Visibility.Collapsed;
+            ApplyPresetMenuColors();
+            RenderThemePresets();
+            ThemePresetPanel.Visibility = Visibility.Visible;
+            e.Handled = true;
+            DiagLog("theme preset menu opened, count=" + _themePresets.Count);
+        }
+
+        // 设置菜单入口：布局预设 → 打开布局预设子菜单
+        private void LayoutPreset_Click(object sender, TappedRoutedEventArgs e)
+        {
+            ThemePresetPanel.Visibility = Visibility.Collapsed;
+            ApplyPresetMenuColors();
+            RenderLayoutPresets();
+            LayoutPresetPanel.Visibility = Visibility.Visible;
+            e.Handled = true;
+            DiagLog("layout preset menu opened, count=" + _layoutPresets.Count);
+        }
+
+        // 点遮罩收起（沿用 ThemeColorPanel_Tapped 的 OriginalSource 判定，点面板内不冒泡）
+        private void ThemePresetPanel_Tapped(object sender, TappedRoutedEventArgs e)
+        {
+            if (e.OriginalSource == ThemePresetPanel)
+            {
+                ThemePresetPanel.Visibility = Visibility.Collapsed;
+                DiagLog("theme preset closed by mask");
+            }
+        }
+
+        private void LayoutPresetPanel_Tapped(object sender, TappedRoutedEventArgs e)
+        {
+            if (e.OriginalSource == LayoutPresetPanel)
+            {
+                LayoutPresetPanel.Visibility = Visibility.Collapsed;
+                DiagLog("layout preset closed by mask");
+            }
+        }
+
+        // 菜单框内部点击：标记已处理，避免冒泡到遮罩触发收起（与 ThemeColorMenu_Tapped 同模式）
+        private void ThemePresetMenu_Tapped(object sender, TappedRoutedEventArgs e)
+        {
+            e.Handled = true;
+        }
+
+        private void LayoutPresetMenu_Tapped(object sender, TappedRoutedEventArgs e)
+        {
+            e.Handled = true;
+        }
+
+        // 添加预设：展开输入行并聚焦
+        private void ThemePresetAdd_Click(object sender, TappedRoutedEventArgs e)
+        {
+            ThemePresetNameRow.Visibility = Visibility.Visible;
+            ThemePresetMsg.Text = "";
+            ThemePresetMsg.Visibility = Visibility.Collapsed;
+            if (ThemePresetNameInput != null)
+            {
+                ThemePresetNameInput.Text = "";
+                ThemePresetNameInput.Focus(FocusState.Programmatic);
+            }
+            e.Handled = true;
+        }
+
+        private void LayoutPresetAdd_Click(object sender, TappedRoutedEventArgs e)
+        {
+            LayoutPresetNameRow.Visibility = Visibility.Visible;
+            LayoutPresetMsg.Text = "";
+            LayoutPresetMsg.Visibility = Visibility.Collapsed;
+            if (LayoutPresetNameInput != null)
+            {
+                LayoutPresetNameInput.Text = "";
+                LayoutPresetNameInput.Focus(FocusState.Programmatic);
+            }
+            e.Handled = true;
+        }
+
+        private void ThemePresetSave_Click(object sender, TappedRoutedEventArgs e)
+        {
+            SavePreset("theme", ThemePresetNameInput, ThemePresetMsg);
+            e.Handled = true;
+        }
+
+        private void LayoutPresetSave_Click(object sender, TappedRoutedEventArgs e)
+        {
+            SavePreset("layout", LayoutPresetNameInput, LayoutPresetMsg);
+            e.Handled = true;
+        }
+
+        private void ThemePresetCancel_Click(object sender, TappedRoutedEventArgs e)
+        {
+            ThemePresetNameRow.Visibility = Visibility.Collapsed;
+            ThemePresetMsg.Text = "";
+            ThemePresetMsg.Visibility = Visibility.Collapsed;
+            e.Handled = true;
+        }
+
+        private void LayoutPresetCancel_Click(object sender, TappedRoutedEventArgs e)
+        {
+            LayoutPresetNameRow.Visibility = Visibility.Collapsed;
+            LayoutPresetMsg.Text = "";
+            LayoutPresetMsg.Visibility = Visibility.Collapsed;
+            e.Handled = true;
+        }
+
+        // 保存预设共用逻辑：校验（空名/超长/非法字符/重名）→ 快照 → 入列 → 重渲染 → PUT_PRESETS 全量写回
+        private void SavePreset(string type, TextBox input, TextBlock msg)
+        {
+            string name = input != null ? input.Text.Trim() : "";
+            if (name.Length == 0) { ShowPresetMsg(msg, "请输入预设名"); return; }
+            if (name.Length > 20) { ShowPresetMsg(msg, "预设名不能超过 20 字符"); return; }
+            if (ContainsIllegalChar(name)) { ShowPresetMsg(msg, "预设名含非法字符"); return; }
+            var list = type == "theme" ? _themePresets : _layoutPresets;
+            foreach (var p in list)
+            {
+                if (p.Name == name) { ShowPresetMsg(msg, "已存在同名预设"); return; }
+            }
+            var preset = type == "theme" ? SaveThemePresetSnapshot(name) : SaveLayoutPresetSnapshot(name);
+            list.Add(preset);
+            if (type == "theme")
+            {
+                RenderThemePresets();
+                ThemePresetNameRow.Visibility = Visibility.Collapsed;
+            }
+            else
+            {
+                RenderLayoutPresets();
+                LayoutPresetNameRow.Visibility = Visibility.Collapsed;
+            }
+            ShowPresetMsg(msg, "");
+            PersistPresetsAsync();   // 全量写回（后台执行，不阻塞 UI）
+            DiagLog("preset saved: " + type + " / " + name);
+        }
+
+        // 过滤路径分隔符等非法字符（文档 §2.3：\ / : * ? " < > | 与控制字符）
+        private static bool ContainsIllegalChar(string name)
+        {
+            foreach (char c in name)
+            {
+                if (c == '\\' || c == '/' || c == ':' || c == '*' || c == '?' ||
+                    c == '"' || c == '<' || c == '>' || c == '|') return true;
+                if (char.IsControl(c)) return true;
+            }
+            return false;
+        }
+
+        private static void ShowPresetMsg(TextBlock msg, string text)
+        {
+            if (msg == null) return;
+            msg.Text = text;
+            msg.Visibility = string.IsNullOrEmpty(text) ? Visibility.Collapsed : Visibility.Visible;
+        }
+
+        // 列表项点击：Tag 路由 —— "THEME|名"/"LAYOUT|名"=应用，"DEL|theme|名"/"DEL|layout|名"=删除
+        private void PresetItem_Tapped(object sender, TappedRoutedEventArgs e)
+        {
+            var b = sender as Border;
+            if (b == null || b.Tag == null) return;
+            string tag = b.Tag.ToString();
+            if (tag.StartsWith("DEL|", StringComparison.Ordinal))
+            {
+                string[] parts = tag.Split('|');
+                if (parts.Length >= 3) DeletePreset(parts[1], parts[2]);
+                e.Handled = true;
+                return;
+            }
+            if (tag.StartsWith("THEME|", StringComparison.Ordinal))
+            {
+                string name = tag.Substring("THEME|".Length);
+                foreach (var p in _themePresets)
+                {
+                    if (p.Name == name) { ApplyThemePreset(p); break; }
+                }
+            }
+            else if (tag.StartsWith("LAYOUT|", StringComparison.Ordinal))
+            {
+                string name = tag.Substring("LAYOUT|".Length);
+                foreach (var p in _layoutPresets)
+                {
+                    if (p.Name == name) { ApplyLayoutPreset(p); break; }
+                }
+            }
+            e.Handled = true;
+        }
+
+        // 删除预设：移除内存列表 → 重渲染 → PUT_PRESETS 全量写回
+        private void DeletePreset(string type, string name)
+        {
+            var list = type == "theme" ? _themePresets : _layoutPresets;
+            int removed = list.RemoveAll(x => x.Name == name);
+            if (removed > 0)
+            {
+                if (type == "theme") RenderThemePresets(); else RenderLayoutPresets();
+                PersistPresetsAsync();
+                DiagLog("preset deleted: " + type + " / " + name);
+            }
+        }
+
+        // ===================== 用户预设（0.7.0）：列表渲染 =====================
+
+        private void RenderThemePresets()
+        {
+            RenderPresetList(ThemePresetList, _themePresets, "theme");
+        }
+
+        private void RenderLayoutPresets()
+        {
+            RenderPresetList(LayoutPresetList, _layoutPresets, "layout");
+        }
+
+        private void RenderPresetList(Panel list, List<PresetEntry> presets, string type)
+        {
+            if (list == null) return;
+            list.Children.Clear();
+            if (presets.Count == 0)
+            {
+                list.Children.Add(new TextBlock
+                {
+                    Text = "暂无预设",
+                    FontSize = 12,
+                    Foreground = KeyFgB(),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Margin = new Thickness(0, 10, 0, 10)
+                });
+                return;
+            }
+            foreach (var p in presets)
+            {
+                list.Children.Add(BuildPresetItem(p, type));
+            }
+        }
+
+        // 动态列表项：整行 Border（点击=应用，Tag="THEME|名"/"LAYOUT|名"）+ 右侧 × 删除 Border（Tag="DEL|type|名"）
+        private Border BuildPresetItem(PresetEntry p, string type)
+        {
+            var row = new Border
+            {
+                Height = 30,
+                CornerRadius = new CornerRadius(4),
+                BorderThickness = new Thickness(1),
+                BorderBrush = BorderB(),
+                Background = KeyBgB(),
+                Margin = new Thickness(0, 0, 0, 4),
+                Tag = (type == "theme" ? "THEME|" : "LAYOUT|") + p.Name
+            };
+            row.Tapped += PresetItem_Tapped;
+            var grid = new Grid();
+            grid.Children.Add(new TextBlock
+            {
+                Text = p.Name,
+                FontSize = 12,
+                Foreground = KeyFgB(),
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(8, 0, 0, 0),
+                TextTrimming = TextTrimming.CharacterEllipsis
+            });
+            var del = new Border
+            {
+                Width = 46,
+                Height = 22,
+                CornerRadius = new CornerRadius(3),
+                BorderThickness = new Thickness(1),
+                BorderBrush = BorderB(),
+                Background = KeyBgB(),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 4, 0),
+                Tag = "DEL|" + type + "|" + p.Name
+            };
+            del.Tapped += PresetItem_Tapped;
+            del.Child = new TextBlock
+            {
+                Text = "\u5220\u9664",   // 删除
+                FontSize = 11,
+                Foreground = KeyFgB(),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            grid.Children.Add(del);
+            row.Child = grid;
+            return row;
+        }
+
+        // ===================== 用户预设（0.7.0）：快照与应用 =====================
+
+        // 主题预设快照：读当前主题态 + 8 个槽位显示色（GetSlotDisplayColor = custom 键值或当前预设色）
+        private PresetEntry SaveThemePresetSnapshot(string name)
+        {
+            var p = new PresetEntry
+            {
+                Name = name,
+                Type = "theme",
+                SavedAt = DateTime.Now.ToString("s", CultureInfo.InvariantCulture),
+                Theme = _theme,
+                Colors = new string[8]
+            };
+            for (int k = 0; k < 8; k++)
+            {
+                p.Colors[k] = ToHex(GetSlotDisplayColor(k));
+            }
+            return p;
+        }
+
+        // 布局预设快照：先 SaveLayout() 保证 Layout_* 落盘为最新，再收集全部布局相关键
+        private PresetEntry SaveLayoutPresetSnapshot(string name)
+        {
+            SaveLayout();
+            var v = ApplicationData.Current.LocalSettings.Values;
+            var p = new PresetEntry
+            {
+                Name = name,
+                Type = "layout",
+                SavedAt = DateTime.Now.ToString("s", CultureInfo.InvariantCulture),
+                LayoutLocked = _layoutLocked,
+                KeyOpacity = (int)_keyOpacity,
+                PadVisible = _padVisible,
+                Keys = new Dictionary<string, string>(),
+                CustomKeys = new Dictionary<string, KeyPos>(),
+                DeletedKeys = new List<string>()
+            };
+            foreach (var kv in v)
+            {
+                if (kv.Key.StartsWith(LayoutPrefix, StringComparison.Ordinal) && kv.Value is string sv)
+                    p.Keys[kv.Key] = sv;
+                else if (kv.Key.StartsWith("Deleted_", StringComparison.Ordinal))
+                    p.DeletedKeys.Add(kv.Key.Substring("Deleted_".Length));
+            }
+            foreach (var kv in _customKeys)
+            {
+                string pos = v["CustomPos_" + kv.Key] as string;
+                p.CustomKeys[kv.Key] = new KeyPos
+                {
+                    Pos = string.IsNullOrEmpty(pos) ? "0;0" : pos,
+                    Size = ((int)kv.Value.Width) + ";" + ((int)kv.Value.Height)
+                };
+            }
+            return p;
+        }
+
+        // 应用主题预设：写 8 个 Custom* 键 + Theme 键 → 全量刷新配色（ApplyTheme 内部会写 Theme 持久化）
+        private void ApplyThemePreset(PresetEntry p)
+        {
+            if (p == null || string.IsNullOrEmpty(p.Theme)) return;
+            string theme = p.Theme;
+            if (theme != "dark" && theme != "gray" && theme != "light" && theme != "pink" && theme != "blue" && theme != "custom")
+                theme = "dark";
+            _theme = theme;
+            if (p.Colors != null)
+            {
+                for (int k = 0; k < 8 && k < p.Colors.Length; k++)
+                {
+                    if (string.IsNullOrEmpty(p.Colors[k])) continue;
+                    var c = ParseHex(p.Colors[k]);
+                    if (c.HasValue) SetCustomKey(k, c.Value);
+                }
+            }
+            RefreshCustomBrushes();
+            ApplyTheme();          // 内部写 LocalSettings["Theme"] 并刷新全部配色
+            ApplySettingsColors();
+            ApplyPresetMenuColors();
+            // 同步 8 个 hex 输入框为当前显示值（无论主题颜色菜单是否打开，保持与当前一致）
+            for (int k = 0; k < 8; k++)
+            {
+                _syncing = true;
+                SlotInput(k).Text = ToHex(GetSlotDisplayColor(k));
+                _syncing = false;
+            }
+            DiagLog("theme preset applied: " + p.Name + " theme=" + theme);
+        }
+
+        // 应用布局预设：写回全部相关 LocalSettings 键 → 重建按键 UI（先清空现有自定义键，再按预设恢复）
+        private void ApplyLayoutPreset(PresetEntry p)
+        {
+            if (p == null) return;
+            var v = ApplicationData.Current.LocalSettings.Values;
+            try
+            {
+                // 0) 清理拖拽/移动/悬停状态（避免重建时残留高亮/光标/参考线）
+                ClearHover();
+                if (_moveKey != null) { EndMoveStyle(_moveKey); _moveKey = null; }
+                _dragKey = null;
+                _dragMode = null;
+                CancelLongPress();
+                HideSnapLines();
+
+                // 1) 移除现有全部自定义键 UI（参考 PerformLayoutReset 的清理路径）
+                var deadNames = new List<string>();
+                foreach (var kv in _customKeys) deadNames.Add(kv.Key);
+                foreach (var nm in deadNames)
+                {
+                    Border cb;
+                    if (_customKeys.TryGetValue(nm, out cb))
+                    {
+                        _customKeys.Remove(nm);
+                        CustomKeysPanel.Children.Remove(cb);
+                    }
+                }
+                if (_customKeys.Count == 0) CustomKeysPanel.Visibility = Visibility.Collapsed;
+
+                // 2) 清空布局/自定义/删除持久化（全量重建，防止预设之外残留）
+                var rmKeys = new List<string>();
+                foreach (var kv in v)
+                {
+                    if (kv.Key.StartsWith(LayoutPrefix, StringComparison.Ordinal) ||
+                        kv.Key.StartsWith("Custom_", StringComparison.Ordinal) ||
+                        kv.Key.StartsWith("CustomPos_", StringComparison.Ordinal) ||
+                        kv.Key.StartsWith("Deleted_", StringComparison.Ordinal))
+                        rmKeys.Add(kv.Key);
+                }
+                foreach (var k in rmKeys) v.Remove(k);
+
+                // 3) 写回预设内容
+                if (p.Keys != null)
+                    foreach (var kv in p.Keys)
+                        if (kv.Value != null) v[kv.Key] = kv.Value;
+                if (p.CustomKeys != null)
+                    foreach (var kv in p.CustomKeys)
+                    {
+                        v["Custom_" + kv.Key] = "1";
+                        v["CustomPos_" + kv.Key] = string.IsNullOrEmpty(kv.Value.Pos) ? "0;0" : kv.Value.Pos;
+                    }
+                if (p.DeletedKeys != null)
+                    foreach (var nm in p.DeletedKeys)
+                        if (!string.IsNullOrEmpty(nm)) v["Deleted_" + nm] = 1;
+                v["LayoutLocked"] = p.LayoutLocked;
+                _layoutLocked = p.LayoutLocked;
+                int opacity = Math.Max(10, Math.Min(100, p.KeyOpacity));
+                v["KeyOpacity_"] = opacity;
+                _keyOpacity = opacity;
+                v["PadVisible_"] = p.PadVisible ? 1 : 0;
+
+                // 4) 重建 UI（复用启动恢复路径，顺序与构造函数一致：登记默认键 → 布局 → 删除 → 鼠标垫可见 → 自定义键）
+                RegisterDefaultKeys();
+                RestoreLayout();
+                RestoreDeletions();
+                RestorePadVisibility();
+                RestoreCustomKeys();
+                if (OpacitySlider != null) OpacitySlider.Value = _keyOpacity;
+                ApplyKeyOpacity();
+                ApplySettingsColors();
+                ApplyPresetMenuColors();
+                DiagLog("layout preset applied: " + p.Name + " keys=" + (p.Keys != null ? p.Keys.Count : 0)
+                        + " custom=" + (p.CustomKeys != null ? p.CustomKeys.Count : 0)
+                        + " deleted=" + (p.DeletedKeys != null ? p.DeletedKeys.Count : 0));
+            }
+            catch (Exception ex)
+            {
+                DiagLog("layout preset apply fail: " + ex.Message);
+            }
+        }
+
+        // ===================== 用户预设（0.7.0）：JSON 序列化（Windows.Data.Json，无第三方库）=====================
+
+        // 组装 presets.json 全文（结构见文档 §3.3：version + themePresets[] + layoutPresets[]）
+        private string BuildPresetsJson()
+        {
+            var root = new JsonObject();
+            root.SetNamedValue("version", JsonValue.CreateNumberValue(1));
+            var themes = new JsonArray();
+            foreach (var p in _themePresets) themes.Add(ThemePresetToJson(p));
+            root.SetNamedValue("themePresets", themes);
+            var layouts = new JsonArray();
+            foreach (var p in _layoutPresets) layouts.Add(LayoutPresetToJson(p));
+            root.SetNamedValue("layoutPresets", layouts);
+            return root.Stringify();
+        }
+
+        private static JsonObject ThemePresetToJson(PresetEntry p)
+        {
+            var data = new JsonObject();
+            data.SetNamedValue("theme", JsonValue.CreateStringValue(p.Theme ?? "dark"));
+            var colors = new JsonObject();
+            string[] keys = { "panel", "border", "keyBg", "keyFg", "pressedBg", "pressedFg", "pad", "dot" };
+            for (int k = 0; k < 8; k++)
+            {
+                colors.SetNamedValue(keys[k],
+                    JsonValue.CreateStringValue(p.Colors != null && k < p.Colors.Length && p.Colors[k] != null ? p.Colors[k] : ""));
+            }
+            data.SetNamedValue("colors", colors);
+            var o = new JsonObject();
+            o.SetNamedValue("name", JsonValue.CreateStringValue(p.Name ?? ""));
+            o.SetNamedValue("type", JsonValue.CreateStringValue("theme"));
+            o.SetNamedValue("savedAt", JsonValue.CreateStringValue(p.SavedAt ?? ""));
+            o.SetNamedValue("data", data);
+            return o;
+        }
+
+        private static JsonObject LayoutPresetToJson(PresetEntry p)
+        {
+            var data = new JsonObject();
+            data.SetNamedValue("layoutLocked", JsonValue.CreateBooleanValue(p.LayoutLocked));
+            data.SetNamedValue("keyOpacity", JsonValue.CreateNumberValue(p.KeyOpacity));
+            data.SetNamedValue("padVisible", JsonValue.CreateBooleanValue(p.PadVisible));
+            var keys = new JsonObject();
+            if (p.Keys != null)
+                foreach (var kv in p.Keys) keys.SetNamedValue(kv.Key, JsonValue.CreateStringValue(kv.Value ?? ""));
+            data.SetNamedValue("keys", keys);
+            var cks = new JsonObject();
+            if (p.CustomKeys != null)
+                foreach (var kv in p.CustomKeys)
+                {
+                    var pos = new JsonObject();
+                    pos.SetNamedValue("pos", JsonValue.CreateStringValue(kv.Value.Pos ?? "0;0"));
+                    pos.SetNamedValue("size", JsonValue.CreateStringValue(kv.Value.Size ?? ""));
+                    cks.SetNamedValue(kv.Key, pos);
+                }
+            data.SetNamedValue("customKeys", cks);
+            var del = new JsonArray();
+            if (p.DeletedKeys != null)
+                foreach (var d in p.DeletedKeys) del.Add(JsonValue.CreateStringValue(d));
+            data.SetNamedValue("deletedKeys", del);
+            var o = new JsonObject();
+            o.SetNamedValue("name", JsonValue.CreateStringValue(p.Name ?? ""));
+            o.SetNamedValue("type", JsonValue.CreateStringValue("layout"));
+            o.SetNamedValue("savedAt", JsonValue.CreateStringValue(p.SavedAt ?? ""));
+            o.SetNamedValue("data", data);
+            return o;
+        }
+
+        // 解析 presets.json 全文填充 _themePresets/_layoutPresets；失败静默清空（不影响其他功能）
+        private void ParsePresetsJson(string json)
+        {
+            try
+            {
+                var root = JsonObject.Parse(json);
+                _themePresets.Clear();
+                _layoutPresets.Clear();
+                var ta = root.GetNamedArray("themePresets");
+                foreach (var item in ta)
+                {
+                    var p = ParseThemePreset(item.GetObject());
+                    if (p != null && !string.IsNullOrEmpty(p.Name)) _themePresets.Add(p);
+                }
+                var la = root.GetNamedArray("layoutPresets");
+                foreach (var item in la)
+                {
+                    var p = ParseLayoutPreset(item.GetObject());
+                    if (p != null && !string.IsNullOrEmpty(p.Name)) _layoutPresets.Add(p);
+                }
+                DiagLog("presets loaded: theme=" + _themePresets.Count + " layout=" + _layoutPresets.Count);
+            }
+            catch
+            {
+                _themePresets.Clear();
+                _layoutPresets.Clear();
+            }
+        }
+
+        private static PresetEntry ParseThemePreset(JsonObject o)
+        {
+            try
+            {
+                var d = o.GetNamedObject("data");
+                var p = new PresetEntry
+                {
+                    Name = o.GetNamedString("name", ""),
+                    Type = "theme",
+                    SavedAt = o.GetNamedString("savedAt", ""),
+                    Theme = d.GetNamedString("theme", "dark"),
+                    Colors = new string[8]
+                };
+                var colors = d.GetNamedObject("colors");
+                string[] keys = { "panel", "border", "keyBg", "keyFg", "pressedBg", "pressedFg", "pad", "dot" };
+                for (int k = 0; k < 8; k++) p.Colors[k] = colors.GetNamedString(keys[k], "");
+                return p;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static PresetEntry ParseLayoutPreset(JsonObject o)
+        {
+            try
+            {
+                var d = o.GetNamedObject("data");
+                var p = new PresetEntry
+                {
+                    Name = o.GetNamedString("name", ""),
+                    Type = "layout",
+                    SavedAt = o.GetNamedString("savedAt", ""),
+                    LayoutLocked = d.GetNamedBoolean("layoutLocked", true),
+                    KeyOpacity = Math.Max(10, Math.Min(100, (int)Math.Round(d.GetNamedNumber("keyOpacity", 100.0)))),
+                    PadVisible = d.GetNamedBoolean("padVisible", true),
+                    Keys = new Dictionary<string, string>(),
+                    CustomKeys = new Dictionary<string, KeyPos>(),
+                    DeletedKeys = new List<string>()
+                };
+                var keys = d.GetNamedObject("keys");
+                foreach (var kv in keys) p.Keys[kv.Key] = kv.Value.GetString();
+                var cks = d.GetNamedObject("customKeys");
+                foreach (var kv in cks)
+                {
+                    var ck = kv.Value.GetObject();
+                    p.CustomKeys[kv.Key] = new KeyPos
+                    {
+                        Pos = ck.GetNamedString("pos", "0;0"),
+                        Size = ck.GetNamedString("size", "")
+                    };
+                }
+                var del = d.GetNamedArray("deletedKeys");
+                foreach (var item in del) p.DeletedKeys.Add(item.GetString());
+                return p;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        // ===================== 用户预设（0.7.0）：管道读写 / 启动拉取 =====================
+
+        // 启动拉取预设列表（OnLoaded 末尾调用）：companion 未就绪时重试数次，失败静默降级
+        private async void LoadPresetsAsync()
+        {
+            for (int attempt = 0; attempt < 5; attempt++)
+            {
+                try
+                {
+                    // 不 ConfigureAwait(false)：续体回 UI 线程，便于解析后按需刷新已打开菜单
+                    string resp = await _reader.RequestPresetAsync("GET_PRESETS", "", 2000);
+                    if (resp == null)
+                    {
+                        if (attempt < 4) await Task.Delay(800);
+                        continue;
+                    }
+                    if (resp.StartsWith("DATA|", StringComparison.Ordinal)) ParsePresetsJson(resp.Substring(5));
+                    else if (resp.StartsWith("DATA:", StringComparison.Ordinal)) ParsePresetsJson(resp.Substring(5));
+                    else DiagLog("presets load resp: " + resp);
+                    // 若预设菜单已打开则刷新列表（加载通常先于用户操作完成，此处兜底）
+                    if (ThemePresetPanel != null && ThemePresetPanel.Visibility == Visibility.Visible) RenderThemePresets();
+                    if (LayoutPresetPanel != null && LayoutPresetPanel.Visibility == Visibility.Visible) RenderLayoutPresets();
+                    return;
+                }
+                catch
+                {
+                }
+            }
+            DiagLog("presets load: unavailable after retries");
+        }
+
+        // 保存/删除后全量写回 presets.json（PUT_PRESETS；失败仅记日志，不影响本地已应用状态）
+        private async void PersistPresetsAsync()
+        {
+            try
+            {
+                string json = BuildPresetsJson();
+                string resp = await _reader.RequestPresetAsync("PUT_PRESETS", json, 2000).ConfigureAwait(false);
+                DiagLog("presets persist resp: " + (resp ?? "<null>"));
+            }
+            catch
+            {
+            }
+        }
+
+        // ===================== 用户预设（0.7.0）：子菜单配色 =====================
+
+        // 预设子菜单统一配色（在打开预设菜单/应用预设后调用）：
+        // 设置菜单两个入口按钮（与 LockKeyBtn 同风格）+ 面板内视觉树递归着色（外层菜单框=面板色，其余=按键配色）
+        private void ApplyPresetMenuColors()
+        {
+            try
+            {
+                if (ThemePresetBtn != null)
+                {
+                    ThemePresetBtn.Background = KeyBgB();
+                    ThemePresetBtn.BorderBrush = BorderB();
+                    var t = ThemePresetBtn.Child as TextBlock;
+                    if (t != null) t.Foreground = KeyFgB();
+                }
+                if (LayoutPresetBtn != null)
+                {
+                    LayoutPresetBtn.Background = KeyBgB();
+                    LayoutPresetBtn.BorderBrush = BorderB();
+                    var t = LayoutPresetBtn.Child as TextBlock;
+                    if (t != null) t.Foreground = KeyFgB();
+                }
+                bool styled = false;
+                if (ThemePresetPanel != null) ColorPresetTree(ThemePresetPanel, ref styled);
+                styled = false;
+                if (LayoutPresetPanel != null) ColorPresetTree(LayoutPresetPanel, ref styled);
+            }
+            catch
+            {
+            }
+        }
+
+        private void ColorPresetTree(DependencyObject parent, ref bool menuStyled)
+        {
+            int count = VisualTreeHelper.GetChildrenCount(parent);
+            for (int i = 0; i < count; i++)
+            {
+                var child = VisualTreeHelper.GetChild(parent, i);
+                var b = child as Border;
+                if (b != null)
+                {
+                    // 遍历序第一个 Border = 菜单框（面板色），其余 Border（按钮/列表项）= 按键配色
+                    if (!menuStyled) { b.Background = PanelB(); menuStyled = true; }
+                    else b.Background = KeyBgB();
+                    b.BorderBrush = BorderB();
+                }
+                var tb = child as TextBlock;
+                if (tb != null) tb.Foreground = KeyFgB();
+                var input = child as TextBox;
+                if (input != null)
+                {
+                    input.Foreground = KeyFgB();
+                    input.BorderBrush = BorderB();
+                    continue;   // 不深入 TextBox 模板内部（避免误改模板部件）
+                }
+                ColorPresetTree(child, ref menuStyled);
             }
         }
 

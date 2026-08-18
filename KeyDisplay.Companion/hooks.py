@@ -32,6 +32,7 @@ WM_MBUTTONDOWN = 0x0207
 WM_MBUTTONUP = 0x0208
 WM_XBUTTONDOWN = 0x020B
 WM_XBUTTONUP = 0x020C
+WM_MOUSEWHEEL = 0x020A
 
 LLKHF_UP = 0x80
 
@@ -142,6 +143,15 @@ MOUSE_MSGS = {
     "R": (WM_RBUTTONDOWN, WM_RBUTTONUP),
     "M": (WM_MBUTTONDOWN, WM_MBUTTONUP),
 }
+
+# 滚轮自定义 VK（widget 按 0x07=滚轮上 / 0x08=滚轮下 显示）。
+# 注意：非真实键码，0x08 同时是 VK_BACK；滚轮位是瞬时事件，由
+# expire_wheel() 维护，reconcile 的 0..255 真实键码校准必须跳过这两位。
+WHEEL_UP_VK = 0x07
+WHEEL_DOWN_VK = 0x08
+WHEEL_HOLD = 0.15       # 滚轮瞬时点亮保持时长（秒）
+_wheel_up_ts = 0.0      # 最近一次上滚时间（0=从未点亮）
+_wheel_down_ts = 0.0    # 最近一次下滚时间（0=从未点亮）
 
 # --- DLL 与结构体 ----------------------------------------------------------
 user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -297,22 +307,54 @@ def _keyboard_proc(n_code, w_param, l_param):
 
 def _mouse_proc(n_code, w_param, l_param):
     # 坐标不再由钩子维护：桌面（光标可见）由 60Hz GetCursorPos 轮询校准，
-    # 游戏（光标隐藏）由 RAWINPUT 增量累计。钩子只负责鼠标按键采集。
+    # 游戏（光标隐藏）由 RAWINPUT 增量累计。钩子只负责鼠标按键/滚轮采集。
     if n_code >= 0:
         ms = ctypes.cast(l_param, ctypes.POINTER(MSLLHOOKSTRUCT)).contents
         for name, (down_msg, up_msg) in MOUSE_MSGS.items():
             if w_param == down_msg:
                 _state.set_mouse(name, True)
+                _state.set_vk(MOUSE_VK[name], True)
                 break
             if w_param == up_msg:
                 _state.set_mouse(name, False)
+                _state.set_vk(MOUSE_VK[name], False)
                 break
         if w_param == WM_XBUTTONDOWN or w_param == WM_XBUTTONUP:
             xbtn = (ms.mouseData >> 16) & 0xFFFF
             name = "X1" if xbtn == 1 else ("X2" if xbtn == 2 else None)
             if name:
-                _state.set_mouse(name, w_param == WM_XBUTTONDOWN)
+                down = w_param == WM_XBUTTONDOWN
+                _state.set_mouse(name, down)
+                _state.set_vk(MOUSE_VK[name], down)
+        if w_param == WM_MOUSEWHEEL:
+            # mouseData 高 16 位为有符号滚轮增量：正=上滚 负=下滚；单事件两方向互斥
+            global _wheel_up_ts, _wheel_down_ts
+            delta = (ms.mouseData >> 16) & 0xFFFF
+            if delta >= 0x8000:
+                delta -= 0x10000
+            if delta > 0:
+                _state.set_vk(WHEEL_UP_VK, True)
+                _wheel_up_ts = time.monotonic()
+            elif delta < 0:
+                _state.set_vk(WHEEL_DOWN_VK, True)
+                _wheel_down_ts = time.monotonic()
     return user32.CallNextHookEx(None, n_code, w_param, l_param)
+
+
+def expire_wheel():
+    """滚轮瞬时点亮自动熄灭：点亮超过 WHEEL_HOLD 秒后复位对应 VK 位。
+
+    由 60Hz 推送循环每帧调用；时间戳为 0（从未点亮）时直接跳过，
+    无副作用。
+    """
+    global _wheel_up_ts, _wheel_down_ts
+    now = time.monotonic()
+    if _wheel_up_ts and now - _wheel_up_ts > WHEEL_HOLD:
+        _state.set_vk(WHEEL_UP_VK, False)
+        _wheel_up_ts = 0.0
+    if _wheel_down_ts and now - _wheel_down_ts > WHEEL_HOLD:
+        _state.set_vk(WHEEL_DOWN_VK, False)
+        _wheel_down_ts = 0.0
 
 
 def _handle_raw_input(l_param):
@@ -399,6 +441,10 @@ def reconcile(state):
     for name, vk in MOUSE_VK.items():
         state.set_mouse(name, _get_async_key_state(vk))
     for vk in range(256):
+        if vk == WHEEL_UP_VK or vk == WHEEL_DOWN_VK:
+            # 滚轮位是瞬时事件（0x07/0x08 非真实键码，0x08 还撞 VK_BACK），
+            # 由 expire_wheel() 按时间戳维护，不能用真实键码状态覆盖
+            continue
         state.set_vk(vk, _get_async_key_state(vk))
 
 

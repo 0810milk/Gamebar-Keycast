@@ -3,15 +3,19 @@
 - 管道名 \\\\.\\pipe\\KeyDisplayState
 - SDDL 授权：Everyone + 当前用户 + 可选 UWP 包 SID（来自 packageFamilyName）
 - 使用重叠 I/O 连接，支持优雅退出
+- 双工请求/应答：客户端可发 CMD|GET_PRESETS / CMD|PUT_PRESETS，应答 RESP|*
+  （STATE 帧推送逻辑与字节布局不变；读线程与推送线程互不阻塞）
 """
 import ctypes
 import ctypes.wintypes as wt
+import json
 import threading
 import time
 
 import debuglog
 import hooks
-from hooks import reconcile, sync_mouse_position, raw_stats
+import presets
+from hooks import reconcile, sync_mouse_position, raw_stats, expire_wheel
 from state import SNAPSHOT_SIZE
 
 
@@ -30,7 +34,9 @@ PIPE_READMODE_MESSAGE = 0x2
 PIPE_WAIT = 0x0
 PIPE_UNLIMITED_INSTANCES = 255
 BUFFER_SIZE = 1024
+MAX_MSG_SIZE = 256 * 1024  # 客户端 CMD 请求帧缓冲上限（presets.json 全文）
 ERROR_IO_PENDING = 997
+ERROR_MORE_DATA = 234
 ERROR_PIPE_CONNECTED = 535
 ERROR_PIPE_BUSY = 231
 INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
@@ -110,6 +116,25 @@ def _make_pipe(sec_attr):
     return handle
 
 
+def _parse_cmd(raw):
+    """解析客户端 CMD 帧 → ("GET_PRESETS", None) / ("PUT_PRESETS", payload) / (None, None)。
+
+    非 "CMD|" 前缀内容（二进制 KDSP 等异常数据）一律返回 (None, None) 表示忽略。
+    """
+    try:
+        text = raw.decode("utf-8", errors="replace")
+    except Exception:
+        return (None, None)
+    if not text.startswith("CMD|"):
+        return (None, None)
+    rest = text[4:]
+    if rest == "GET_PRESETS":
+        return ("GET_PRESETS", None)
+    if rest.startswith("PUT_PRESETS|"):
+        return ("PUT_PRESETS", rest[len("PUT_PRESETS|"):])
+    return (None, None)
+
+
 class PipeServer:
     def __init__(self, state, stop_event, package_family_name=None, fps=240):
         self._state = state
@@ -179,6 +204,9 @@ class PipeServer:
                                        wt.DWORD, ctypes.POINTER(wt.DWORD), ctypes.c_void_p]
         kernel32.WriteFile.restype = wt.BOOL
         debuglog.log("[pipe] client connected")
+        # 读线程：处理客户端 CMD 请求并应答（管道已 PIPE_ACCESS_DUPLEX），
+        # 与下方 STATE 推送线程互不阻塞；STATE 帧推送逻辑与字节布局一律不动
+        threading.Thread(target=self._read_loop, args=(handle,), daemon=True).start()
         try:
             self._pump_loop(handle)
         except Exception as exc:  # noqa: BLE001 泵线程异常必须落盘，否则连接静默抖动
@@ -201,6 +229,8 @@ class PipeServer:
             self._state.vh = user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
             # 桌面（光标可见）坐标的 60Hz 校准；隐藏时坐标由 RAWINPUT 增量维护
             sync_mouse_position(self._state)
+            # 滚轮瞬时点亮自动熄灭（0x07/0x08 位）
+            expire_wheel()
             blob = self._state.serialize()
             self._state.seq += 1
             written = wt.DWORD()
@@ -229,6 +259,93 @@ class PipeServer:
                 summary_at = now
                 frames = 0
             time.sleep(self._interval)
+
+    def _read_loop(self, handle):
+        """读线程：阻塞等待客户端 CMD 请求帧并应答；与 STATE 推送互不阻塞。
+
+        管道为 message 模式 + 重叠句柄，读用 OVERLAPPED 事件等待；
+        客户端断开 / 停止时退出。任何异常只落日志，不影响推送线程。
+        """
+        try:
+            self._read_loop_inner(handle)
+        except Exception as exc:  # noqa: BLE001
+            debuglog.log("[pipe] read loop error: %s: %s"
+                         % (type(exc).__name__, exc))
+
+    def _read_loop_inner(self, handle):
+        kernel32.ReadFile.argtypes = [ctypes.c_void_p, ctypes.c_void_p, wt.DWORD,
+                                      ctypes.POINTER(wt.DWORD), ctypes.c_void_p]
+        kernel32.ReadFile.restype = wt.BOOL
+        buf = ctypes.create_string_buffer(MAX_MSG_SIZE)
+        while not self._stop.is_set():
+            ov = OVERLAPPED()
+            ov.hEvent = kernel32.CreateEventW(None, True, False, None)
+            if not ov.hEvent:
+                return
+            read = wt.DWORD()
+            ok = kernel32.ReadFile(handle, buf, MAX_MSG_SIZE,
+                                   ctypes.byref(read), ctypes.byref(ov))
+            if not ok:
+                err = ctypes.get_last_error()
+                if err == ERROR_IO_PENDING:
+                    # 等待读完成，期间每 100ms 检查一次停止信号
+                    while not self._stop.is_set():
+                        if kernel32.WaitForSingleObject(ov.hEvent, 100) == 0:
+                            break
+                    got = wt.DWORD()
+                    success = kernel32.GetOverlappedResult(
+                        handle, ctypes.byref(ov), ctypes.byref(got), False)
+                    kernel32.CloseHandle(ov.hEvent)
+                    if self._stop.is_set() or not success:
+                        return  # 停止或客户端断开
+                    read.value = got.value
+                elif err == ERROR_MORE_DATA:
+                    # 单条消息超过缓冲上限：剩余部分被管道丢弃，忽略本条
+                    kernel32.CloseHandle(ov.hEvent)
+                    debuglog.log("[pipe] client message exceeds %d bytes, "
+                                 "dropped" % MAX_MSG_SIZE)
+                    continue
+                else:
+                    kernel32.CloseHandle(ov.hEvent)
+                    return  # 管道断开（客户端退出/断开）
+            else:
+                kernel32.CloseHandle(ov.hEvent)
+            data = buf.raw[:read.value]
+            if data.startswith(b"CMD|"):
+                self._handle_cmd(handle, data)
+
+    def _handle_cmd(self, handle, raw):
+        """处理一条 CMD 请求帧并写应答；presets 异常只回 RESP|ERR，进程不崩溃。"""
+        kind, payload = _parse_cmd(raw)
+        if kind is None:
+            return  # 未知 CMD / 非文本内容 → 忽略
+        try:
+            if kind == "GET_PRESETS":
+                obj = presets.load()
+                self._send_reply(handle, "RESP|DATA|" + json.dumps(
+                    obj, ensure_ascii=False))
+            elif kind == "PUT_PRESETS":
+                obj = json.loads(payload)
+                if not isinstance(obj, dict):
+                    raise ValueError("presets 数据必须是 JSON 对象")
+                presets.save(obj)
+                self._send_reply(handle, "RESP|OK")
+        except Exception as exc:  # noqa: BLE001
+            debuglog.log("[pipe] cmd error: %s: %s" % (type(exc).__name__, exc))
+            self._send_reply(handle, "RESP|ERR|%s" % exc)
+
+    def _send_reply(self, handle, text):
+        """用与 STATE 帧相同的 WriteFile 机制写应答帧（message 模式，UTF-8）。"""
+        try:
+            blob = text.encode("utf-8")
+            written = wt.DWORD()
+            buf = ctypes.create_string_buffer(blob)
+            if not kernel32.WriteFile(handle, buf, len(blob),
+                                      ctypes.byref(written), None):
+                debuglog.log("[pipe] reply write failed err=%d"
+                             % ctypes.get_last_error())
+        except Exception as exc:  # noqa: BLE001
+            debuglog.log("[pipe] reply write error: %s" % exc)
 
 
 class StopFlag:

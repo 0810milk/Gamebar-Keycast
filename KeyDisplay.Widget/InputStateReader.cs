@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Win32.SafeHandles;
@@ -35,9 +36,19 @@ namespace KeyDisplay
     {
         public event EventHandler<InputSnapshot> Snapshot;
 
+        // 预设协议（0.7.0）应答事件：读循环线程触发，参数 = RESP 帧体（"OK" / "ERR|<msg>" / "DATA|<json>"）
+        public event EventHandler<string> PresetResponse;
+
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
         private Task _task;
         private int _failCount;
+
+        // 预设请求/应答（0.7.0）：应答由读循环线程经 PresetResponse 回调，请求间用 _requestLock 互斥（防应答错配）
+        private readonly SemaphoreSlim _requestLock = new SemaphoreSlim(1, 1);
+        private volatile bool _connected;          // 当前是否已连上管道（未连时写请求直接返回 null）
+        private FileStream _stream;                // 当前连接的读写流（读循环维护，写请求经它发送）
+        private const int MsgBufSize = 65536;      // 单次读缓冲上限（状态帧 36/68B；RESP 按 Peek 实际长度读取）
+        private const int MaxResponseBytes = 2 * 1024 * 1024;   // RESP 应答长度上限（2MB，防异常消息无限读）
 
         public void Start()
         {
@@ -56,6 +67,52 @@ namespace KeyDisplay
             _cts.Dispose();
         }
 
+        /// <summary>
+        /// 发送 CMD 请求帧并等待应答（0.7.0 预设协议）。与快照读取共用同一管道：
+        /// 写 CMD 帧、应答由读循环线程经 PresetResponse 事件回调（读循环天然串行，无需与 60Hz 读取竞争）。
+        /// 管道未连接 / 超时 / 写失败 → 返回 null（调用方降级，不影响主功能）。
+        /// </summary>
+        /// <param name="cmd">请求命令，如 GET_PRESETS / PUT_PRESETS</param>
+        /// <param name="payload">命令载荷（GET_PRESETS 传空串）；非空时拼接到 CMD| 帧后</param>
+        /// <param name="timeoutMs">应答超时（默认 2000ms）</param>
+        /// <returns>应答帧体：OK / ERR|&lt;msg&gt; / DATA|&lt;json&gt;；失败返回 null</returns>
+        public async Task<string> RequestPresetAsync(string cmd, string payload, int timeoutMs = 2000)
+        {
+            if (!_connected) return null;
+            string frame = "CMD|" + cmd + (string.IsNullOrEmpty(payload) ? "" : "|" + payload);
+            var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+            EventHandler<string> handler = null;
+            handler = (s, resp) => tcs.TrySetResult(resp);
+            PresetResponse += handler;
+            try
+            {
+                await _requestLock.WaitAsync().ConfigureAwait(false);
+                if (!_connected) return null;   // 等锁期间管道可能已断开
+                var bytes = Encoding.UTF8.GetBytes(frame);
+                try
+                {
+                    // 消息模式管道下一次 WriteAsync = 一条完整 CMD 消息（阻塞写，全量写入）。
+                    // 远端不读（旧版伴生进程）时大消息会阻塞：写也套超时，超时直接放弃（返回 null）。
+                    var writeTask = _stream.WriteAsync(bytes, 0, bytes.Length);
+                    var writeWinner = await Task.WhenAny(writeTask, Task.Delay(timeoutMs)).ConfigureAwait(false);
+                    if (writeWinner != writeTask) return null;   // 写超时
+                    await writeTask.ConfigureAwait(false);        // 写失败（管道断开等）→ 抛异常 → 返回 null
+                }
+                catch
+                {
+                    return null;   // 写失败（管道断开等）
+                }
+                var winner = await Task.WhenAny(tcs.Task, Task.Delay(timeoutMs)).ConfigureAwait(false);
+                if (winner != tcs.Task) return null;   // 超时：伴生进程旧版本不支持预设协议/未响应
+                return await tcs.Task.ConfigureAwait(false);
+            }
+            finally
+            {
+                PresetResponse -= handler;
+                _requestLock.Release();
+            }
+        }
+
         private async Task RunLoopAsync(CancellationToken ct)
         {
             while (!ct.IsCancellationRequested)
@@ -65,7 +122,7 @@ namespace KeyDisplay
                 {
                     handle = NativeMethods.CreateFileW(
                         @"\\.\pipe\KeyDisplayState",
-                        NativeMethods.GENERIC_READ,
+                        NativeMethods.GENERIC_READ | NativeMethods.GENERIC_WRITE,
                         0,
                         IntPtr.Zero,
                         NativeMethods.OPEN_EXISTING,
@@ -97,23 +154,59 @@ namespace KeyDisplay
                     catch
                     {
                     }
-                    using (var stream = new FileStream(new SafeFileHandle(handle, true), FileAccess.Read))
+                    using (var stream = new FileStream(new SafeFileHandle(handle, true), FileAccess.ReadWrite))
                     {
-                        var buf = new byte[68];
-                        while (!ct.IsCancellationRequested)
+                        _stream = stream;
+                        _connected = true;
+                        var buf = new byte[MsgBufSize];
+                        try
                         {
-                            // 消息模式下一次 ReadAsync 即一条完整消息（缓冲区 >= 消息长度时）。
-                            // 兼容协议 v2（36 字节）与 v3（68 字节）：按实际读到的长度分派，
-                            // 非 KDSP 开头或长度 < 36 一律丢弃（防错位解析）。
-                            int n = await stream.ReadAsync(buf, 0, buf.Length, ct).ConfigureAwait(false);
-                            if (n == 0) break; // 管道断开，重连
-
-                            if (n >= 36 && buf[0] == (byte)'K' && buf[1] == (byte)'D' &&
-                                buf[2] == (byte)'S' && buf[3] == (byte)'P')
+                            while (!ct.IsCancellationRequested)
                             {
-                                var snap = Parse(buf, n);
-                                Snapshot?.Invoke(this, snap);
+                                // 消息模式管道：先 PeekNamedPipe 取当前消息实际长度（lpBytesLeftThisMessage），
+                                // 按实际长度一次读完整条消息，避免缓冲区小于消息时的 ERROR_MORE_DATA / 截断问题。
+                                uint avail = 0, left = 0;
+                                bool peekOk;
+                                try { peekOk = NativeMethods.PeekNamedPipe(handle, null, 0, IntPtr.Zero, out avail, out left); }
+                                catch { peekOk = false; }
+                                if (!peekOk)
+                                {
+                                    // peek 失败（管道异常）：让 ReadAsync 读到 0 触发重连
+                                    int nz = await stream.ReadAsync(buf, 0, buf.Length, ct).ConfigureAwait(false);
+                                    if (nz == 0) break;
+                                    continue;
+                                }
+                                if (left == 0)
+                                {
+                                    // 当前无完整消息（伴生进程推送间隙）：稍候轮询，避免按错误长度读取
+                                    await Task.Delay(4, ct).ConfigureAwait(false);
+                                    continue;
+                                }
+                                if (left > (uint)MaxResponseBytes) left = (uint)MaxResponseBytes;   // 应答长度上限保护
+                                if (buf.Length < left) buf = new byte[(int)left];
+                                int n = await stream.ReadAsync(buf, 0, (int)left, ct).ConfigureAwait(false);
+                                if (n == 0) break; // 管道断开，重连
+
+                                if (n >= 4 && buf[0] == (byte)'R' && buf[1] == (byte)'E' &&
+                                    buf[2] == (byte)'S' && buf[3] == (byte)'P')
+                                {
+                                    // 应答帧（0.7.0 预设协议）：RESP|OK / RESP|ERR|<msg> / RESP|DATA|<json>
+                                    string body = Encoding.UTF8.GetString(buf, 4, n - 4).TrimEnd('\0', '\r', '\n');
+                                    PresetResponse?.Invoke(this, body);
+                                }
+                                else if (n >= 36 && buf[0] == (byte)'K' && buf[1] == (byte)'D' &&
+                                         buf[2] == (byte)'S' && buf[3] == (byte)'P')
+                                {
+                                    // 状态帧：协议 v2（36 字节）与 v3（68 字节），现有解析逻辑不变
+                                    var snap = Parse(buf, n);
+                                    Snapshot?.Invoke(this, snap);
+                                }
                             }
+                        }
+                        finally
+                        {
+                            _stream = null;
+                            _connected = false;
                         }
                     }
                 }

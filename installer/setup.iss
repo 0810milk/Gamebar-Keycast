@@ -12,7 +12,7 @@
 
 #define MyAppName "按键显示"
 ; 版本号与 VERSION.md 保持一致（当前 0.6.0 beta），发布时同步修改
-#define MyAppVersion "0.6.0"
+#define MyAppVersion "0.7.0"
 #define MyAppPublisher "KeyDisplay"
 #define MyAppExeName "KeyDisplayCompanion.exe"
 
@@ -76,6 +76,11 @@ Source: "..\KeyDisplay.Companion\dist\KeyDisplayCompanion.exe"; DestDir: "{app}"
 Source: "..\cert\KeyDisplay.cer"; DestDir: "{app}\cert"; Flags: ignoreversion
 Source: "..\dist\KeyDisplay.Install\*.msix"; DestDir: "{app}\appx"; Flags: ignoreversion
 Source: "install-msix.ps1"; DestDir: "{app}"; Flags: ignoreversion
+
+; 0.7.0 打包事故修复：每次安装前清空 {app}\appx 下旧 msix，保证安装目录始终只有本次分发的
+; 一个 msix（历史事故：appx 目录累积多个版本 → install-msix.ps1 多文件守卫抛错 → Setup 静默失败）
+[InstallDelete]
+Type: files; Name: "{app}\appx\*.msix"
 
 [Registry]
 Root: HKCU; Subkey: "Software\Classes\keydisplay"; ValueType: string; ValueName: ""; ValueData: "URL:KeyDisplay"; Flags: uninsdeletekey

@@ -6,7 +6,11 @@
   companion.py + test_client.py 端到端验证。）
 """
 import ctypes
+import json
+import os
+import shutil
 import struct
+import tempfile
 import time
 import unittest
 
@@ -14,6 +18,7 @@ from state import (InputState, SNAPSHOT_SIZE, KEY_ORDER, MOUSE_ORDER,
                    MAGIC, VERSION, parse_snapshot)
 import hooks
 import pipe_server
+import presets
 
 
 class SnapshotTests(unittest.TestCase):
@@ -228,6 +233,16 @@ class HookMappingTests(unittest.TestCase):
         ms.mouseData = xbtn << 16
         hooks._mouse_proc(0, msg, ctypes.addressof(ms))
 
+    def _wheel(self, delta):
+        """构造 WM_MOUSEWHEEL：mouseData 高 16 位为有符号滚轮增量。"""
+        ms = hooks.MSLLHOOKSTRUCT()
+        ms.mouseData = (delta << 16) & 0xFFFFFFFF
+        hooks._mouse_proc(0, hooks.WM_MOUSEWHEEL, ctypes.addressof(ms))
+
+    @staticmethod
+    def _vk(vk):
+        return vk >> 3, 1 << (vk & 7)
+
     def test_keyboard_down_up(self):
         for name, vk in hooks.VK.items():
             self._kb(vk, True)
@@ -262,6 +277,83 @@ class HookMappingTests(unittest.TestCase):
         self.assertFalse(hooks._state.mouse & (1 << MOUSE_ORDER.index("X1")))
         self._ms(hooks.WM_XBUTTONDOWN, xbtn=2)
         self.assertTrue(hooks._state.mouse & (1 << MOUSE_ORDER.index("X2")))
+
+    def test_mouse_buttons_write_vk_bitmap(self):
+        # 鼠标按键按下/松开同步写入 VK 位图（L=0x01 R=0x02 M=0x04 X1=0x05 X2=0x06）
+        cases = [
+            ("L", hooks.WM_LBUTTONDOWN, hooks.WM_LBUTTONUP, 0),
+            ("R", hooks.WM_RBUTTONDOWN, hooks.WM_RBUTTONUP, 0),
+            ("M", hooks.WM_MBUTTONDOWN, hooks.WM_MBUTTONUP, 0),
+            ("X1", hooks.WM_XBUTTONDOWN, hooks.WM_XBUTTONUP, 1),
+            ("X2", hooks.WM_XBUTTONDOWN, hooks.WM_XBUTTONUP, 2),
+        ]
+        for name, down_msg, up_msg, xbtn in cases:
+            vk = hooks.MOUSE_VK[name]
+            b, m = self._vk(vk)
+            self._ms(down_msg, xbtn=xbtn)
+            self.assertTrue(hooks._state.extra[b] & m,
+                            name + " 按下未置位 VK 0x%02X 位" % vk)
+            self._ms(up_msg, xbtn=xbtn)
+            self.assertFalse(hooks._state.extra[b] & m,
+                             name + " 松开未复位 VK 0x%02X 位" % vk)
+
+    def test_wheel_up_sets_bit_and_expires(self):
+        self._wheel(120)
+        b, m = self._vk(hooks.WHEEL_UP_VK)
+        self.assertTrue(hooks._state.extra[b] & m, "滚轮上未置位")
+        # 刚点亮未过期 → 不熄灭
+        hooks.expire_wheel()
+        self.assertTrue(hooks._state.extra[b] & m, "未过期却被熄灭")
+        # 伪造过期时间戳 → 自动熄灭
+        hooks._wheel_up_ts = time.monotonic() - 1.0
+        hooks.expire_wheel()
+        self.assertFalse(hooks._state.extra[b] & m, "过期后未熄灭")
+        self.assertEqual(hooks._wheel_up_ts, 0.0)
+
+    def test_wheel_down_sets_bit_and_expires(self):
+        self._wheel(-120)
+        b, m = self._vk(hooks.WHEEL_DOWN_VK)
+        self.assertTrue(hooks._state.extra[b] & m, "滚轮下未置位")
+        hooks.expire_wheel()
+        self.assertTrue(hooks._state.extra[b] & m, "未过期却被熄灭")
+        hooks._wheel_down_ts = time.monotonic() - 1.0
+        hooks.expire_wheel()
+        self.assertFalse(hooks._state.extra[b] & m, "过期后未熄灭")
+        self.assertEqual(hooks._wheel_down_ts, 0.0)
+
+    def test_wheel_directions_are_exclusive(self):
+        # 单个事件只置对应方向位：上滚只置 0x07、下滚只置 0x08
+        self._wheel(120)
+        b, m = self._vk(hooks.WHEEL_DOWN_VK)
+        self.assertFalse(hooks._state.extra[b] & m, "上滚误置滚轮下位")
+        # 模拟上滚点亮过期熄灭后，下滚只置 0x08
+        hooks._wheel_up_ts = time.monotonic() - 1.0
+        hooks.expire_wheel()
+        self._wheel(-120)
+        b, m = self._vk(hooks.WHEEL_UP_VK)
+        self.assertFalse(hooks._state.extra[b] & m, "下滚误置滚轮上位")
+
+    def test_wheel_default_ts_expire_is_noop(self):
+        # 时间戳默认 0（从未点亮）→ expire 不触碰任何位
+        hooks._wheel_up_ts = 0.0
+        hooks._wheel_down_ts = 0.0
+        hooks.expire_wheel()
+        self.assertEqual(bytes(hooks._state.extra), bytes(32))
+
+    def test_reconcile_skips_wheel_vks(self):
+        # 滚轮位是瞬时事件：reconcile 不得用真实键码状态（0x08=VK_BACK）覆盖
+        real_get = hooks._get_async_key_state
+        hooks._get_async_key_state = lambda vk: True  # 假装所有键都按下
+        try:
+            hooks._state.set_vk(hooks.WHEEL_UP_VK, True)
+            hooks._state.set_vk(hooks.WHEEL_DOWN_VK, True)
+            hooks.reconcile(hooks._state)
+            for vk in (hooks.WHEEL_UP_VK, hooks.WHEEL_DOWN_VK):
+                b, m = self._vk(vk)
+                self.assertTrue(hooks._state.extra[b] & m,
+                                "reconcile 清掉了滚轮 VK 0x%02X 位" % vk)
+        finally:
+            hooks._get_async_key_state = real_get
 
     def test_mouse_move_does_not_write_position(self):
         # 坐标改由 60Hz GetCursorPos 轮询 / RAWINPUT 累计维护，WM_MOUSEMOVE 不再写坐标
@@ -314,6 +406,98 @@ class StopFlagTests(unittest.TestCase):
         flag.set()
         self.assertTrue(flag.is_set())
         self.assertTrue(flag.wait(0.1))
+
+
+class PresetsTests(unittest.TestCase):
+    """presets.py：包外 JSON 持久化（load / save / 损坏备份 / 原子写）。"""
+
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp(prefix="presets_test_")
+        # 注入到临时目录下的 KeyDisplay\presets.json（父目录刻意不存在）
+        self._path = os.path.join(self._tmp, "KeyDisplay", "presets.json")
+        presets.set_presets_path(self._path)
+
+    def tearDown(self):
+        presets.set_presets_path(None)
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    @staticmethod
+    def _sample():
+        return {
+            "version": 1,
+            "themePresets": [
+                {"name": "配色A", "type": "theme",
+                 "savedAt": "2026-08-19T12:00:00",
+                 "data": {"theme": "custom", "colors": {"panel": "#B3FFB3C6"}}},
+            ],
+            "layoutPresets": [
+                {"name": "布局A", "type": "layout",
+                 "savedAt": "2026-08-19T12:00:00",
+                 "data": {"layoutLocked": False, "keys": {"W": "0,0,44,44"}}},
+            ],
+        }
+
+    def test_load_missing_returns_empty_struct(self):
+        obj = presets.load()
+        self.assertEqual(
+            obj, {"version": 1, "themePresets": [], "layoutPresets": []})
+        # 每次返回独立副本：篡改返回值不影响后续读取
+        obj["themePresets"].append("x")
+        self.assertEqual(presets.load()["themePresets"], [])
+
+    def test_save_then_load_roundtrip(self):
+        sample = self._sample()
+        presets.save(sample)
+        self.assertTrue(os.path.exists(self._path))
+        # 原子写：无 .tmp 残留
+        self.assertFalse(os.path.exists(self._path + ".tmp"))
+        self.assertEqual(presets.load(), sample)
+        # 父目录不存在时 save 自动创建
+        self.assertTrue(os.path.isdir(os.path.dirname(self._path)))
+        # UTF-8 无 BOM
+        with open(self._path, "rb") as f:
+            self.assertNotEqual(f.read(3), b"\xef\xbb\xbf")
+        # 中文以 UTF-8 原文落盘（ensure_ascii=False）
+        with open(self._path, "r", encoding="utf-8") as f:
+            self.assertIn("配色A", f.read())
+
+    def test_load_corrupt_backs_up_and_returns_empty(self):
+        os.makedirs(os.path.dirname(self._path), exist_ok=True)
+        with open(self._path, "w", encoding="utf-8") as f:
+            f.write("{ 这不是合法 JSON")
+        obj = presets.load()
+        self.assertEqual(
+            obj, {"version": 1, "themePresets": [], "layoutPresets": []})
+        self.assertFalse(os.path.exists(self._path))
+        self.assertTrue(os.path.exists(self._path + ".bak"))
+        with open(self._path + ".bak", "r", encoding="utf-8") as f:
+            self.assertEqual(f.read(), "{ 这不是合法 JSON")
+
+    def test_load_non_object_json_is_corrupt(self):
+        # 合法 JSON 但顶层不是对象（如数组）→ 同样按损坏处理：备份 + 空结构
+        os.makedirs(os.path.dirname(self._path), exist_ok=True)
+        with open(self._path, "w", encoding="utf-8") as f:
+            json.dump(["not", "a", "dict"], f)
+        obj = presets.load()
+        self.assertEqual(
+            obj, {"version": 1, "themePresets": [], "layoutPresets": []})
+        self.assertTrue(os.path.exists(self._path + ".bak"))
+
+
+class PipeCommandTests(unittest.TestCase):
+    """pipe_server 的 CMD 帧路由（纯函数 _parse_cmd，无需真实管道）。"""
+
+    def test_parse_cmd_routing(self):
+        self.assertEqual(pipe_server._parse_cmd(b"CMD|GET_PRESETS"),
+                         ("GET_PRESETS", None))
+        self.assertEqual(pipe_server._parse_cmd(b"CMD|PUT_PRESETS|{\"a\":1}"),
+                         ("PUT_PRESETS", "{\"a\":1}"))
+        self.assertEqual(pipe_server._parse_cmd(b"CMD|GET_PRESETS|x"),  # 未知 CMD
+                         (None, None))
+        self.assertEqual(pipe_server._parse_cmd(b"CMD|"), (None, None))
+        # 二进制 KDSP 等异常数据一律忽略
+        self.assertEqual(pipe_server._parse_cmd(b"KDSP" + bytes(64)), (None, None))
+        self.assertEqual(pipe_server._parse_cmd(b"\x00\x01\x02\xff"), (None, None))
 
 
 if __name__ == "__main__":
