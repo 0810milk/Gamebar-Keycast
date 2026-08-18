@@ -26,3 +26,5 @@ KeyDisplay.Widget/Generated Files/
 # 工具生成目录
 .mimosa/
 .zcode/
+# release dir: only official per-version installers may be tracked
+release/*.bad-*
