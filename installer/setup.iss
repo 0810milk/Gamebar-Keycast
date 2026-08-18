@@ -23,6 +23,8 @@ AppVersion={#MyAppVersion}
 AppVerName={#MyAppName} {#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\KeyDisplay
+; 0.6.0 事故修复：禁用"记住上次安装路径"，强制使用默认目录，避免装进遗留的 %TEMP% 目录
+UsePreviousAppDir=no
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=admin
