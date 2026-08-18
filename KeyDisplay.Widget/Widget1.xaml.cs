@@ -42,13 +42,13 @@ namespace KeyDisplay
         private const double CursorDampingDecay = 0.75;
         private readonly System.Diagnostics.Stopwatch _frameClock = System.Diagnostics.Stopwatch.StartNew();
         private long _lastFrameTicks = -1;
-        private double _smoothX = -1;   // 平滑后的垫面坐标；-1 = 尚无初始位置
+        private double _smoothX = -1;   // 平滑后的垫面坐标：-1 = 尚无初始位置
         private double _smoothY = -1;
         private double _targetX;
         private double _targetY;
         private bool _hasSmoothTarget;
 
-        private bool _dark = true;
+        private string _theme = "dark";   // 五态主题："dark"/"gray"/"light"/"pink"/"blue"（黑/灰/白/粉/蓝）+ custom，持久化到 Theme
         private bool _docked;
         private XboxGameBarWidget _widget;   // 本实例自己的 widget（由 App 导航传入），不用共享 App.Widget
         private static bool s_companionLaunched;
@@ -116,6 +116,74 @@ namespace KeyDisplay
         private readonly SolidColorBrush _lightPad = new SolidColorBrush(Color.FromArgb(0x59, 0xFF, 0xFF, 0xFF));
         private readonly SolidColorBrush _transparent = new SolidColorBrush(Colors.Transparent);
 
+        // 粉色主题画刷（用户拍板：字体白色，按键底加深一档保证白字可读）
+        private readonly SolidColorBrush _pinkPanel = new SolidColorBrush(Color.FromArgb(0xB3, 0xFF, 0xB3, 0xC6));   // 面板 #B3FFB3C6
+        private readonly SolidColorBrush _pinkBorder = new SolidColorBrush(Color.FromArgb(0xCC, 0xB0, 0x57, 0x7E));  // 边框 #CCB0577E
+        private readonly SolidColorBrush _pinkKeyBg = new SolidColorBrush(Color.FromArgb(0xFF, 0xFF, 0xB3, 0xC6));   // 按键默认背景 #FFFFB3C6（原 #FFCDD8 太浅，白字看不清）
+        private readonly SolidColorBrush _pinkKeyFg = new SolidColorBrush(Colors.White);       // 默认文字白色
+        private readonly SolidColorBrush _pinkPressedBg = new SolidColorBrush(Colors.White);  // 按下白底
+        private readonly SolidColorBrush _pinkPressedFg = new SolidColorBrush(Color.FromArgb(0xFF, 0xB0, 0x57, 0x7E));  // 按下深粉字
+        private readonly SolidColorBrush _pinkPad = new SolidColorBrush(Color.FromArgb(0x4D, 0xFF, 0xB3, 0xC6));      // 鼠标垫 #4DFFB3C6
+        private readonly SolidColorBrush _pinkDot = new SolidColorBrush(Color.FromArgb(0xFF, 0xB0, 0x57, 0x7E));     // 鼠标点深粉
+
+        // 灰色主题画刷（浅灰底 + 黑字）
+        private readonly SolidColorBrush _grayPanel = new SolidColorBrush(Color.FromArgb(0xB3, 0xD6, 0xD6, 0xD6));   // 面板 #B3D6D6D6
+        private readonly SolidColorBrush _grayBorder = new SolidColorBrush(Color.FromArgb(0x66, 0x66, 0x66, 0x66));  // 边框 #66666666
+        private readonly SolidColorBrush _grayKeyBg = new SolidColorBrush(Color.FromArgb(0xFF, 0xE4, 0xE4, 0xE4));   // 按键默认背景 #FFE4E4E4
+        private readonly SolidColorBrush _grayKeyFg = new SolidColorBrush(Colors.Black);       // 默认文字黑色
+        private readonly SolidColorBrush _grayPressedBg = new SolidColorBrush(Color.FromArgb(0xFF, 0x8C, 0x8C, 0x8C));  // 按下深灰底
+        private readonly SolidColorBrush _grayPressedFg = new SolidColorBrush(Colors.White);  // 按下白字
+        private readonly SolidColorBrush _grayPad = new SolidColorBrush(Color.FromArgb(0x59, 0xD6, 0xD6, 0xD6));      // 鼠标垫 #59D6D6D6
+        private readonly SolidColorBrush _grayDot = new SolidColorBrush(Colors.Black);        // 鼠标点黑色
+
+        // 蓝色主题画刷（浅蓝底 + 深蓝字）
+        private readonly SolidColorBrush _bluePanel = new SolidColorBrush(Color.FromArgb(0xB3, 0xBF, 0xD9, 0xEE));   // 面板 #B3BFD9EE
+        private readonly SolidColorBrush _blueBorder = new SolidColorBrush(Color.FromArgb(0x66, 0x3A, 0x6E, 0xA5));  // 边框 #663A6EA5
+        private readonly SolidColorBrush _blueKeyBg = new SolidColorBrush(Color.FromArgb(0xFF, 0xD2, 0xE5, 0xF7));   // 按键默认背景 #FFD2E5F7
+        private readonly SolidColorBrush _blueKeyFg = new SolidColorBrush(Color.FromArgb(0xFF, 0x1F, 0x4E, 0x79));   // 默认文字深蓝
+        private readonly SolidColorBrush _bluePressedBg = new SolidColorBrush(Colors.White);  // 按下白底
+        private readonly SolidColorBrush _bluePressedFg = new SolidColorBrush(Color.FromArgb(0xFF, 0x1F, 0x4E, 0x79));  // 按下深蓝字
+        private readonly SolidColorBrush _bluePad = new SolidColorBrush(Color.FromArgb(0x59, 0xBF, 0xD9, 0xEE));      // 鼠标垫 #59BFD9EE
+        private readonly SolidColorBrush _blueDot = new SolidColorBrush(Color.FromArgb(0xFF, 0x1F, 0x4E, 0x79));     // 鼠标点深蓝
+
+        // 按键透明度滑条设定值（0~100，默认 100）；锁定开=按此值，锁定关=临时强制 100%
+        private double _keyOpacity = 100.0;
+
+        // ===================== 自定义主题色（8 槽位，custom 态）=====================
+        // 持久化键（Custom_ 前缀，存 "#RRGGBB"）；缺省回落 dark 预设对应值
+        private static readonly string[] CustomKeys = { "CustomPanel_", "CustomBorder_", "CustomKeyBg_", "CustomKeyFg_",
+            "CustomPressedBg_", "CustomPressedFg_", "CustomPad_", "CustomDot_" };
+        private static readonly string[] SlotNames = { "面板", "边框", "按键底", "文字", "按下底", "按下字", "鼠标垫", "鼠标点" };
+        // 动态画刷：custom 态下 8 个语义方法返回它们；启动/修改时用 Custom_ 键刷新
+        private readonly SolidColorBrush[] _customBrushes = new SolidColorBrush[8];
+        private int _activeSlot = -1;          // 调色区当前作用行（-1=未展开）
+        private double _hue = 0.0;             // 当前色相（0~360）
+        private double _alpha = 255.0;         // 当前透明度（0~255，调色盘取色套用）
+        private bool _syncing = false;         // 程序性文本更新标志（防 TextChanged 递归）
+        private Color? _lastPickColor;         // 拖动中最后取色（释放时固化用，避免依赖拖动中不更新的 hex 框）
+        private int _lastPickMs;               // 拖动节流时间戳（Environment.TickCount，ms）
+
+        // ===================== 主题配色查询（数据驱动，扩展性）=====================
+        // 未来加第六种颜色：新增一个 _xxxXxx 画刷字段 + 在 P()/各语义方法的 blue 参数后追加，或改写成按主题名查字典表即可
+
+        // 五态取画刷：dark/gray/light/pink/blue（黑/灰/白/粉/蓝）
+        private Brush P(Brush dark, Brush gray, Brush light, Brush pink, Brush blue) =>
+            _theme == "dark" ? dark : _theme == "gray" ? gray : _theme == "light" ? light : _theme == "pink" ? pink : blue;
+
+        // 语义分组查询（每组一语义，避免散落三元）；custom 态返回自定义动态画刷
+        private Brush PanelB() => _theme == "custom" ? _customBrushes[0] : P(_darkPanel, _grayPanel, _lightPanel, _pinkPanel, _bluePanel);     // 面板背景
+        private Brush BorderB() => _theme == "custom" ? _customBrushes[1] : P(_darkBorder, _grayBorder, _lightBorder, _pinkBorder, _blueBorder); // 边框
+        private Brush KeyBgB() => _theme == "custom" ? _customBrushes[2] : P(_darkDefaultBg, _grayKeyBg, _lightDefaultBg, _pinkKeyBg, _blueKeyBg);     // 按键默认背景
+        private Brush KeyFgB() => _theme == "custom" ? _customBrushes[3] : P(_darkDefaultFg, _grayKeyFg, _lightDefaultFg, _pinkKeyFg, _blueKeyFg);     // 默认文字
+        private Brush PressBgB() => _theme == "custom" ? _customBrushes[4] : P(_darkPressedBg, _grayPressedBg, _lightPressedBg, _pinkPressedBg, _bluePressedBg); // 按下背景
+        private Brush PressFgB() => _theme == "custom" ? _customBrushes[5] : P(_darkPressedFg, _grayPressedFg, _lightPressedFg, _pinkPressedFg, _bluePressedFg); // 按下文字
+        private Brush PadB() => _theme == "custom" ? _customBrushes[6] : P(_darkPad, _grayPad, _lightPad, _pinkPad, _bluePad);             // 鼠标垫背景
+        private Brush DotB() => _theme == "custom" ? _customBrushes[7] : P(_darkDefaultFg, _grayDot, _darkDefaultBg, _pinkDot, _blueDot);  // 鼠标点（dark=白、light=黑、gray=黑、pink=深粉、blue=深蓝）
+
+        // 反色按钮（主题切换/开关类胶囊）：深色主题（dark）=亮胶囊，浅色主题（gray/light/pink/blue）=暗胶囊；custom=文字色底+背景色字（互换反色）
+        private Brush InvertKeyBgB() => _theme == "custom" ? _customBrushes[3] : (_theme == "dark" ? _lightDefaultBg : _darkDefaultBg);
+        private Brush InvertKeyFgB() => _theme == "custom" ? _customBrushes[2] : (_theme == "dark" ? _lightDefaultFg : _darkDefaultFg);
+
         public Widget1()
         {
             this.InitializeComponent();
@@ -154,7 +222,19 @@ namespace KeyDisplay
             _layoutLocked = (layoutLock is bool lb) ? lb : true;
 
             object theme = ApplicationData.Current.LocalSettings.Values["Theme"];
-            _dark = (theme is string s && s == "light") ? false : true;
+            _theme = (theme is string ts && (ts == "light" || ts == "pink" || ts == "gray" || ts == "blue" || ts == "custom")) ? ts : "dark";   // 老数据只有 dark/light，缺失默认 dark
+
+            // 自定义主题色：构建调色盘控件 + 恢复 8 槽自定义值（custom 态生效，预设态忽略）
+            InitPickerControls();
+            for (int k = 0; k < 8; k++) _customBrushes[k] = new SolidColorBrush(Colors.Black);
+            RefreshCustomBrushes();
+            if (_theme == "custom") ApplyTheme();   // 语义方法的 custom 分支需要 _theme 已定后应用一次
+
+            // 恢复按键透明度设定值（KeyOpacity_ 存 0~100；缺失默认 100），并同步滑条位置 + 应用（按当前锁定状态）
+            object op = ApplicationData.Current.LocalSettings.Values["KeyOpacity_"];
+            _keyOpacity = (op is int oi && oi >= 10 && oi <= 100) ? oi : 100.0;
+            if (OpacitySlider != null) OpacitySlider.Value = _keyOpacity;
+            ApplyKeyOpacity();
 
             _reader = new InputStateReader();
             _reader.Snapshot += (_, snap) => _latest = snap;
@@ -330,11 +410,11 @@ namespace KeyDisplay
 
         private void ApplyTheme()
         {
-            RootPanel.Background = _dark ? _darkPanel : _lightPanel;
-            RootPanel.BorderBrush = _dark ? _darkBorder : _lightBorder;
-            MousePad.Background = _dark ? _darkPad : _lightPad;
-            MousePad.BorderBrush = _dark ? _darkBorder : _lightBorder;
-            MouseDot.Fill = _dark ? _darkDefaultFg : _darkDefaultBg;
+            RootPanel.Background = PanelB();
+            RootPanel.BorderBrush = BorderB();
+            MousePad.Background = PadB();
+            MousePad.BorderBrush = BorderB();
+            MouseDot.Fill = DotB();
             MouseDot.Visibility = Visibility.Collapsed;
 
             foreach (var kv in _keys) SetKey(kv.Value, false);
@@ -362,28 +442,15 @@ namespace KeyDisplay
 
             ApplySettingsColors();
 
-            ApplicationData.Current.LocalSettings.Values["Theme"] = _dark ? "dark" : "light";
+            ApplicationData.Current.LocalSettings.Values["Theme"] = _theme;
         }
 
         private void SetKey(Border border, bool down)
         {
-            SolidColorBrush bg, fg, borderBrush;
-            if (_dark)
-            {
-                bg = down ? _darkPressedBg : _darkDefaultBg;
-                fg = down ? _darkPressedFg : _darkDefaultFg;
-                borderBrush = _darkBorder;
-            }
-            else
-            {
-                bg = down ? _lightPressedBg : _lightDefaultBg;
-                fg = down ? _lightPressedFg : _lightDefaultFg;
-                borderBrush = _lightBorder;
-            }
-            border.Background = bg;
-            border.BorderBrush = borderBrush;
+            border.Background = down ? PressBgB() : KeyBgB();
+            border.BorderBrush = BorderB();
             var tb = border.Child as TextBlock;
-            if (tb != null) tb.Foreground = fg;
+            if (tb != null) tb.Foreground = down ? PressFgB() : KeyFgB();
         }
 
         // 移动落位/丢捕获时恢复按键样式：普通键走 SetKey(false)；鼠标垫恢复其专属半透明背景（避免被默认键样式覆盖）
@@ -391,8 +458,8 @@ namespace KeyDisplay
         {
             if (key == MousePad)
             {
-                MousePad.Background = _dark ? _darkPad : _lightPad;
-                MousePad.BorderBrush = _dark ? _darkBorder : _lightBorder;
+                MousePad.Background = PadB();
+                MousePad.BorderBrush = BorderB();
             }
             else
             {
@@ -574,7 +641,7 @@ namespace KeyDisplay
             if (h < MinH) { double f = MinH / h; h = MinH; w *= f; }
         }
 
-        // ===================== 鼠标垫等比缩放（0.5.0）=====================
+        // ===================== 鼠标垫等比缩放（0.5.0）====================
         // 任意边/四角拖动鼠标垫都等比例变化宽高（比例 = 拖动起点 _dragStartW/_dragStartH）。
         // 主导轴决定缩放：纯水平边（l/r）由 dx 主导；纯垂直边（t/b）由 dy 主导；
         // 四角比较 |dx| 与 |dy|（换算到同一量纲）取变化更大的轴，保证比例一致不漂移。
@@ -701,88 +768,101 @@ namespace KeyDisplay
         // 二级控件菜单的标题/锁定行/按钮及 87 配列布局键同步刷新
         private void ApplySettingsColors()
         {
-            SettingsMenu.Background = _dark ? _darkPanel : _lightPanel;
-            SettingsMenu.BorderBrush = _dark ? _darkBorder : _lightBorder;
-            SettingsTitle.Foreground = _dark ? _darkDefaultFg : _lightDefaultFg;
-            SettingsThemeLabel.Foreground = _dark ? _darkDefaultFg : _lightDefaultFg;
-            SettingsPadLabel.Foreground = _dark ? _darkDefaultFg : _lightDefaultFg;
+            // 面板背景/边框
+            SettingsMenu.Background = PanelB();
+            SettingsMenu.BorderBrush = BorderB();
+            LockMenu.Background = PanelB();
+            LockMenu.BorderBrush = BorderB();
+            AboutMenu.Background = PanelB();
+            AboutMenu.BorderBrush = BorderB();
+            DeleteConfirmBox.Background = PanelB();
+            DeleteConfirmBox.BorderBrush = BorderB();
 
-            LockMenu.Background = _dark ? _darkPanel : _lightPanel;
-            LockMenu.BorderBrush = _dark ? _darkBorder : _lightBorder;
-            LockMenuTitle.Foreground = _dark ? _darkDefaultFg : _lightDefaultFg;
-            LockSwitchLabel.Foreground = _dark ? _darkDefaultFg : _lightDefaultFg;
-            KeyPickerToggleText.Foreground = _dark ? _darkDefaultFg : _lightDefaultFg;
-            KeyPickerToggleArrow.Foreground = _dark ? _darkDefaultFg : _lightDefaultFg;
+            // 标题/标签文字（默认文字，FollowKeyFg）
+            SettingsTitle.Foreground = KeyFgB();
+            SettingsThemeLabel.Foreground = KeyFgB();
+            SettingsPadLabel.Foreground = KeyFgB();
+            SettingsOpacityLabel.Foreground = KeyFgB();
+            AboutTitle.Foreground = KeyFgB();
+            AboutAuthor.Foreground = KeyFgB();
+            SettingsInfoBtn.BorderBrush = BorderB();
+            SettingsInfoText.Foreground = KeyFgB();
+            LockMenuTitle.Foreground = KeyFgB();
+            LockSwitchLabel.Foreground = KeyFgB();
+            KeyPickerToggleText.Foreground = KeyFgB();
+            KeyPickerToggleArrow.Foreground = KeyFgB();
+            DeleteConfirmText.Foreground = KeyFgB();
+            // GitHub/QQ 行文字用固定浅蓝 #4A9EFF 作为可点击提示，下划线已在 XAML 设置
 
-            SettingsThemeText.Text = _dark ? "\u767d" : "\u9ed1";   // 白 / 黑
+            // 状态文本：主题切换按钮显示当前主题名（黑/灰/白/粉/蓝），点击切到下一个
+            SettingsThemeText.Text = _theme == "dark" ? "黑" : _theme == "gray" ? "灰" : _theme == "light" ? "白" : _theme == "pink" ? "粉" : "蓝";
             SettingsPadText.Text = _padVisible ? "\u663e\u793a" : "\u9690\u85cf";   // 显示 / 隐藏
             LockSwitchText.Text = _layoutLocked ? "\u5f00" : "\u5173";   // 开 / 关（锁定菜单开关，与设置面板逻辑同步）
-            if (_dark)
+
+            // 反色按钮（主题切换 + 鼠标垫开关）：深色主题=亮胶囊，浅色主题=暗胶囊
+            SettingsThemeBtn.Background = InvertKeyBgB();
+            SettingsThemeBtn.BorderBrush = BorderB();
+            SettingsThemeText.Foreground = InvertKeyFgB();
+            SettingsPadBtn.Background = InvertKeyBgB();
+            SettingsPadBtn.BorderBrush = BorderB();
+            SettingsPadText.Foreground = InvertKeyFgB();
+            // 透明度滑条：轨道/滑块用主题文字色与边框色
+            OpacitySlider.Foreground = KeyFgB();
+            OpacitySlider.Background = BorderB();
+
+            // 主题颜色子菜单：「自定义」按钮（反色胶囊）、菜单配色 + 8 行目标输入框/颜色盘按钮
+            SettingsCustomBtn.Background = InvertKeyBgB();
+            SettingsCustomBtn.BorderBrush = BorderB();
+            (SettingsCustomBtn.Child as TextBlock).Foreground = InvertKeyFgB();
+            ThemeColorMenu.Background = PanelB();
+            ThemeColorMenu.BorderBrush = BorderB();
+            PickerMenu.Background = PanelB();
+            PickerMenu.BorderBrush = BorderB();
+            ThemeColorTitle.Foreground = KeyFgB();
+            PickerTitle.Foreground = KeyFgB();
+            foreach (var tb in new TextBlock[] { SlotLabel0, SlotLabel1, SlotLabel2, SlotLabel3, SlotLabel4, SlotLabel5, SlotLabel6, SlotLabel7 })
+                tb.Foreground = KeyFgB();
+            foreach (var b in new Border[] { SlotPick0, SlotPick1, SlotPick2, SlotPick3, SlotPick4, SlotPick5, SlotPick6, SlotPick7 })
             {
-                SettingsThemeBtn.Background = _lightDefaultBg;
-                SettingsThemeBtn.BorderBrush = _lightBorder;
-                SettingsThemeText.Foreground = _lightDefaultFg;
-                LockKeyBtn.Background = _darkDefaultBg;
-                LockKeyBtn.BorderBrush = _darkBorder;
-                LockKeyText.Foreground = _darkDefaultFg;
-                LockSwitchBtn.Background = _darkDefaultBg;
-                LockSwitchBtn.BorderBrush = _darkBorder;
-                LockSwitchText.Foreground = _darkDefaultFg;
-                LockResetBtn.Background = _darkDefaultBg;
-                LockResetBtn.BorderBrush = _darkBorder;
-                LockResetText.Foreground = _darkDefaultFg;
-                LockCloseBtn.Background = _darkDefaultBg;
-                LockCloseBtn.BorderBrush = _darkBorder;
-                LockCloseText.Foreground = _darkDefaultFg;
-                DeleteConfirmBox.Background = _darkPanel;
-                DeleteConfirmBox.BorderBrush = _darkBorder;
-                DeleteConfirmText.Foreground = _darkDefaultFg;
-                DeleteConfirmYes.Background = _darkDefaultBg;
-                DeleteConfirmYes.BorderBrush = _darkBorder;
-                DeleteConfirmYesText.Foreground = _darkDefaultFg;
-                DeleteConfirmNo.Background = _darkDefaultBg;
-                DeleteConfirmNo.BorderBrush = _darkBorder;
-                DeleteConfirmNoText.Foreground = _darkDefaultFg;
-                SettingsBtn.Background = _darkDefaultBg;
-                SettingsBtn.BorderBrush = _darkBorder;
-                SettingsBtnText.Foreground = _darkDefaultFg;
-                SettingsPadBtn.Background = _lightDefaultBg;
-                SettingsPadBtn.BorderBrush = _lightBorder;
-                SettingsPadText.Foreground = _lightDefaultFg;
+                b.Background = KeyBgB();
+                b.BorderBrush = BorderB();
+                (b.Child as TextBlock).Foreground = KeyFgB();
             }
-            else
+            foreach (var tb in new TextBox[] { SlotInput0, SlotInput1, SlotInput2, SlotInput3, SlotInput4, SlotInput5, SlotInput6, SlotInput7 })
             {
-                SettingsThemeBtn.Background = _darkDefaultBg;
-                SettingsThemeBtn.BorderBrush = _darkBorder;
-                SettingsThemeText.Foreground = _darkDefaultFg;
-                LockKeyBtn.Background = _lightDefaultBg;
-                LockKeyBtn.BorderBrush = _lightBorder;
-                LockKeyText.Foreground = _lightDefaultFg;
-                LockSwitchBtn.Background = _lightDefaultBg;
-                LockSwitchBtn.BorderBrush = _lightBorder;
-                LockSwitchText.Foreground = _lightDefaultFg;
-                LockResetBtn.Background = _lightDefaultBg;
-                LockResetBtn.BorderBrush = _lightBorder;
-                LockResetText.Foreground = _lightDefaultFg;
-                LockCloseBtn.Background = _lightDefaultBg;
-                LockCloseBtn.BorderBrush = _lightBorder;
-                LockCloseText.Foreground = _lightDefaultFg;
-                DeleteConfirmBox.Background = _lightPanel;
-                DeleteConfirmBox.BorderBrush = _lightBorder;
-                DeleteConfirmText.Foreground = _lightDefaultFg;
-                DeleteConfirmYes.Background = _lightDefaultBg;
-                DeleteConfirmYes.BorderBrush = _lightBorder;
-                DeleteConfirmYesText.Foreground = _lightDefaultFg;
-                DeleteConfirmNo.Background = _lightDefaultBg;
-                DeleteConfirmNo.BorderBrush = _lightBorder;
-                DeleteConfirmNoText.Foreground = _lightDefaultFg;
-                SettingsBtn.Background = _lightDefaultBg;
-                SettingsBtn.BorderBrush = _lightBorder;
-                SettingsBtnText.Foreground = _lightDefaultFg;
-                SettingsPadBtn.Background = _darkDefaultBg;
-                SettingsPadBtn.BorderBrush = _darkBorder;
-                SettingsPadText.Foreground = _darkDefaultFg;
+                tb.Foreground = KeyFgB();
+                tb.BorderBrush = BorderB();
             }
+            SvMarker.Stroke = KeyFgB();
+            AlphaMarker.Stroke = KeyFgB();
+            foreach (var row in ColorGrid.Children)
+                if (row is Grid rg)
+                    foreach (var ch in rg.Children)
+                        if (ch is Border sw) sw.BorderBrush = BorderB();
+
+            // 顺色按钮（普通按钮随按键默认配色）
+            LockKeyBtn.Background = KeyBgB();
+            LockKeyBtn.BorderBrush = BorderB();
+            LockKeyText.Foreground = KeyFgB();
+            LockSwitchBtn.Background = KeyBgB();
+            LockSwitchBtn.BorderBrush = BorderB();
+            LockSwitchText.Foreground = KeyFgB();
+            LockResetBtn.Background = KeyBgB();
+            LockResetBtn.BorderBrush = BorderB();
+            LockResetText.Foreground = KeyFgB();
+            LockCloseBtn.Background = KeyBgB();
+            LockCloseBtn.BorderBrush = BorderB();
+            LockCloseText.Foreground = KeyFgB();
+            DeleteConfirmYes.Background = KeyBgB();
+            DeleteConfirmYes.BorderBrush = BorderB();
+            DeleteConfirmYesText.Foreground = KeyFgB();
+            DeleteConfirmNo.Background = KeyBgB();
+            DeleteConfirmNo.BorderBrush = BorderB();
+            DeleteConfirmNoText.Foreground = KeyFgB();
+            SettingsBtn.Background = KeyBgB();
+            SettingsBtn.BorderBrush = BorderB();
+            SettingsBtnText.Foreground = KeyFgB();
+
             ApplyPickerColors();
         }
 
@@ -803,10 +883,10 @@ namespace KeyDisplay
                 var b = child as Border;
                 if (b != null && b.Tag is string)
                 {
-                    b.Background = _dark ? _darkDefaultBg : _lightDefaultBg;
-                    b.BorderBrush = _dark ? _darkBorder : _lightBorder;
+                    b.Background = KeyBgB();
+                    b.BorderBrush = BorderB();
                     var tb = b.Child as TextBlock;
-                    if (tb != null) tb.Foreground = _dark ? _darkDefaultFg : _lightDefaultFg;
+                    if (tb != null) tb.Foreground = KeyFgB();
                 }
                 else
                 {
@@ -820,7 +900,7 @@ namespace KeyDisplay
         {
             ApplySettingsColors();
             SettingsPanel.Visibility = Visibility.Visible;
-            DiagLog("settings opened theme=" + (_dark ? "dark" : "light"));
+            DiagLog("settings opened theme=" + _theme);
         }
 
         // 点击菜单框内部：标记已处理，避免冒泡到遮罩触发关闭
@@ -829,17 +909,78 @@ namespace KeyDisplay
             e.Handled = true;
         }
 
-        // 点击遮罩（菜单框外）：收起设置子菜单
+        // 点击遮罩（菜单框外）：收起设置子菜单，并一并收起关于面板与主题颜色面板
         private void SettingsPanel_Tapped(object sender, TappedRoutedEventArgs e)
         {
             SettingsPanel.Visibility = Visibility.Collapsed;
+            AboutPanel.Visibility = Visibility.Collapsed;
+            ThemeColorPanel.Visibility = Visibility.Collapsed;
             DiagLog("settings closed by mask");
         }
 
-        // 设置面板里的主题切换：与底部胶囊按钮同逻辑
+        // 设置菜单 信息按钮：弹出「关于」面板（覆盖在设置菜单之上）
+        private void SettingsInfo_Click(object sender, TappedRoutedEventArgs e)
+        {
+            ApplySettingsColors();
+            AboutPanel.Visibility = Visibility.Visible;
+            DiagLog("about opened");
+        }
+
+        // 点击关于面板框内部：标记已处理，避免冒泡到遮罩触发关闭
+        private void AboutMenu_Tapped(object sender, TappedRoutedEventArgs e)
+        {
+            e.Handled = true;
+        }
+
+        // 点击关于面板遮罩（面板框外）：收起关于面板
+        private void AboutPanel_Tapped(object sender, TappedRoutedEventArgs e)
+        {
+            if (e.OriginalSource == AboutPanel)
+            {
+                AboutPanel.Visibility = Visibility.Collapsed;
+                DiagLog("about closed by mask");
+            }
+        }
+
+        // GitHub 行点击：调用系统浏览器打开仓库页；Game Bar 沙箱可能拦截，失败静默降级为仅显示
+        private async void GitHubRow_Tapped(object sender, TappedRoutedEventArgs e)
+        {
+            try
+            {
+                await Windows.System.Launcher.LaunchUriAsync(new Uri("https://github.com/0810milk/Gamebar-Keycast"));
+            }
+            catch
+            {
+                // 静默降级：仅显示地址文本，不崩溃
+            }
+        }
+
+        // QQ 群行点击：调用系统打开 QQ 群快捷链接（链接不显示在界面，仅群号文本），失败静默
+        private async void QqRow_Tapped(object sender, TappedRoutedEventArgs e)
+        {
+            try
+            {
+                await Windows.System.Launcher.LaunchUriAsync(new Uri("https://qun.qq.com/universal-share/share?ac=1&authKey=O"));
+            }
+            catch
+            {
+                // 静默降级：仅显示群号文本，不崩溃
+            }
+        }
+
+        // 设置面板里的主题切换：三色轮换 dark→light→pink→dark（与底部胶囊按钮同逻辑）
         private void SettingsTheme_Click(object sender, TappedRoutedEventArgs e)
         {
-            _dark = !_dark;
+            // 五态循环：黑 → 灰 → 白 → 粉 → 蓝 → 黑
+            if (_theme == "dark") _theme = "gray";
+            else if (_theme == "gray") _theme = "light";
+            else if (_theme == "light") _theme = "pink";
+            else if (_theme == "pink") _theme = "blue";
+            else _theme = "dark";
+            // 切主题时收起调色盘/主题颜色菜单，避免残留覆盖层
+            PickerMenu.Visibility = Visibility.Collapsed;
+            ThemeColorPanel.Visibility = Visibility.Collapsed;
+            _activeSlot = -1;
             ApplyTheme();
         }
 
@@ -876,7 +1017,7 @@ namespace KeyDisplay
             ResetKeyLayout("X1", MouseX1, 36, 36, new Thickness(0, 0, 6, 0));
             ResetKeyLayout("X2", MouseX2, 36, 36, new Thickness(0, 0, 0, 0));
             // 重置 = 恢复到刚安装时的样子：删除全部自定义添加的按键（字典/面板/持久化），默认键恢复初始布局。
-            // 绝不触碰主题（_dark/_light 及任何配色）——重置只处理按键布局与自定义键。
+            // 绝不触碰主题（_theme/_light 及任何配色）——重置只处理按键布局与自定义键。
             var deadNames = new List<string>();
             foreach (var kv in _customKeys) deadNames.Add(kv.Key);
             foreach (var nm in deadNames)
@@ -913,7 +1054,7 @@ namespace KeyDisplay
             DiagLog("layout reset (custom keys cleared: " + deadNames.Count + ")");
         }
 
-        // 二级控件菜单："自定义控件"按键点击，展开控件菜单（覆盖层在设置面板之上，外观一致）
+        // 二级控件菜单的"自定义控件"按键点击，展开控件菜单（覆盖层在设置面板之上，外观一致）
         private void LockKey_Click(object sender, TappedRoutedEventArgs e)
         {
             ApplySettingsColors();
@@ -1178,8 +1319,542 @@ namespace KeyDisplay
             _layoutLocked = !_layoutLocked;
             ApplicationData.Current.LocalSettings.Values["LayoutLocked"] = _layoutLocked;
             ClearHover();   // 锁定/解锁都重置高亮与光标，避免残留 Size 光标
+            ApplyKeyOpacity();   // 锁定切换：解锁→按键临时 100%；重新锁定→恢复滑条设定值（不残留 100%）
             ApplySettingsColors();
             DiagLog("layout lock=" + (_layoutLocked ? "on" : "off"));
+        }
+
+        // 应用按键透明度：锁定开启（游玩中）= 滑条设定值；锁定关闭（编辑布局）= 临时强制 100%
+        // 关键：始终从 _keyOpacity 设定值计算，绝不从当前 Opacity 推导——退出编辑（重新开启锁定）自动回到设定值，
+        // 不会残留编辑期的 100%。被删内置键不在字典，foreach 天然跳过；菜单/关于面板/参考线不设 Opacity
+        private void ApplyKeyOpacity()
+        {
+            double target = _layoutLocked ? _keyOpacity / 100.0 : 1.0;
+            foreach (var kv in _keys) kv.Value.Opacity = target;
+            foreach (var kv in _mouse) kv.Value.Opacity = target;
+            foreach (var kv in _customKeys) kv.Value.Opacity = target;
+            if (MousePad != null) MousePad.Opacity = target;
+        }
+
+        // 透明度滑条：更新设定值、写持久化（KeyOpacity_ 存 0~100），立即按当前锁定状态应用
+        private void OpacitySlider_Changed(object sender, RangeBaseValueChangedEventArgs e)
+        {
+            _keyOpacity = e.NewValue;
+            ApplicationData.Current.LocalSettings.Values["KeyOpacity_"] = (int)e.NewValue;
+            ApplyKeyOpacity();
+        }
+
+        // ===================== 自定义主题色：工具与核心逻辑 =====================
+
+        // #RRGGBB 或 #AARRGGBB 转 Color（大小写均可，alpha 在前，8 位默认 alpha=FF）；非法返回 null
+        private static Color? ParseHex(string s)
+        {
+            if (s == null) return null;
+            s = s.Trim();   // 容忍粘贴带空格
+            if (s.Length < 7 || s.Length > 9 || s[0] != '#') return null;
+            byte A = 0xFF, R, G, B;
+            int off = 0;
+            if (s.Length == 9)
+            {
+                if (!byte.TryParse(s.Substring(1, 2), System.Globalization.NumberStyles.HexNumber, null, out A)) return null;
+                off = 2;
+            }
+            if (!byte.TryParse(s.Substring(1 + off, 2), System.Globalization.NumberStyles.HexNumber, null, out R)) return null;
+            if (!byte.TryParse(s.Substring(3 + off, 2), System.Globalization.NumberStyles.HexNumber, null, out G)) return null;
+            if (!byte.TryParse(s.Substring(5 + off, 2), System.Globalization.NumberStyles.HexNumber, null, out B)) return null;
+            return Color.FromArgb(A, R, G, B);
+        }
+
+        // Color 转 #RRGGBB（alpha=FF 时）或 #AARRGGBB（带透明度时）
+        private static string ToHex(Color c)
+        {
+            if (c.A == 0xFF)
+                return "#" + c.R.ToString("X2") + c.G.ToString("X2") + c.B.ToString("X2");
+            return "#" + c.A.ToString("X2") + c.R.ToString("X2") + c.G.ToString("X2") + c.B.ToString("X2");
+        }
+
+        // HSV 转 RGB（h 0~360，s/v 0~1），标准算法
+        private static Color HsvToRgb(double h, double s, double v)
+        {
+            double c = v * s;
+            double x = c * (1 - Math.Abs((h / 60.0) % 2 - 1));
+            double m = v - c;
+            double r = 0, g = 0, b = 0;
+            if (h < 60) { r = c; g = x; }
+            else if (h < 120) { r = x; g = c; }
+            else if (h < 180) { g = c; b = x; }
+            else if (h < 240) { g = x; b = c; }
+            else if (h < 300) { r = x; b = c; }
+            else { r = c; b = x; }
+            return Color.FromArgb(0xFF, (byte)Math.Round((r + m) * 255), (byte)Math.Round((g + m) * 255), (byte)Math.Round((b + m) * 255));
+        }
+
+        // 当前主题预设的第 k 槽颜色（dark/gray/light/pink/blue 从现有画刷字段取，与五态主题一致）
+        private Color PresetColor(int k)
+        {
+            Brush[] d = { _darkPanel, _darkBorder, _darkDefaultBg, _darkDefaultFg, _darkPressedBg, _darkPressedFg, _darkPad, _darkDefaultFg };
+            Brush[] g = { _grayPanel, _grayBorder, _grayKeyBg, _grayKeyFg, _grayPressedBg, _grayPressedFg, _grayPad, _grayDot };
+            Brush[] l = { _lightPanel, _lightBorder, _lightDefaultBg, _lightDefaultFg, _lightPressedBg, _lightPressedFg, _lightPad, _darkDefaultBg };
+            Brush[] p = { _pinkPanel, _pinkBorder, _pinkKeyBg, _pinkKeyFg, _pinkPressedBg, _pinkPressedFg, _pinkPad, _pinkDot };
+            Brush[] b = { _bluePanel, _blueBorder, _blueKeyBg, _blueKeyFg, _bluePressedBg, _bluePressedFg, _bluePad, _blueDot };
+            var pick = _theme == "dark" ? d : _theme == "gray" ? g : _theme == "light" ? l : _theme == "pink" ? p : b;
+            return ((SolidColorBrush)pick[k]).Color;
+        }
+
+        private Color? GetCustomKey(int k)
+        {
+            var v = ApplicationData.Current.LocalSettings.Values[CustomKeys[k]] as string;
+            return v != null ? ParseHex(v) : null;
+        }
+
+        private void SetCustomKey(int k, Color c)
+        {
+            ApplicationData.Current.LocalSettings.Values[CustomKeys[k]] = ToHex(c);
+        }
+
+        // 槽位显示色：custom 态读自定义键（缺省回落 dark 预设）；否则当前预设色
+        private Color GetSlotDisplayColor(int k)
+        {
+            if (_theme == "custom")
+            {
+                var c = GetCustomKey(k);
+                if (c.HasValue) return c.Value;
+                // 回落：dark 预设
+                var save = _theme; _theme = "dark";
+                var col = PresetColor(k);
+                _theme = save;
+                return col;
+            }
+            return PresetColor(k);
+        }
+
+        // 固化保存（用户拍板的预设联动）：先把当前显示中的 8 个值全部写入，再写被改槽位新值，切主题为 custom 并刷新应用
+        private void CommitSlotColor(int i, Color c)
+        {
+            for (int k = 0; k < 8; k++) SetCustomKey(k, GetSlotDisplayColor(k));
+            SetCustomKey(i, c);
+            _theme = "custom";
+            RefreshCustomBrushes();
+            ApplyTheme();
+        }
+
+        // 用 8 个 Custom_ 键刷新动态画刷（缺省回落 dark 预设，GetSlotDisplayColor 已处理回落逻辑）
+        private void RefreshCustomBrushes()
+        {
+            for (int k = 0; k < 8; k++)
+            {
+                _customBrushes[k].Color = GetSlotDisplayColor(k);
+            }
+        }
+
+        // 取色统一入口（低频：色块点击/hex 输入后同步）：回填 hex 框（防递归）→ 全量固化 → 盘同步。
+        // 拖动中（高频）不走这里，由三个 Update*Pick 直连轻量路径（只改画刷色 + marker，不落盘不刷文本）
+        private void ApplyPickedColor(Color c)
+        {
+            if (_activeSlot < 0 || PickerMenu.Visibility != Visibility.Visible) return;
+            _lastPickColor = c;
+            var tb = SlotInput(_activeSlot);
+            _syncing = true;
+            tb.Text = ToHex(c);
+            _syncing = false;
+            tb.BorderBrush = BorderB();   // 恢复可能存在的红框
+            CommitSlotColor(_activeSlot, c);
+            SyncPickerToColor(c);
+        }
+
+        // 拖动节流：两次取色间隔 <10ms 直接跳过（高刷屏 120Hz+ 事件合并，避免每帧全量工作）
+        private bool ThrottlePick()
+        {
+            int now = Environment.TickCount;
+            if (now - _lastPickMs < 10) return false;
+            _lastPickMs = now;
+            return true;
+        }
+
+        // 拖动结束：用拖动中保存的最后颜色全量固化（8 键落盘 + 切 custom + ApplyTheme），并回填 hex 框
+        private void FinalizePick()
+        {
+            if (_activeSlot < 0 || PickerMenu.Visibility != Visibility.Visible) return;
+            Color? c = _lastPickColor;
+            if (!c.HasValue) c = ParseHex(SlotInput(_activeSlot).Text);   // 兜底：未拖动直接点开再收起
+            if (c.HasValue)
+            {
+                CommitSlotColor(_activeSlot, c.Value);
+                var tb = SlotInput(_activeSlot);
+                _syncing = true;
+                tb.Text = ToHex(c.Value);   // 拖动中不刷文本，释放时一次回填
+                _syncing = false;
+            }
+        }
+
+        // 拖动开始：确保处于 custom 主题（否则轻量路径改的 brush 不被组件引用）
+        private void EnsureCustomTheme()
+        {
+            if (_theme != "custom")
+            {
+                _theme = "custom";
+                RefreshCustomBrushes();
+                ApplyTheme();
+            }
+        }
+
+        private TextBox SlotInput(int i)
+        {
+            switch (i)
+            {
+                case 0: return SlotInput0;
+                case 1: return SlotInput1;
+                case 2: return SlotInput2;
+                case 3: return SlotInput3;
+                case 4: return SlotInput4;
+                case 5: return SlotInput5;
+                case 6: return SlotInput6;
+                default: return SlotInput7;
+            }
+        }
+
+        // 让调色盘显示某颜色：更新色相、方块渐变、marker 位置、透明度条
+        private void SyncPickerToColor(Color c)
+        {
+            _alpha = c.A;
+            double r = c.R / 255.0, g = c.G / 255.0, b = c.B / 255.0;
+            double max = Math.Max(r, Math.Max(g, b)), min = Math.Min(r, Math.Min(g, b));
+            double delta = max - min;
+            double h = 0, s = 0, v = max;
+            if (delta > 0.0001)
+            {
+                s = delta / max;
+                if (max == r) h = 60 * (((g - b) / delta) % 6);
+                else if (max == g) h = 60 * ((b - r) / delta + 2);
+                else h = 60 * ((r - g) / delta + 4);
+                if (h < 0) h += 360;
+            }
+            _hue = h;
+            UpdateSvBase();
+            double sx = s, sy = 1 - v;
+            if (SvBox.ActualWidth > 0)
+            {
+                // 父级是 Grid，Canvas.SetLeft/Top 无效，必须用 Margin 定位
+                SvMarker.Margin = new Thickness(sx * SvBox.ActualWidth - SvMarker.Width / 2,
+                                                sy * SvBox.ActualHeight - SvMarker.Height / 2, 0, 0);
+            }
+            UpdateAlphaBar();
+            UpdateHueMarker();
+        }
+
+        // 更新方块底层渐变：白 → 当前色相纯色
+        private void UpdateSvBase()
+        {
+            var grad = SvBase.Fill as LinearGradientBrush;
+            if (grad == null) return;
+            grad.GradientStops[1].Color = HsvToRgb(_hue, 1.0, 1.0);
+        }
+
+        // ===================== 自定义主题色：事件 =====================
+
+        // 设置菜单"自定义"按钮：切到自定义主题并打开「主题颜色」子菜单
+        private void CustomTheme_Click(object sender, TappedRoutedEventArgs e)
+        {
+            _theme = "custom";
+            RefreshCustomBrushes();
+            ApplyTheme();
+            ApplySettingsColors();
+            // 同步 8 个 hex 输入框为当前显示值（重启后 custom 值也能正确显示，而非初始 #FF000000）
+            for (int k = 0; k < 8; k++)
+            {
+                _syncing = true;
+                SlotInput(k).Text = ToHex(GetSlotDisplayColor(k));
+                _syncing = false;
+            }
+            // 重置调色区，避免上次残留的展开状态
+            _activeSlot = -1;
+            PickerMenu.Visibility = Visibility.Collapsed;
+            ThemeColorPanel.Visibility = Visibility.Visible;
+            DiagLog("theme color menu opened");
+        }
+
+        // 点遮罩收起；点面板内不冒泡
+        private void ThemeColorPanel_Tapped(object sender, TappedRoutedEventArgs e)
+        {
+            if (e.OriginalSource == ThemeColorPanel)
+            {
+                ThemeColorPanel.Visibility = Visibility.Collapsed;
+                DiagLog("theme color closed by mask");
+            }
+        }
+
+        private void ThemeColorMenu_Tapped(object sender, TappedRoutedEventArgs e)
+        {
+            e.Handled = true;
+        }
+
+        // 点某行"颜色盘"：展开调色区并定位到该行，盘显示该行当前色；再点同一行则收起
+        private void SlotPick_Tapped(object sender, TappedRoutedEventArgs e)
+        {
+            int i = Convert.ToInt32(((Border)sender).Tag);   // XAML Tag 是字符串，必须 Convert 不能强转
+            if (_activeSlot == i && PickerMenu.Visibility == Visibility.Visible)
+            {
+                PickerMenu.Visibility = Visibility.Collapsed;
+                _activeSlot = -1;
+                return;
+            }
+            _activeSlot = i;
+            PickerTitle.Text = SlotNames[_activeSlot];
+            PickerMenu.Visibility = Visibility.Visible;
+            SyncPickerToColor(GetSlotDisplayColor(_activeSlot));
+        }
+
+        // hex 输入校验：合法则固化应用 + 盘同步；非法（非空）标红框不应用
+        private void SlotInput_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_syncing) return;
+            var tb = (TextBox)sender;
+            int i = Convert.ToInt32(tb.Tag);   // XAML Tag 是字符串，必须 Convert 不能强转
+            var c = ParseHex(tb.Text);
+            if (c.HasValue)
+            {
+                tb.BorderBrush = BorderB();
+                _activeSlot = i;
+                CommitSlotColor(i, c.Value);
+                SyncPickerToColor(c.Value);
+            }
+            else if (!string.IsNullOrEmpty(tb.Text))
+            {
+                tb.BorderBrush = new SolidColorBrush(Colors.Red);
+            }
+        }
+
+        // 方形盘：按下捕获 → 移动取色 → 释放（拖动中轻量更新，释放时固化）
+        private void SvBox_PointerPressed(object sender, PointerRoutedEventArgs e)
+        {
+            EnsureCustomTheme();
+            if (SvBox.CapturePointer(e.Pointer)) UpdateSvPick(e);
+        }
+
+        private void SvBox_PointerMoved(object sender, PointerRoutedEventArgs e)
+        {
+            if (SvBox.PointerCaptures != null && SvBox.PointerCaptures.Count > 0) UpdateSvPick(e);
+        }
+
+        private void SvBox_PointerReleased(object sender, PointerRoutedEventArgs e)
+        {
+            if (SvBox.PointerCaptures != null && SvBox.PointerCaptures.Count > 0)
+            {
+                SvBox.ReleasePointerCapture(e.Pointer);
+                FinalizePick();
+            }
+        }
+
+        private void UpdateSvPick(PointerRoutedEventArgs e)
+        {
+            if (SvBox.ActualWidth <= 0 || SvBox.ActualHeight <= 0) return;
+            if (!ThrottlePick()) return;
+            var pos = e.GetCurrentPoint(SvBox).Position;
+            double s = Math.Max(0.0, Math.Min(1.0, pos.X / SvBox.ActualWidth));
+            double v = Math.Max(0.0, Math.Min(1.0, 1.0 - pos.Y / SvBox.ActualHeight));
+            var c = HsvToRgb(_hue, s, v);
+            c.A = (byte)Math.Round(_alpha);
+            _lastPickColor = c;
+            _customBrushes[_activeSlot].Color = c;   // 引用即改，组件实时变色
+            SvMarker.Margin = new Thickness(s * SvBox.ActualWidth - SvMarker.Width / 2,
+                                            (1 - v) * SvBox.ActualHeight - SvMarker.Height / 2, 0, 0);
+            UpdateAlphaBar();   // RGB 变了，透明度条渐变同步
+        }
+
+        // 色相条：按下捕获 → 取色 → 释放（拖动中轻量更新，释放时固化）
+        private void HueBar_PointerPressed(object sender, PointerRoutedEventArgs e)
+        {
+            EnsureCustomTheme();
+            if (HueBar.CapturePointer(e.Pointer)) UpdateHuePick(e);
+        }
+
+        private void HueBar_PointerMoved(object sender, PointerRoutedEventArgs e)
+        {
+            if (HueBar.PointerCaptures != null && HueBar.PointerCaptures.Count > 0) UpdateHuePick(e);
+        }
+
+        private void HueBar_PointerReleased(object sender, PointerRoutedEventArgs e)
+        {
+            if (HueBar.PointerCaptures != null && HueBar.PointerCaptures.Count > 0)
+            {
+                HueBar.ReleasePointerCapture(e.Pointer);
+                FinalizePick();
+            }
+        }
+
+        // 透明度条：取 X → alpha（0~255）→ 用当前 S/V/H 重新取色
+        private void AlphaBar_PointerPressed(object sender, PointerRoutedEventArgs e)
+        {
+            EnsureCustomTheme();
+            if (AlphaBar.CapturePointer(e.Pointer)) UpdateAlphaPick(e);
+        }
+
+        private void AlphaBar_PointerMoved(object sender, PointerRoutedEventArgs e)
+        {
+            if (AlphaBar.PointerCaptures != null && AlphaBar.PointerCaptures.Count > 0) UpdateAlphaPick(e);
+        }
+
+        private void AlphaBar_PointerReleased(object sender, PointerRoutedEventArgs e)
+        {
+            if (AlphaBar.PointerCaptures != null && AlphaBar.PointerCaptures.Count > 0)
+            {
+                AlphaBar.ReleasePointerCapture(e.Pointer);
+                FinalizePick();
+            }
+        }
+
+        private void UpdateAlphaPick(PointerRoutedEventArgs e)
+        {
+            if (AlphaBar.ActualWidth <= 0) return;
+            if (!ThrottlePick()) return;
+            var pos = e.GetCurrentPoint(AlphaBar).Position;
+            _alpha = Math.Max(0.0, Math.Min(255.0, pos.X / AlphaBar.ActualWidth * 255.0));
+            // 用当前行的 S/V/H 与新区块重新取色
+            if (_activeSlot >= 0 && PickerMenu.Visibility == Visibility.Visible)
+            {
+                var cur = ParseHex(SlotInput(_activeSlot).Text);
+                if (cur.HasValue)
+                {
+                    var c = cur.Value;
+                    c.A = (byte)Math.Round(_alpha);
+                    _lastPickColor = c;
+                    _customBrushes[_activeSlot].Color = c;   // 引用即改，组件实时变色
+                }
+            }
+            UpdateAlphaBar();   // marker 随 alpha 移动（渐变 RGB 不变，无需重建）
+        }
+
+        // 更新透明度条：Fill = 透明 → 当前 RGB 色（垫灰底显示透明效果），marker 随 alpha 移动
+        private void UpdateAlphaBar()
+        {
+            var grad = AlphaFill.Fill as LinearGradientBrush;
+            if (grad == null)
+            {
+                grad = new LinearGradientBrush();
+                grad.StartPoint = new Point(0, 0); grad.EndPoint = new Point(1, 0);
+                grad.GradientStops.Add(new GradientStop { Color = Colors.Transparent, Offset = 0 });
+                grad.GradientStops.Add(new GradientStop { Color = Colors.Transparent, Offset = 1 });
+                AlphaFill.Fill = grad;
+            }
+            Color rgb = Colors.Black;
+            if (_activeSlot >= 0 && PickerMenu.Visibility == Visibility.Visible)
+            {
+                var cur = ParseHex(SlotInput(_activeSlot).Text);
+                if (cur.HasValue) { rgb = cur.Value; rgb.A = 0xFF; }
+            }
+            grad.GradientStops[0].Color = Colors.Transparent;
+            grad.GradientStops[1].Color = rgb;
+            if (AlphaBar.ActualWidth > 0)
+            {
+                // 父级是 Grid，Canvas.SetLeft/Top 无效，必须用 Margin 定位
+                AlphaMarker.Margin = new Thickness(_alpha / 255.0 * AlphaBar.ActualWidth - AlphaMarker.Width / 2,
+                                                   (AlphaBar.ActualHeight - AlphaMarker.Height) / 2, 0, 0);
+            }
+        }
+
+        // 色相条指示器：随 _hue 移动
+        private void UpdateHueMarker()
+        {
+            if (HueMarker == null || HueBar.ActualWidth <= 0) return;
+            HueMarker.Margin = new Thickness(_hue / 360.0 * HueBar.ActualWidth - HueMarker.Width / 2, 0, 0, 0);
+        }
+
+        private void UpdateHuePick(PointerRoutedEventArgs e)
+        {
+            if (HueBar.ActualWidth <= 0) return;
+            if (!ThrottlePick()) return;
+            var pos = e.GetCurrentPoint(HueBar).Position;
+            _hue = Math.Max(0.0, Math.Min(360.0, pos.X / HueBar.ActualWidth * 360.0));
+            UpdateSvBase();
+            UpdateHueMarker();
+            // 用新色相 + 当前 S/V（方块 marker 位置反推）实时取色——旧实现反推旧色导致拖色相条无效）
+            if (_activeSlot >= 0 && PickerMenu.Visibility == Visibility.Visible)
+            {
+                double sx = 0.5, sy = 0.5;
+                if (SvBox.ActualWidth > 0)
+                {
+                    sx = Math.Max(0.0, Math.Min(1.0, (SvMarker.Margin.Left + SvMarker.Width / 2) / SvBox.ActualWidth));
+                    sy = Math.Max(0.0, Math.Min(1.0, (SvMarker.Margin.Top + SvMarker.Height / 2) / SvBox.ActualHeight));
+                }
+                var c = HsvToRgb(_hue, sx, sy);
+                c.A = (byte)Math.Round(_alpha);
+                _lastPickColor = c;
+                _customBrushes[_activeSlot].Color = c;   // 引用即改，组件实时变色
+                UpdateAlphaBar();   // RGB 变了，透明度条渐变同步
+            }
+        }
+
+        // 16 常用色块：点击设为当前行颜色（低频操作，直接全量固化）
+        private void Swatch_Tapped(object sender, TappedRoutedEventArgs e)
+        {
+            var c = ParseHex((string)((Border)sender).Tag);
+            if (c.HasValue) ApplyPickedColor(c.Value);
+        }
+
+        // 构建 16 常用色块（4 × 4 列）与调色盘渐变（初始化时调用一次）
+        private void InitPickerControls()
+        {
+            string[] hexes = { "#000000", "#FFFFFF", "#808080", "#C0C0C0",
+                               "#FF0000", "#FF8000", "#FFFF00", "#80FF00",
+                               "#00FF00", "#00FF80", "#00FFFF", "#0080FF",
+                               "#0000FF", "#8000FF", "#FF00FF", "#FF0080" };
+            for (int r = 0; r < 4; r++)
+            {
+                ColorGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(20) });
+                var row = new Grid { Margin = new Thickness(0, 2, 0, 0) };
+                for (int c = 0; c < 4; c++) row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                for (int c = 0; c < 4; c++)
+                {
+                    string hex = hexes[r * 4 + c];
+                    var col = ParseHex(hex);
+                    var sw = new Border
+                    {
+                        Background = col.HasValue ? new SolidColorBrush(col.Value) : _darkDefaultBg,
+                        BorderBrush = new SolidColorBrush(Color.FromArgb(0x66, 0x00, 0x00, 0x00)),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(3),
+                        Margin = new Thickness(2),
+                        Tag = hex
+                    };
+                    sw.Tapped += Swatch_Tapped;
+                    Grid.SetColumn(sw, c);
+                    row.Children.Add(sw);
+                }
+                Grid.SetRow(row, r);
+                ColorGrid.Children.Add(row);
+            }
+
+            // 方块底层渐变：白 → 当前色相纯色（初始红色相）
+            var baseGrad = new LinearGradientBrush();
+            baseGrad.StartPoint = new Point(0, 0); baseGrad.EndPoint = new Point(1, 0);
+            baseGrad.GradientStops.Add(new GradientStop { Color = Colors.White, Offset = 0 });
+            baseGrad.GradientStops.Add(new GradientStop { Color = HsvToRgb(0, 1, 1), Offset = 1 });
+            SvBase.Fill = baseGrad;
+            // 方块上层渐变：透明 → 黑（垂直，明度）
+            var overGrad = new LinearGradientBrush();
+            overGrad.StartPoint = new Point(0, 0); overGrad.EndPoint = new Point(0, 1);
+            overGrad.GradientStops.Add(new GradientStop { Color = Colors.Transparent, Offset = 0 });
+            overGrad.GradientStops.Add(new GradientStop { Color = Colors.Black, Offset = 1 });
+            SvOver.Fill = overGrad;
+            // 色相条渐变：红→黄→绿→青→蓝→品红→红
+            var hueGrad = new LinearGradientBrush();
+            hueGrad.StartPoint = new Point(0, 0); hueGrad.EndPoint = new Point(1, 0);
+            double[] stops = { 0, 60, 120, 180, 240, 300, 360 };
+            foreach (var deg in stops)
+            {
+                hueGrad.GradientStops.Add(new GradientStop { Color = HsvToRgb(deg, 1, 1), Offset = deg / 360.0 });
+            }
+            (HueBar.Children[0] as Rectangle).Fill = hueGrad;
+
+            // 调色区刚展开时 SvBox 可能尚未布局（ActualWidth=0），marker 定位会被跳过——布局完成后补一次
+            SvBox.SizeChanged += (s2, e2) =>
+            {
+                if (PickerMenu.Visibility == Visibility.Visible && _activeSlot >= 0)
+                {
+                    var cur = ParseHex(SlotInput(_activeSlot).Text);
+                    if (cur.HasValue) SyncPickerToColor(cur.Value);
+                }
+            };
         }
 
         // 给按键附加指针处理并让内层文字不拦截指针（Border 直接收事件）
@@ -1350,14 +2025,14 @@ namespace KeyDisplay
             ClearHover();
             _hoverKey = b;
             _hoverMode = mode;
-            b.BorderBrush = _dark ? _darkDefaultFg : _darkDefaultBg;
+            b.BorderBrush = _theme == "dark" ? _darkDefaultFg : _darkDefaultBg;   // 深色主题白高亮，浅色主题黑高亮
             ApplyCursor(mode);
         }
 
         private void ClearHover()
         {
             if (_hoverKey == null) return;
-            _hoverKey.BorderBrush = _dark ? _darkBorder : _lightBorder;
+            _hoverKey.BorderBrush = BorderB();
             ApplyCursor(null);
             _hoverKey = null;
             _hoverMode = null;
@@ -1587,7 +2262,7 @@ namespace KeyDisplay
             HideSnapLines();     // 丢捕获兜底隐藏吸附参考线，防残留
         }
 
-        // ===================== 吸附对齐（0.5.0）=====================
+        // ===================== 吸附对齐（0.5.0）====================
         // 统一坐标系：SnapCanvas（最外层覆盖层），与被拖按键所在容器无关，跨 StackPanel 也能正确比较视觉边。
         // 关键：拖动中只用"起点视觉坐标 + 位移增量"反推被拖按键的边，避免改 Margin 后布局未刷新导致 TransformToVisual 读到旧值。
 

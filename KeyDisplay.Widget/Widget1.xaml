@@ -129,13 +129,31 @@
                             HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,8,44"
                             Tapped="SettingsMenu_Tapped">
                         <StackPanel Padding="12">
-                            <TextBlock x:Name="SettingsTitle" Text="设置" FontSize="14" FontWeight="SemiBold"/>
+                            <!-- 标题行：左侧「设置」+ 右上角「关于」椭圆按钮 -->
+                            <Grid>
+                                <TextBlock x:Name="SettingsTitle" Text="设置" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                <Border x:Name="SettingsInfoBtn" Width="46" Height="22" CornerRadius="11" BorderThickness="1"
+                                        HorizontalAlignment="Right" VerticalAlignment="Center" Tapped="SettingsInfo_Click">
+                                    <TextBlock x:Name="SettingsInfoText" Text="关于" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="11"/>
+                                </Border>
+                            </Grid>
                             <Grid Margin="0,12,0,0">
                                 <TextBlock x:Name="SettingsThemeLabel" Text="主题" FontSize="13" VerticalAlignment="Center"/>
+                                <Border x:Name="SettingsCustomBtn" Width="52" Height="22" CornerRadius="11"
+                                        BorderThickness="1" HorizontalAlignment="Right" Margin="0,0,52,0" Tapped="CustomTheme_Click">
+                                    <TextBlock Text="自定义" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="11"/>
+                                </Border>
                                 <Border x:Name="SettingsThemeBtn" Width="44" Height="22" CornerRadius="11"
                                         BorderThickness="1" HorizontalAlignment="Right" Tapped="SettingsTheme_Click">
                                     <TextBlock x:Name="SettingsThemeText" Text="白" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="11"/>
                                 </Border>
+                            </Grid>
+                            <!-- 按键透明度滑条：10%~100%，无数值标注，线性；游玩（锁定开启）时生效，编辑（锁定关闭）时按键强制 100% -->
+                            <Grid Margin="0,12,0,0">
+                                <TextBlock x:Name="SettingsOpacityLabel" Text="透明度" FontSize="13" VerticalAlignment="Center"/>
+                                <Slider x:Name="OpacitySlider" Minimum="10" Maximum="100" Value="100"
+                                        Width="108" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                        ValueChanged="OpacitySlider_Changed"/>
                             </Grid>
                             <!-- 鼠标垫显示/隐藏开关：仅切 Visibility（不删除，位置/尺寸/transform 保留） -->
                             <Grid Margin="0,12,0,0">
@@ -151,6 +169,170 @@
                             </Border>
                         </StackPanel>
                     </Border>
+                </Grid>
+                <!-- 主题颜色子菜单覆盖层：设置菜单"自定义"按钮弹出；点遮罩收起（8 个调色目标 + 独立调色盘子菜单） -->
+                <Grid x:Name="ThemeColorPanel" Grid.RowSpan="2" Visibility="Collapsed" Background="#40000000"
+                      Tapped="ThemeColorPanel_Tapped">
+                    <!-- 双栏容器：列0=调色盘、列1=主题颜色；整体右下对齐，由布局引擎保证两子菜单并排、永不重叠 -->
+                    <Grid HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,8,44">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                    <Border x:Name="ThemeColorMenu" Grid.Column="1" Width="320" CornerRadius="8" BorderThickness="1"
+                            Margin="8,0,0,0"
+                            Tapped="ThemeColorMenu_Tapped">
+                        <StackPanel Padding="12">
+                            <TextBlock x:Name="ThemeColorTitle" Text="主题颜色" FontSize="14" FontWeight="SemiBold"/>
+                            <!-- 8 行调色目标：目标名 | hex 输入框 | 颜色盘按钮 -->
+                            <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="64"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="60"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="SlotLabel0" Grid.Column="0" Text="面板" FontSize="12" VerticalAlignment="Center"/>
+                                <TextBox x:Name="SlotInput0" Grid.Column="1" FontSize="12" VerticalAlignment="Center" Margin="0,0,6,0"
+                                         Text="#FF000000" Tag="0" TextChanged="SlotInput_TextChanged"/>
+                                <Border x:Name="SlotPick0" Grid.Column="2" Height="24" CornerRadius="4" BorderThickness="1"
+                                        Tag="0" Tapped="SlotPick_Tapped">
+                                    <TextBlock Text="颜色盘" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                            </Grid>
+                            <Grid Margin="0,8,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="64"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="60"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="SlotLabel1" Grid.Column="0" Text="边框" FontSize="12" VerticalAlignment="Center"/>
+                                <TextBox x:Name="SlotInput1" Grid.Column="1" FontSize="12" VerticalAlignment="Center" Margin="0,0,6,0"
+                                         Text="#FF000000" Tag="1" TextChanged="SlotInput_TextChanged"/>
+                                <Border x:Name="SlotPick1" Grid.Column="2" Height="24" CornerRadius="4" BorderThickness="1"
+                                        Tag="1" Tapped="SlotPick_Tapped">
+                                    <TextBlock Text="颜色盘" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                            </Grid>
+                            <Grid Margin="0,8,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="64"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="60"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="SlotLabel2" Grid.Column="0" Text="按键底" FontSize="12" VerticalAlignment="Center"/>
+                                <TextBox x:Name="SlotInput2" Grid.Column="1" FontSize="12" VerticalAlignment="Center" Margin="0,0,6,0"
+                                         Text="#FF000000" Tag="2" TextChanged="SlotInput_TextChanged"/>
+                                <Border x:Name="SlotPick2" Grid.Column="2" Height="24" CornerRadius="4" BorderThickness="1"
+                                        Tag="2" Tapped="SlotPick_Tapped">
+                                    <TextBlock Text="颜色盘" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                            </Grid>
+                            <Grid Margin="0,8,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="64"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="60"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="SlotLabel3" Grid.Column="0" Text="文字" FontSize="12" VerticalAlignment="Center"/>
+                                <TextBox x:Name="SlotInput3" Grid.Column="1" FontSize="12" VerticalAlignment="Center" Margin="0,0,6,0"
+                                         Text="#FF000000" Tag="3" TextChanged="SlotInput_TextChanged"/>
+                                <Border x:Name="SlotPick3" Grid.Column="2" Height="24" CornerRadius="4" BorderThickness="1"
+                                        Tag="3" Tapped="SlotPick_Tapped">
+                                    <TextBlock Text="颜色盘" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                            </Grid>
+                            <Grid Margin="0,8,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="64"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="60"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="SlotLabel4" Grid.Column="0" Text="按下底" FontSize="12" VerticalAlignment="Center"/>
+                                <TextBox x:Name="SlotInput4" Grid.Column="1" FontSize="12" VerticalAlignment="Center" Margin="0,0,6,0"
+                                         Text="#FF000000" Tag="4" TextChanged="SlotInput_TextChanged"/>
+                                <Border x:Name="SlotPick4" Grid.Column="2" Height="24" CornerRadius="4" BorderThickness="1"
+                                        Tag="4" Tapped="SlotPick_Tapped">
+                                    <TextBlock Text="颜色盘" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                            </Grid>
+                            <Grid Margin="0,8,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="64"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="60"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="SlotLabel5" Grid.Column="0" Text="按下字" FontSize="12" VerticalAlignment="Center"/>
+                                <TextBox x:Name="SlotInput5" Grid.Column="1" FontSize="12" VerticalAlignment="Center" Margin="0,0,6,0"
+                                         Text="#FF000000" Tag="5" TextChanged="SlotInput_TextChanged"/>
+                                <Border x:Name="SlotPick5" Grid.Column="2" Height="24" CornerRadius="4" BorderThickness="1"
+                                        Tag="5" Tapped="SlotPick_Tapped">
+                                    <TextBlock Text="颜色盘" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                            </Grid>
+                            <Grid Margin="0,8,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="64"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="60"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="SlotLabel6" Grid.Column="0" Text="鼠标垫" FontSize="12" VerticalAlignment="Center"/>
+                                <TextBox x:Name="SlotInput6" Grid.Column="1" FontSize="12" VerticalAlignment="Center" Margin="0,0,6,0"
+                                         Text="#FF000000" Tag="6" TextChanged="SlotInput_TextChanged"/>
+                                <Border x:Name="SlotPick6" Grid.Column="2" Height="24" CornerRadius="4" BorderThickness="1"
+                                        Tag="6" Tapped="SlotPick_Tapped">
+                                    <TextBlock Text="颜色盘" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                            </Grid>
+                            <Grid Margin="0,8,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="64"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="60"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="SlotLabel7" Grid.Column="0" Text="鼠标点" FontSize="12" VerticalAlignment="Center"/>
+                                <TextBox x:Name="SlotInput7" Grid.Column="1" FontSize="12" VerticalAlignment="Center" Margin="0,0,6,0"
+                                         Text="#FF000000" Tag="7" TextChanged="SlotInput_TextChanged"/>
+                                <Border x:Name="SlotPick7" Grid.Column="2" Height="24" CornerRadius="4" BorderThickness="1"
+                                        Tag="7" Tapped="SlotPick_Tapped">
+                                    <TextBlock Text="颜色盘" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                    <!-- 独立调色盘子菜单：点某行"颜色盘"在主题颜色菜单左侧弹出；双栏 Grid 布局保证并排、永不重叠 -->
+                    <Border x:Name="PickerMenu" Grid.Column="0" Width="200" CornerRadius="8" BorderThickness="1" Visibility="Collapsed"
+                            Margin="0,0,8,0"
+                            Tapped="ThemeColorMenu_Tapped">
+                        <!-- 垂直排列（从上到下：标题 → 色相条 → 透明度条 → 色方块 → 常用色块），避免 Grid 默认同格重叠 -->
+                        <StackPanel x:Name="PickerArea" Margin="12">
+                            <TextBlock x:Name="PickerTitle" Text="面板" FontSize="11"/>
+                            <Grid x:Name="HueBar" Width="160" Height="16" Margin="0,8,0,0" HorizontalAlignment="Left"
+                                  PointerPressed="HueBar_PointerPressed" PointerMoved="HueBar_PointerMoved" PointerReleased="HueBar_PointerReleased">
+                                <Rectangle Fill="White" Stroke="Gray" StrokeThickness="1"/>
+                                <Ellipse x:Name="HueMarker" Width="4" Height="16" Fill="White" Stroke="Black" StrokeThickness="1"
+                                         HorizontalAlignment="Left" VerticalAlignment="Top" IsHitTestVisible="False"/>
+                            </Grid>
+                            <StackPanel Margin="0,6,0,0" HorizontalAlignment="Left">
+                                <TextBlock Text="透明度" FontSize="10"/>
+                                <Grid x:Name="AlphaBar" Width="160" Height="16" Margin="0,2,0,0"
+                                      PointerPressed="AlphaBar_PointerPressed" PointerMoved="AlphaBar_PointerMoved" PointerReleased="AlphaBar_PointerReleased">
+                                    <Rectangle x:Name="AlphaBg" Fill="#FFCCCCCC"/>
+                                    <Rectangle x:Name="AlphaFill" Fill="Transparent"/>
+                                    <Ellipse x:Name="AlphaMarker" Width="12" Height="12" Stroke="White" StrokeThickness="2"
+                                             HorizontalAlignment="Left" VerticalAlignment="Top" IsHitTestVisible="False"/>
+                                </Grid>
+                            </StackPanel>
+                            <Grid x:Name="SvBox" Width="160" Height="160" Margin="0,6,0,0" HorizontalAlignment="Left"
+                                  PointerPressed="SvBox_PointerPressed" PointerMoved="SvBox_PointerMoved" PointerReleased="SvBox_PointerReleased">
+                                <Rectangle x:Name="SvBase" Fill="White"/>
+                                <Rectangle x:Name="SvOver" Fill="Transparent"/>
+                                <Ellipse x:Name="SvMarker" Width="12" Height="12" Stroke="White" StrokeThickness="2"
+                                         HorizontalAlignment="Left" VerticalAlignment="Top" IsHitTestVisible="False"/>
+                            </Grid>
+                            <Grid x:Name="ColorGrid" Width="160" Margin="0,10,0,0" HorizontalAlignment="Left"/>
+                        </StackPanel>
+                    </Border>
+                    </Grid>
                 </Grid>
                 <!-- 二级控件菜单覆盖层：从设置面板的"自定义控件"按键弹出；点遮罩/关闭按钮收起（与 SettingsPanel 同一覆盖层网格，保证两菜单位置对齐） -->
                 <Grid x:Name="LockPanel" Grid.RowSpan="2" Visibility="Collapsed" Background="#40000000"
@@ -317,6 +499,34 @@
                                     <TextBlock x:Name="DeleteConfirmNoText" Text="取消" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
                                 </Border>
                             </StackPanel>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+                <!-- 关于面板覆盖层：设置菜单 ⓘ 按钮点击弹出；点遮罩收起（同在 SettingsPanel 覆盖层网格内，层级更高覆盖其上） -->
+                <Grid x:Name="AboutPanel" Grid.RowSpan="2" Visibility="Collapsed" Background="#40000000"
+                      Tapped="AboutPanel_Tapped">
+                    <Border x:Name="AboutMenu" Width="240" CornerRadius="8" BorderThickness="1"
+                            HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,8,44"
+                            Tapped="AboutMenu_Tapped">
+                        <StackPanel Padding="16">
+                            <TextBlock x:Name="AboutTitle" Text="关于" FontSize="14" FontWeight="SemiBold"/>
+                            <!-- 圆形头像：Ellipse + ImageBrush（UniformToFill 裁切为圆形），直径 52 -->
+                            <Ellipse x:Name="AboutAvatar" Width="52" Height="52" HorizontalAlignment="Center" Margin="0,14,0,0">
+                                <Ellipse.Fill>
+                                    <ImageBrush ImageSource="ms-appx:///Assets/Avatar.jpg" Stretch="UniformToFill"/>
+                                </Ellipse.Fill>
+                            </Ellipse>
+                            <TextBlock x:Name="AboutAuthor" Text="恐龙milk" HorizontalAlignment="Center" FontSize="13" Margin="0,10,0,0"/>
+                            <!-- GitHub 行：点击打开浏览器（链接文本显示，可点击） -->
+                            <Border x:Name="AboutGitHubRow" Margin="0,12,0,0" Tapped="GitHubRow_Tapped" Background="Transparent">
+                                <TextBlock x:Name="AboutGitHubText" Text="https://github.com/0810milk/Gamebar-Keycast"
+                                           FontSize="11" TextWrapping="Wrap" TextDecorations="Underline" Foreground="#4A9EFF"/>
+                            </Border>
+                            <!-- QQ 反馈群行：点击跳群链接（只显示群号文本，链接不显示） -->
+                            <Border x:Name="AboutQqRow" Margin="0,8,0,0" Tapped="QqRow_Tapped" Background="Transparent">
+                                <TextBlock x:Name="AboutQqText" Text="QQ 反馈群：2152061189"
+                                           FontSize="12" TextDecorations="Underline" Foreground="#4A9EFF"/>
+                            </Border>
                         </StackPanel>
                     </Border>
                 </Grid>
