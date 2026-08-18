@@ -17,11 +17,11 @@
 ```
 ┌──────────────────────────┐       命名管道             ┌───────────────────────────┐
 │  KeyDisplayCompanion     │  \\.\pipe\KeyDisplayState │  KeyDisplay.Widget        │
-│  (Python + PyInstaller)  │ ←── 68B/帧, 240Hz ──────► │  (UWP C# Game Bar 小组件) │
-│  · WH_KEYBOARD_LL 钩子    │                           │  · CreateFileW + FileStream│
-│  · WH_MOUSE_LL 钩子       │                           │  · 跟随刷新率渲染          │
-│  · RAWINPUT 游戏内累计    │                           │  · 右下角胶囊按钮切主题    │
-│  · GetAsyncKeyState 兜底  │                           │  · 自定义控件/长按移动/删除 │
+│  (Python + PyInstaller)  │ ←── 68B/帧, 240Hz ──────► │  (UWP C# Game Bar 小组件)  │
+│  · WH_KEYBOARD_LL 钩子   │                           │  · CreateFileW + FileStream│
+│  · WH_MOUSE_LL 钩子      │                           │  · 跟随刷新率渲染           │
+│  · RAWINPUT 游戏内累计    │                           │  · 右下角胶囊按钮切主题     │
+│  · GetAsyncKeyState 兜底 │                           │  · 自定义控件/长按移动/删除 │
 └──────────────────────────┘                           └───────────────────────────┘
         ▲ keydisplay://start（协议唤起）
         │
