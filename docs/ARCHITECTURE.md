@@ -1,4 +1,4 @@
-﻿# 架构说明
+# 架构说明
 
 ## 组件与职责
 
@@ -24,12 +24,16 @@ KeyDisplayCompanion（Python，桌面进程）           KeyDisplay.Widget（UWP
 - **小组件**：仅在 Game Bar 显示时存活；打开即尝试连接管道，连不上时
   每 2 秒重试，并触发一次协议启动。
 
-## 快照协议（36 字节，小端）
+## 快照协议（68 字节，小端，v3）
+
+> 0.4.0 起协议升 v3：为支持「自定义控件」的任意按键反色，在 v2 基础上
+> 追加 32 字节的 256 位虚拟键（VK）位图，快照由 36 → 68 字节。
+> 旧 36 字节连接仍可解析（`ExtraKeys` 为 null）。
 
 ```
 偏移  类型    字段
 0     char[4]  MAGIC "KDSP"
-4     u8       version = 2
+4     u8       version = 3
 5     u16      keys
 7     u8       mouse
 8     i32      mouseX
@@ -39,15 +43,19 @@ KeyDisplayCompanion（Python，桌面进程）           KeyDisplay.Widget（UWP
 24    i32      vsW
 28    i32      vsH
 32    u32      seq
+36    u8[32]   extra（256 位 VK 位图）  ← v3 新增
 ```
 
 - `keys` 位序（12 位）：`0=Q 1=W 2=E 3=R 4=A 5=S 6=D 7=F 8=Shift 9=Ctrl 10=Alt 11=Space`
 - `mouse` 位序（5 位）：`0=L 1=R 2=M 3=X1 4=X2`
+- `extra`（v3 新增）：256 位虚拟键位图，`bit = (extra[vk >> 3] >> (vk & 7)) & 1`，
+  覆盖全部按键按下状态，供小组件驱动自定义键反色（UWP 沙箱禁止 P/Invoke
+  `GetAsyncKeyState`，故由伴生进程采集全键位图后随帧下发）。
 - `mouseX/Y`：Win32 屏幕坐标；虚拟屏幕范围（`vsX/vsY/vsW/vsH`）由伴生进程
   用 `GetSystemMetrics`（SM_*VIRTUALSCREEN）采集后随帧下发，
   小组件据此把坐标映射到 80×80 鼠标垫（UWP 沙箱内不允许 P/Invoke
   `user32!GetSystemMetrics`，故由桌面侧传入）。
-- 字节布局 `struct.calcsize('<4sBHBiiiiiiI') == 36`。
+- 字节布局 `struct.calcsize('<4sBHBiiiiiiI32s') == 68`。
 
 Python 侧序列化：`KeyDisplay.Companion\state.py`；
 C# 侧解析：`KeyDisplay.Widget\InputStateReader.cs`。
