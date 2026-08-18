@@ -117,24 +117,59 @@ python -m unittest test_units -v   # 工作目录 KeyDisplay.Companion，26 测�
 ```
 MSBuild 编译 → 签名 msix（signtool）→ 复制到 dist\KeyDisplay.Install（删旧 msix，避免通配符混入）
 → 三处版本号同步（VERSION.md / README.md / installer\setup.iss）+ UWP 包版本递增（Package.appxmanifest）
+→ 【必须】跑发布门禁：powershell -NoProfile -ExecutionPolicy Bypass -File installer\publish-check.ps1
+   （exit 0 才允许继续；检查 dist 单 msix / msix 签名有效 / install-msix.ps1 带 BOM / 安装器文件与 git 一致）
 → ISCC 打包 Setup.exe → 归档 release/<版本> + 刷新桌面副本
-→ git commit → 【推到 GitHub：§4.6】（可选：发 Release）
+→ git commit（安装器文件先提交，保证门禁第 4 项通过）→ 【推到 GitHub：§4.6】（可选：发 Release）
 ```
 - 版本号对照表：语义版本 0.x.y ↔ UWP 包 1.x.y.0（发布时两处都要递增）。
 
+> **⚠️ 0.5.2-beta 发布事故（2026-08-18，已修复）——发布前必读：**
+> 三重叠加导致用户安装 0.5.2-beta 后装成老版本 0.4.1：
+> 1. **dist\KeyDisplay.Install 残留旧 msix**：setup.iss 用 `*.msix` 通配符打包，把残留的
+>    `KeyDisplay.Widget_1.1.0.0_x64.msix`（0.4.1）一起打进 Setup.exe；install-msix.ps1 旧逻辑
+>    `Get-Item *.msix | Select -First 1` 按字母序取第一个（1.1.0.0 < 1.2.2.0）→ 装旧版。
+>    修复：install-msix.ps1 改为**多 msix 直接报错**；发布前**必须清空 dist\KeyDisplay.Install**
+>    只留最新一个 msix。
+> 2. **install-msix.ps1 编码坑**：文件是 UTF-8 无 BOM + 中文，被 Inno 复制到 {app} 后由提权
+>    PS 5.1 按 ANSI 读取 → 中文乱码 → 含 `$LASTEXITCODE` 的 throw 字符串语法崩坏 →
+>    **脚本从未成功执行过**（装啥都不生效，用户看到机器上原有旧包）。修复：文件转 UTF-8 带 BOM
+>    （`[IO.File]::WriteAllText($p, $c, New-Object Text.UTF8Encoding $true)`）；改后必须提权实测。
+> 3. **msix 签名损坏**：0.5.2 发布时构建的 msix 签名无效（Add-AppxPackage 报 0x80073D02/
+>    DeploymentError，且旧包进程占用也报 0x80073D02——先杀进程再装）。修复：发布前用 signtool
+>    重新签名（/fd SHA256 /f cert\KeyDisplay.pfx /p KeyDisplayDev!）。
+> **发布核对清单（每次发布必须逐项过）**：① dist\KeyDisplay.Install 清空后只拷贝一个最新 msix；
+> ② signtool 签名该 msix（SIGN=0）；③ install-msix.ps1 为 UTF-8 带 BOM（首 3 字节 EF BB BF）；
+> ④ 提权实装验证（全新目录 /DIR 安装一次，确认包版本正确）；⑤ 上传资产前核对 SHA256。
+
 ### 4.5 部署到本机（签名 + 提权安装，验收前必做）
+
+**⚠️ 必须用「参数化脚本 + 结果日志文件」法，不要用内联提权命令**（历史事故：内联字符串里的 `$?` 被外层 PS 先展开 → 永远真 → "部署退出码 0" 假成功，包实际没装）。
+
 ```powershell
 # 1) 签名（测试证书 KeyDisplayDev!）
 & 'C:\Program Files (x86)\Windows Kits\10\bin\<sdk版本>\x64\signtool.exe' sign /fd SHA256 /f 'cert\KeyDisplay.pfx' /p 'KeyDisplayDev!' <msix路径>
 # （signtool 可用 Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe 定位）
+# 注：编译刚结束立即签名偶发 "SignTool Error: An unexpected internal error"（文件句柄占用），等 2~4 秒重签即可。
 
-# 2) 提权安装（停止旧进程 → 移除旧包 → 装新包；UAC 会弹窗）
-$msix = "<完整msix路径>"
-$cmd = "-NoProfile -ExecutionPolicy Bypass -Command `"Get-Process | Where-Object { `$_.Name -like 'KeyDisplay.Widget*' } | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep 1; Get-AppxPackage -Name 'KeyDisplay.Widget' | Remove-AppxPackage -ErrorAction SilentlyContinue; Start-Sleep 2; Add-AppxPackage -Path '$msix'; if (`$?) { 'INSTALL_OK' } else { 'INSTALL_FAIL' }`""
+# 2) 写部署脚本到 %TEMP%\dsh-install.ps1（param 版，脚本内零中文）：
+#    param([string]$Msix)  → Stop-Process 旧 widget → Remove-AppxPackage → Add-AppxPackage -Path $Msix
+#    → 结果写 %TEMP%\dsh-install-result.txt（"INSTALL_OK"/"INSTALL_FAIL: 原因"）
+
+# 3) 提权运行（UAC 弹窗）：绝对路径作为 -Msix 参数传入
+$msix = "C:\绝对\路径\KeyDisplay.Widget_x64.msix"   # ❗ 必须绝对路径！
 $psi = New-Object System.Diagnostics.ProcessStartInfo
-$psi.FileName='powershell.exe'; $psi.Arguments=$cmd; $psi.Verb='runas'; $psi.UseShellExecute=$true
-$p=[System.Diagnostics.Process]::Start($psi); $p.WaitForExit(90000)
+$psi.FileName='powershell.exe'
+$psi.Arguments='-NoProfile -ExecutionPolicy Bypass -File "' + "$env:TEMP\dsh-install.ps1" + '" -Msix "' + $msix + '"'
+$psi.Verb='runas'; $psi.UseShellExecute=$true
+$p=[System.Diagnostics.Process]::Start($psi); $p.WaitForExit(120000)
+
+# 4) 验证：读 %TEMP%\dsh-install-result.txt + Get-AppxPackage -Name 'KeyDisplay.Widget' 的 Version
 ```
+
+**部署两坑（都踩过，必记）：**
+1. **脚本内不能有中文**：提权进程是 PS 5.1，把 UTF-8 无 BOM 脚本按 ANSI 读 → `恐龙` 变 `鎭愰緳` → "路径不存在"。所以脚本零中文，msix 路径走 `-Msix` 命令行参数（Unicode 安全，CreateProcessW）。
+2. **msix 必须绝对路径**：提权进程工作目录是 `C:\WINDOWS\system32`，相对路径解析到 system32 下 → "找不到路径"。
 
 ### 4.6 GitHub 发布（版本更新直接推到 GitHub，含凭据与踩坑）
 
@@ -193,6 +228,7 @@ $p=[System.Diagnostics.Process]::Start($psi); $p.WaitForExit(90000)
 | `git status` 大量 M 文件 | 上次任务改动未提交 | 读 diff 确认内容 → 问用户是否提交，勿自动丢弃（**若用户已说"暂缓发布"，属正常，别擅自提交**） |
 | 桌面安装包版本 ≠ VERSION.md | 上次发布没走完 | 报告用户，补全发布（§4.4）|
 | `.ps1` 中文乱码 / 语法报错 | 脚本是 UTF-8 无 BOM | 用 PS 转 `UTF8Encoding($true)`（带 BOM），项目 `install-msix.ps1` 等已修，不要改回无 BOM |
+| 提权安装 "INSTALL_FAIL: 找不到路径" | 脚本含中文（提权 PS5.1 按 ANSI 读，乱码）或 msix 传了相对路径（提权进程工作目录是 system32） | 脚本零中文 + msix 绝对路径走 `-Msix` 参数（见 §4.5）|
 | `Get-AppxPackage` 版本仍是旧包号 | 升级未完成 | 走 `install-msix.ps1`（它已含强制移除旧包 + 验证，见 HANDOFF）|
 | 进程 `KeyDisplayCompanion` 停不掉（Access denied） | 它以系统级/单实例 mutex 运行 | 属正常，不强制杀；新启动的加载新 exe 即是新版 |
 | **主 Agent 输出空转**（反复说"调用工具/执行"却无实际动作、复读机式重复） | 模型输出层异常（本次会话最严重一次，连续数百行无效重复） | **用户直接打断**："继续 / 重新执行"；新 Agent 接手后**第一件事就是真实调用工具**，用结果说话，绝不模仿空转 |

@@ -5,10 +5,16 @@
 > `docs/INHERIT.md`（**Agent 继承协议 v2.0：主 Agent 卡顿/断联时的接班 4 步核对 + 项目快照 + 思维链 + 防空转纪律**）、
 > `docs/ARCHITECTURE.md`（架构细节）、`docs/BUILD.md`、`docs/INSTALL.md`、
 > `docs/ISSUE-PINNED-CHROME.md`（全部历史问题的调查与修复记录，1–25 节）、`VERSION.md`（版本登记）。
-> **当前最新交接事项：0.5.3（开发中，未发布）**——设置菜单「关于」信息面板（ⓘ 已改为椭圆「关于」按钮：圆形头像 + 作者「恐龙milk」+ GitHub 地址可点击 + QQ 反馈群 2152061189 点击跳群链接）。
-> 任务书：`docs/TASK-0.5.3-about.md`。**功能已开发+部署验证完毕，按用户要求暂缓发布**，待用户后续新功能一起打包发布。
-> ⚠️ **工作区有未提交改动**（0.5.3 关于面板的 Widget1.xaml/.cs、csproj、Avatar.jpg、任务书），属正常暂存，用户明确"等新功能一起更新"。
-> 上一版 0.5.2 beta 已发布（GitHub 9 个 Release，Latest = 0.5.2）。
+> **当前最新交接事项：0.5.3（4 个功能开发完成，未发布）**——
+> ① 设置菜单「关于」信息面板（椭圆「关于」按钮：圆形头像 + 作者「恐龙milk」+ GitHub 可点击 + QQ 反馈群 2152061189）；
+> ② 三色主题轮转（黑→白→粉，P()/语义画刷架构，pink=黑字白底）；
+> ③ 按键透明度滑条（10~100%，锁定开=设定值/锁定关=强制100%，KeyOpacity_ 持久化）；
+> ④ 主题颜色子菜单（「自定义」按钮 → 8 槽位调色：hex 输入/方形 HSV 调色盘/色相条/透明度条/16 常用色 4×4；Custom_×8 持久化，改槽位时 8 值整体固化 + 主题切 custom；预设联动显示）。
+> 任务书：`docs/TASK-0.5.3-about.md` / `TASK-0.5.3-theme.md` / `TASK-0.5.3-themecolor.md`。
+> **用户已拍板：暂不发布**，继续攒新功能，下次与后续功能一起打包发布。
+> ⚠️ **工作区有未提交改动**（0.5.3 的 Widget1.xaml/.cs、csproj、Avatar.jpg、3 个任务书），属正常暂存。
+> **GitHub 核对（2026-08-18 维护）：** 9 个 Release，Latest=0.5.2-beta，安装包 SHA256 与本地构建完全一致（资产无问题）；0.5.3 功能从未发布，故 GitHub 下载的 0.5.2 不含新功能属预期。
+> **⚠️ 0.5.2-beta 安装包事故（2026-08-18 已修复并替换资产）：** 用户反馈 GitHub 下载的 0.5.2-beta 装出老版本（0.4.1）。深挖三重根因：① dist\KeyDisplay.Install 残留 1.1.0.0 msix 被 `*.msix` 通配符打进 Setup.exe，install-msix.ps1 按字母序取第一个装成旧版；② install-msix.ps1 为 UTF-8 无 BOM+中文，提权 PS 5.1 按 ANSI 读乱码导致语法崩坏，**脚本从未成功执行**；③ 0.5.2 msix 签名损坏（0x80073D02 装不上）。已修复：脚本转 BOM + 多 msix 报错、重签 msix、清 dist、重建 Setup.exe（SHA256 eda89d15…）并替换 GitHub 资产。教训已记 INHERIT §4.4 发布核对清单。
 
 ---
 

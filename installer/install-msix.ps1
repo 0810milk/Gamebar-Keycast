@@ -16,10 +16,17 @@ param(
 $ErrorActionPreference = "Stop"
 
 Write-Host "==> 0/4 解析 APPX 路径"
-$resolved = Get-Item -Path $AppxPath -ErrorAction SilentlyContinue |
-    Select-Object -First 1
-if (-not $resolved) { throw "找不到 APPX: $AppxPath" }
-$AppxPath = $resolved.FullName
+# ❗ 历史事故（0.5.2-beta 装成 0.4.1）：*.msix 通配符匹配到多个文件时，
+#   旧实现按字母序取第一个（1.1.0.0 < 1.2.2.0）→ 装到残留的老版本。
+#   现在：多文件直接报错（发布流程必须保证目录只含最新一个 msix）。
+$resolved = @(Get-Item -Path $AppxPath -ErrorAction SilentlyContinue)
+if ($resolved.Count -eq 0) { throw "找不到 APPX: $AppxPath" }
+if ($resolved.Count -gt 1) {
+    $names = ($resolved | ForEach-Object { $_.Name }) -join ", "
+    throw "appx 目录存在多个 msix（$names）——请清理只保留最新一个后再安装，否则可能装到旧版本！"
+}
+$AppxPath = $resolved[0].FullName
+Write-Host "APPX: $AppxPath"
 Write-Host "APPX: $AppxPath"
 
 Write-Host "==> 1/4 信任证书: certutil -addstore TrustedPeople"
