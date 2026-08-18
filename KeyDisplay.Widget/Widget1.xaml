@@ -113,12 +113,12 @@
                 <!-- 自定义按键区：由"自定义控件"菜单从 87 配列布局添加的按键（动态创建、按名去重、持久化恢复） -->
                 <StackPanel x:Name="CustomKeysPanel" Orientation="Horizontal" Margin="0,8,0,0" Visibility="Collapsed"/>
                 </StackPanel>
-                <!-- 底部工具条：设置图标（右对齐） -->
+                <!-- 底部工具条：设置按钮（右对齐，固定不参与移动/锁定） -->
                 <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
-                    <Border x:Name="SettingsBtn" Width="44" Height="26" CornerRadius="13" BorderThickness="1"
+                    <Border x:Name="SettingsBtn" Width="52" Height="26" CornerRadius="13" BorderThickness="1"
                             Tapped="Settings_Click">
-                        <TextBlock x:Name="SettingsBtnIcon" Text="&#x2699;" FontFamily="Segoe UI Symbol"
-                                   HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="14"/>
+                        <TextBlock x:Name="SettingsBtnText" Text="设置"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
                     </Border>
                 </StackPanel>
                 <TextBlock x:Name="StatusText" Text="" HorizontalAlignment="Right" VerticalAlignment="Top" FontSize="10" Opacity="0.6"/>
@@ -135,6 +135,14 @@
                                 <Border x:Name="SettingsThemeBtn" Width="44" Height="22" CornerRadius="11"
                                         BorderThickness="1" HorizontalAlignment="Right" Tapped="SettingsTheme_Click">
                                     <TextBlock x:Name="SettingsThemeText" Text="白" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="11"/>
+                                </Border>
+                            </Grid>
+                            <!-- 鼠标垫显示/隐藏开关：仅切 Visibility（不删除，位置/尺寸/transform 保留） -->
+                            <Grid Margin="0,12,0,0">
+                                <TextBlock x:Name="SettingsPadLabel" Text="鼠标垫" FontSize="13" VerticalAlignment="Center"/>
+                                <Border x:Name="SettingsPadBtn" Width="44" Height="22" CornerRadius="11"
+                                        BorderThickness="1" HorizontalAlignment="Right" Tapped="PadToggle_Click">
+                                    <TextBlock x:Name="SettingsPadText" Text="显示" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="11"/>
                                 </Border>
                             </Grid>
                             <Border x:Name="LockKeyBtn" Height="26" CornerRadius="6" BorderThickness="1"
@@ -278,10 +286,6 @@
                                         <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="↓" Tapped="AddKeyFromLayout_Click"><TextBlock Text="↓" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
                                         <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="←" Tapped="AddKeyFromLayout_Click"><TextBlock Text="←" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
                                         <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="→" Tapped="AddKeyFromLayout_Click"><TextBlock Text="→" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
-                                    </StackPanel>
-                                    <!-- 触摸板：作为一个可移动/缩放的 80×80 自定义控件添加（与普通键一致，但不参与按下反色） -->
-                                    <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                                        <Border Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Padding="8,0" Tag="触摸板" Tapped="AddKeyFromLayout_Click"><TextBlock Text="触摸板" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
                                     </StackPanel>
                                 </StackPanel>
                             </ScrollViewer>

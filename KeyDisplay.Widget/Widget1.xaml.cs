@@ -74,6 +74,7 @@ namespace KeyDisplay
         private double _dragStartW, _dragStartH;
         private double _dragStartML, _dragStartMT;
         private bool _padCustomized;                 // 用户是否已自定义过鼠标垫（首次移动/缩放后置位，UpdatePadSize 据此跳过自动跟随）
+        private bool _padVisible = true;             // 鼠标垫显示/隐藏状态（true=显示；仅切 Visibility，不影响位置/尺寸/transform）
         private Border _hoverKey;                    // 当前边缘悬停高亮的按键
         private string _hoverMode;                   // 当前悬停的边缘模式（l/r/t/b/tl/tr/bl/br，null=无）
         private CoreCursorType? _curCursorType;      // 当前生效的全局光标类型（null=系统默认）
@@ -136,11 +137,7 @@ namespace KeyDisplay
                 SnapCanvas.Children.Add(line);
             }
 
-            _keys["Q"] = KeyQ; _keys["W"] = KeyW; _keys["E"] = KeyE; _keys["R"] = KeyR;
-            _keys["A"] = KeyA; _keys["S"] = KeyS; _keys["D"] = KeyD; _keys["F"] = KeyF;
-            _keys["Shift"] = KeyShift; _keys["Ctrl"] = KeyCtrl; _keys["Alt"] = KeyAlt; _keys["Space"] = KeySpace;
-            _mouse["L"] = MouseL; _mouse["M"] = MouseM; _mouse["MR"] = MouseR;   // MR：避免与键盘 R 的 Layout_R 冲突
-            _mouse["X1"] = MouseX1; _mouse["X2"] = MouseX2;
+            RegisterDefaultKeys();   // 登记全部默认键（键盘 12 键 + 鼠标 5 键）到字典
 
             // 布局自定义：所有按键/鼠标键附加指针处理（边缘/四角拖拽缩放）；鼠标垫也参与（长按移动 + 等比缩放）
             foreach (var kv in _keys) AttachResize(kv.Value);
@@ -150,7 +147,9 @@ namespace KeyDisplay
             MouseDot.IsHitTestVisible = false;
             AttachResize(MousePad);
             RestoreLayout();
+            RestoreDeletions();   // 应用"已删默认键"状态（Collapsed + 移除字典）
             RestorePadCustom();
+            RestorePadVisibility();
             object layoutLock = ApplicationData.Current.LocalSettings.Values["LayoutLocked"];
             _layoutLocked = (layoutLock is bool lb) ? lb : true;
 
@@ -484,11 +483,13 @@ namespace KeyDisplay
                 bool m = (snap.Mouse & 4) != 0;
                 bool x1 = (snap.Mouse & 8) != 0;
                 bool x2 = (snap.Mouse & 16) != 0;
-                if (_mouse["L"] != _moveKey) SetKey(_mouse["L"], l);
-                if (_mouse["MR"] != _moveKey) SetKey(_mouse["MR"], r);
-                if (_mouse["M"] != _moveKey) SetKey(_mouse["M"], m);
-                if (_mouse["X1"] != _moveKey) SetKey(_mouse["X1"], x1);
-                if (_mouse["X2"] != _moveKey) SetKey(_mouse["X2"], x2);
+                // 被删的内置鼠标键不在字典里，用 TryGetValue 容忍缺失（不抛 KeyNotFound）
+                Border mL;
+                if (_mouse.TryGetValue("L", out mL)) { if (mL != _moveKey) SetKey(mL, l); }
+                if (_mouse.TryGetValue("MR", out mL)) { if (mL != _moveKey) SetKey(mL, r); }
+                if (_mouse.TryGetValue("M", out mL)) { if (mL != _moveKey) SetKey(mL, m); }
+                if (_mouse.TryGetValue("X1", out mL)) { if (mL != _moveKey) SetKey(mL, x1); }
+                if (_mouse.TryGetValue("X2", out mL)) { if (mL != _moveKey) SetKey(mL, x2); }
 
                 UpdatePadSize(snap.VsW, snap.VsH);
                 // 目标点：绝对屏幕坐标 → 垫面位置（点 = 屏幕的真实镜像）
@@ -704,6 +705,7 @@ namespace KeyDisplay
             SettingsMenu.BorderBrush = _dark ? _darkBorder : _lightBorder;
             SettingsTitle.Foreground = _dark ? _darkDefaultFg : _lightDefaultFg;
             SettingsThemeLabel.Foreground = _dark ? _darkDefaultFg : _lightDefaultFg;
+            SettingsPadLabel.Foreground = _dark ? _darkDefaultFg : _lightDefaultFg;
 
             LockMenu.Background = _dark ? _darkPanel : _lightPanel;
             LockMenu.BorderBrush = _dark ? _darkBorder : _lightBorder;
@@ -713,6 +715,7 @@ namespace KeyDisplay
             KeyPickerToggleArrow.Foreground = _dark ? _darkDefaultFg : _lightDefaultFg;
 
             SettingsThemeText.Text = _dark ? "\u767d" : "\u9ed1";   // 白 / 黑
+            SettingsPadText.Text = _padVisible ? "\u663e\u793a" : "\u9690\u85cf";   // 显示 / 隐藏
             LockSwitchText.Text = _layoutLocked ? "\u5f00" : "\u5173";   // 开 / 关（锁定菜单开关，与设置面板逻辑同步）
             if (_dark)
             {
@@ -740,7 +743,12 @@ namespace KeyDisplay
                 DeleteConfirmNo.Background = _darkDefaultBg;
                 DeleteConfirmNo.BorderBrush = _darkBorder;
                 DeleteConfirmNoText.Foreground = _darkDefaultFg;
-                SettingsBtnIcon.Foreground = _darkDefaultFg;
+                SettingsBtn.Background = _darkDefaultBg;
+                SettingsBtn.BorderBrush = _darkBorder;
+                SettingsBtnText.Foreground = _darkDefaultFg;
+                SettingsPadBtn.Background = _lightDefaultBg;
+                SettingsPadBtn.BorderBrush = _lightBorder;
+                SettingsPadText.Foreground = _lightDefaultFg;
             }
             else
             {
@@ -768,7 +776,12 @@ namespace KeyDisplay
                 DeleteConfirmNo.Background = _lightDefaultBg;
                 DeleteConfirmNo.BorderBrush = _lightBorder;
                 DeleteConfirmNoText.Foreground = _lightDefaultFg;
-                SettingsBtnIcon.Foreground = _lightDefaultFg;
+                SettingsBtn.Background = _lightDefaultBg;
+                SettingsBtn.BorderBrush = _lightBorder;
+                SettingsBtnText.Foreground = _lightDefaultFg;
+                SettingsPadBtn.Background = _darkDefaultBg;
+                SettingsPadBtn.BorderBrush = _darkBorder;
+                SettingsPadText.Foreground = _darkDefaultFg;
             }
             ApplyPickerColors();
         }
@@ -830,9 +843,21 @@ namespace KeyDisplay
             ApplyTheme();
         }
 
+        // 鼠标垫显示/隐藏开关：仅切 Visibility（不是删除，位置/尺寸/transform 全部保留），写 PadVisible_ 持久化并刷新配色
+        private void PadToggle_Click(object sender, TappedRoutedEventArgs e)
+        {
+            _padVisible = !_padVisible;
+            MousePad.Visibility = _padVisible ? Visibility.Visible : Visibility.Collapsed;
+            ApplicationData.Current.LocalSettings.Values["PadVisible_"] = _padVisible ? 1 : 0;
+            ApplySettingsColors();
+            DiagLog("pad visible=" + (_padVisible ? "on" : "off"));
+        }
+
         // 重置按键布局共用逻辑（设置面板与二级锁定菜单的重置按钮都走这里）
         private void PerformLayoutReset()
         {
+            // 重新登记全部默认键（含被删的），恢复其可见性由下方 ResetKeyLayout 统一处理
+            RegisterDefaultKeys();
             ResetKeyLayout("Q", KeyQ, 52, 48, new Thickness(0, 0, 6, 0));
             ResetKeyLayout("W", KeyW, 52, 48, new Thickness(0, 0, 6, 0));
             ResetKeyLayout("E", KeyE, 52, 48, new Thickness(0, 0, 6, 0));
@@ -877,6 +902,13 @@ namespace KeyDisplay
             MousePad.Margin = new Thickness(0, 0, 0, 0);
             MousePad.RenderTransform = null;   // 清 transform（恢复默认位置）
             RefreshPadAutoSize();
+            // 清除"已删默认键"标记（重置后全部默认键恢复到刚安装状态）
+            var delNames = new List<string>();
+            foreach (var kv in ApplicationData.Current.LocalSettings.Values)
+            {
+                if (kv.Key.StartsWith("Deleted_", StringComparison.Ordinal)) delNames.Add(kv.Key);
+            }
+            foreach (var k in delNames) ApplicationData.Current.LocalSettings.Values.Remove(k);
             ClearHover();
             DiagLog("layout reset (custom keys cleared: " + deadNames.Count + ")");
         }
@@ -907,12 +939,11 @@ namespace KeyDisplay
                 DiagLog("custom key duplicate: " + name);
                 return;
             }
-            bool isPad = name == "触摸板";
             var border = new Border
             {
-                Width = isPad ? 80 : CustomKeyWidth(name),
-                Height = isPad ? 80 : 48,
-                CornerRadius = new CornerRadius(isPad ? 8 : 6),
+                Width = CustomKeyWidth(name),
+                Height = 48,
+                CornerRadius = new CornerRadius(6),
                 BorderThickness = new Thickness(1),
                 Margin = new Thickness(0, 0, 6, 0),
                 Tag = name
@@ -1081,7 +1112,7 @@ namespace KeyDisplay
         // 删除确认框：确认删除
         private void DeleteConfirmYes_Click(object sender, TappedRoutedEventArgs e)
         {
-            if (_deleteConfirmKey != null) ConfirmDeleteCustomKey(_deleteConfirmKey);
+            if (_deleteConfirmKey != null) ConfirmDeleteKey(_deleteConfirmKey);
             _deleteConfirmKey = null;
             DeleteConfirmPanel.Visibility = Visibility.Collapsed;
             e.Handled = true;
@@ -1135,6 +1166,7 @@ namespace KeyDisplay
             b.Height = h;
             b.Margin = m;
             b.RenderTransform = null;   // 清 transform（恢复默认位置）
+            b.Visibility = Visibility.Visible;   // 恢复可见（重置 = 恢复被删内置键）
             ApplicationData.Current.LocalSettings.Values[LayoutPrefix + name] =
                 ((int)w) + ";" + ((int)h) + ";0;0";   // 位置=transform，归零
         }
@@ -1210,19 +1242,34 @@ namespace KeyDisplay
         }
 
         // 确认删除自定义键：移除字典/面板/LocalSettings/CustomPos，并清理状态
-        private void ConfirmDeleteCustomKey(Border b)
+        // 确认删除键：自定义键（移除字典/面板/持久化）或内置键（字典移除/Collapsed/清 Layout_ 并记录 Deleted_），并清理状态
+        private void ConfirmDeleteKey(Border b)
         {
-            string name = b.Tag as string;
-            if (string.IsNullOrEmpty(name)) return;
-            if (!_customKeys.Remove(name)) return;
-            CustomKeysPanel.Children.Remove(b);
-            ApplicationData.Current.LocalSettings.Values.Remove("Custom_" + name);
-            ApplicationData.Current.LocalSettings.Values.Remove("CustomPos_" + name);
-            if (_customKeys.Count == 0) CustomKeysPanel.Visibility = Visibility.Collapsed;
+            string name = NameOf(b);
+            if (string.IsNullOrEmpty(name) || name == "?" || name == "Pad") return;
+            if (_customKeys.ContainsKey(name))
+            {
+                // 自定义键：移除面板 + 清 Custom_/CustomPos_ 持久化
+                _customKeys.Remove(name);
+                CustomKeysPanel.Children.Remove(b);
+                ApplicationData.Current.LocalSettings.Values.Remove("Custom_" + name);
+                ApplicationData.Current.LocalSettings.Values.Remove("CustomPos_" + name);
+                if (_customKeys.Count == 0) CustomKeysPanel.Visibility = Visibility.Collapsed;
+                DiagLog("custom key deleted: " + name);
+            }
+            else if (_keys.ContainsKey(name) || _mouse.ContainsKey(name))
+            {
+                // 内置键：字典移除 + 清 Layout_ 持久化 + 记录 Deleted_ + Collapsed（不销毁，便于重置恢复）
+                DeleteDefaultKey(name, b);
+                DiagLog("default key deleted: " + name);
+            }
+            else
+            {
+                return;
+            }
             _deleteConfirmKey = null;
             DeleteConfirmPanel.Visibility = Visibility.Collapsed;
             CancelLongPress();
-            DiagLog("custom key deleted: " + name);
         }
 
         // 判定指针是否在按键边缘/四角（8px 阈值），返回模式 l/r/t/b/tl/tr/bl/br
@@ -1321,7 +1368,7 @@ namespace KeyDisplay
         {
             var b = sender as Border;
             if (b == null) return;
-            // 右键：仅自定义键弹删除确认框；先取消待决长按并防护拖拽/移动中的状态
+            // 右键：自定义键与内置键（_keys/_mouse）均可删除确认；鼠标垫（Pad）不可删
             if (e.GetCurrentPoint(b).Properties.IsRightButtonPressed)
             {
                 CancelLongPress();
@@ -1330,8 +1377,8 @@ namespace KeyDisplay
                     e.Handled = true;
                     return;
                 }
-                string nm = b.Tag as string;
-                if (nm != null && _customKeys.ContainsKey(nm))
+                string nm = NameOf(b);
+                if (nm != "?" && nm != "Pad")
                 {
                     _deleteConfirmKey = b;
                     DeleteConfirmText.Text = "\u5220\u9664\u63a7\u4ef6 " + nm + " \uff1f";   // 删除控件 <名> ？
@@ -1884,6 +1931,60 @@ namespace KeyDisplay
             return "?";
         }
 
+        // 登记全部默认键到字典（键盘 12 键 + 鼠标 5 键；覆盖式，重置/恢复被删键时复用）
+        private void RegisterDefaultKeys()
+        {
+            _keys["Q"] = KeyQ; _keys["W"] = KeyW; _keys["E"] = KeyE; _keys["R"] = KeyR;
+            _keys["A"] = KeyA; _keys["S"] = KeyS; _keys["D"] = KeyD; _keys["F"] = KeyF;
+            _keys["Shift"] = KeyShift; _keys["Ctrl"] = KeyCtrl; _keys["Alt"] = KeyAlt; _keys["Space"] = KeySpace;
+            _mouse["L"] = MouseL; _mouse["M"] = MouseM; _mouse["MR"] = MouseR;   // MR：避免与键盘 R 的 Layout_R 冲突
+            _mouse["X1"] = MouseX1; _mouse["X2"] = MouseX2;
+        }
+
+        // 删除一个默认键（内置 _keys/_mouse）：字典移除 + 清 Layout_ 持久化 + 记录 Deleted_ + Collapsed（不销毁，便于重置恢复）
+        private void DeleteDefaultKey(string name, Border b)
+        {
+            if (_keys.ContainsKey(name)) _keys.Remove(name);
+            else if (_mouse.ContainsKey(name)) _mouse.Remove(name);
+            ApplicationData.Current.LocalSettings.Values.Remove("Layout_" + name);
+            ApplicationData.Current.LocalSettings.Values["Deleted_" + name] = 1;
+            b.Visibility = Visibility.Collapsed;
+        }
+
+        // 启动/布局加载后应用"已删默认键"状态：遍历 Deleted_ 前缀，把对应键 Collapsed + 移除字典
+        private void RestoreDeletions()
+        {
+            try
+            {
+                var values = ApplicationData.Current.LocalSettings.Values;
+                var deadNames = new List<string>();
+                foreach (var kv in values)
+                {
+                    if (kv.Key.StartsWith("Deleted_", StringComparison.Ordinal))
+                    {
+                        deadNames.Add(kv.Key.Substring("Deleted_".Length));
+                    }
+                }
+                foreach (var nm in deadNames)
+                {
+                    Border b;
+                    if (_keys.TryGetValue(nm, out b))
+                    {
+                        _keys.Remove(nm);
+                        b.Visibility = Visibility.Collapsed;
+                    }
+                    else if (_mouse.TryGetValue(nm, out b))
+                    {
+                        _mouse.Remove(nm);
+                        b.Visibility = Visibility.Collapsed;
+                    }
+                }
+            }
+            catch
+            {
+            }
+        }
+
         // 布局持久化：每个按键存 "宽;高;tx;ty"（位置=TranslateTransform 偏移，Margin 不再存位置）。
         // 老数据 4 段格式 w;h;ml;mt 的 ml/mt 数值等价于 tx/ty，可直接兼容解读（无需迁移）。
         private void SaveLayout()
@@ -1927,6 +2028,28 @@ namespace KeyDisplay
             }
             catch
             {
+            }
+        }
+
+        // 启动恢复鼠标垫显示状态：PadVisible_=0 → 隐藏（Collapsed），否则显示（默认显示）
+        private void RestorePadVisibility()
+        {
+            try
+            {
+                object pv = ApplicationData.Current.LocalSettings.Values["PadVisible_"];
+                bool visible = true;
+                if (pv != null)
+                {
+                    if (pv is bool b) visible = b;
+                    else visible = !(pv.ToString() == "0");
+                }
+                _padVisible = visible;
+                MousePad.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+            }
+            catch
+            {
+                _padVisible = true;
+                MousePad.Visibility = Visibility.Visible;
             }
         }
 
