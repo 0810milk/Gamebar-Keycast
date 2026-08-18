@@ -30,6 +30,14 @@ if (-not (Test-Path $Appx)) { throw "找不到 APPX: $Appx" }
 if (-not (Test-Path $Cert)) { throw "找不到证书: $Cert（请先运行 make-cert.ps1）" }
 if (-not (Test-Path $CompanionExe)) { throw "找不到伴生进程: $CompanionExe（请先运行 KeyDisplay.Companion\build.ps1）" }
 
+# 安装前：结束残留进程（widget / 伴生 / GameBar 缓存），避免文件占用导致要求重启或升级残留
+Write-Host "结束残留进程..."
+Get-Process | Where-Object { $_.Name -like 'KeyDisplay*' } |
+    Stop-Process -Force -ErrorAction SilentlyContinue
+Get-Process | Where-Object { $_.Name -in @('GameBar', 'GameBarFTServer', 'GameBarPresenter') } |
+    Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 800
+
 $targetDir = Join-Path $env:ProgramFiles "KeyDisplay"
 New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
 Copy-Item -Path $CompanionExe -Destination $targetDir -Force

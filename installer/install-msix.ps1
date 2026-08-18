@@ -26,27 +26,45 @@ Write-Host "==> 1/4 信任证书: certutil -addstore TrustedPeople"
 & certutil -addstore "TrustedPeople" $CertPath | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "证书导入失败（错误码 $LASTEXITCODE）" }
 
-Write-Host "==> 2/4 安装/更新 APPX: $AppxPath"
+Write-Host "==> 2/4 安装/更新 APPX（先确保旧包彻底移除，避免残留）: $AppxPath"
+
+# 前置清理：结束可能占用包的进程（widget / 宿主缓存）
+Write-Host "---- 结束残留进程（widget / Game Bar 宿主缓存）----"
+Get-Process | Where-Object { $_.Name -like 'KeyDisplay.Widget*' } |
+    Stop-Process -Force -ErrorAction SilentlyContinue
+Get-Process | Where-Object { $_.Name -in @('GameBar','GameBarFTServer','GameBarPresenter') } |
+    Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 800
+
+# 强制移除现有包（无论版本，保证全新加载，避免旧包/旧块图残留导致"装完还在旧版"）
 $existing = Get-AppxPackage -Name "KeyDisplay.Widget"
 if ($existing) {
-    $incoming = (Get-AppxPackageManifest -Path $AppxPath).Package.Identity.Version
-    if ([version]$existing.Version -ge [version]$incoming) {
-        # 同版本/低版本无法直接 Add-AppxPackage（0x80073CFB），先移除旧包再安装，
-        # 否则脚本在此中断、后续协议注册与 config.json 都不会执行（覆盖更新失效）
-        Write-Host "现有 $($existing.Version)，目标 $incoming：先移除旧包"
-        Get-Process | Where-Object Name -like 'KeyDisplay.Widget*' |
-            Stop-Process -Force -ErrorAction SilentlyContinue
-        Remove-AppxPackage -Package $existing.PackageFullName
-        Add-AppxPackage -Path $AppxPath
+    Write-Host "---- 移除现有包: $($existing.PackageFullName) ----"
+    $retries = 0
+    do {
+        try { Remove-AppxPackage -Package $existing.PackageFullName -ErrorAction Stop } catch {
+            Write-Host "移除失败($retries): $($_.Exception.Message)"
+        }
+        Start-Sleep -Seconds 2
+        # 移除后包可能仍在"待处理"状态，等待其真正消失
+        $remaining = Get-AppxPackage -Name "KeyDisplay.Widget" -ErrorAction SilentlyContinue
+        $retries++
+    } while ($remaining -and $retries -lt 5)
+    if ($remaining) {
+        throw "无法完全移除旧包 $($existing.PackageFullName)，存在残留。请手动结束 GameBar 后重试。"
     }
-    else {
-        Add-AppxPackage -Path $AppxPath -ForceApplicationShutdown
-    }
+    Write-Host "---- 旧包已完全移除 ----"
 }
-else {
-    Add-AppxPackage -Path $AppxPath
-}
-if (-not $?) { throw "APPX 安装失败" }
+
+# 安装新包
+Write-Host "---- 安装新包 ----"
+Add-AppxPackage -Path $AppxPath
+if (-not $?) { throw "APPX 安装失败（错误码 $LASTEXITCODE）" }
+
+# 验证安装成功
+$installed = Get-AppxPackage -Name "KeyDisplay.Widget"
+if (-not $installed) { throw "APPX 安装后未找到包，安装失败" }
+Write-Host "---- 安装成功: $($installed.PackageFullName) ----"
 
 Write-Host "==> 3/4 注册 keydisplay 协议"
 $regBase = "HKCU:\Software\Classes\keydisplay"
