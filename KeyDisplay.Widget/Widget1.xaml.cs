@@ -59,13 +59,21 @@ namespace KeyDisplay
         // 边缘悬停仍配合边框高亮作为视觉提示。
         private const double EdgeHit = 8.0;          // 判定为"边缘"的指针距离（px）
         private const double MinKeyW = 20, MinKeyH = 20;
+        private const double MinPadW = 40, MinPadH = 36;   // 鼠标垫等比缩放最小尺寸（沿用 ComputePadSize 的 MinW/MinH）
         private const string LayoutPrefix = "Layout_";
+        // 吸附对齐（0.5.0）：拖动/缩放时按周边按键十字方向边对边贴齐；软化——接近 SnapNear 触发、偏离 SnapRelease 脱离
+        private const double SnapNear = 8.0;         // 触发吸附的边距（px）
+        private const double SnapRelease = 10.0;     // 脱离吸附的边距（px，大于 SnapNear 形成滞回，避免抖动）
+        private const double SnapHintNear = 40.0;    // 接近提示阈值（px）：8~40 显示半透明虚线，>40 不显示
+        private static readonly Color SnapLineColor = Color.FromArgb(0xFF, 0x4A, 0x9E, 0xFF);   // 浅蓝 #4A9EFF（吸中实线）
+        private static readonly Color SnapHintColor = Color.FromArgb(0x80, 0x4A, 0x9E, 0xFF);   // 半透明浅蓝（接近提示虚线，约 50%）
         private bool _layoutLocked = true;           // true=锁定（不可调整），默认开
         private Border _dragKey;                     // 当前拖拽中的按键
         private string _dragMode;                    // l/r/t/b/tl/tr/bl/br
         private double _dragStartX, _dragStartY;
         private double _dragStartW, _dragStartH;
         private double _dragStartML, _dragStartMT;
+        private bool _padCustomized;                 // 用户是否已自定义过鼠标垫（首次移动/缩放后置位，UpdatePadSize 据此跳过自动跟随）
         private Border _hoverKey;                    // 当前边缘悬停高亮的按键
         private string _hoverMode;                   // 当前悬停的边缘模式（l/r/t/b/tl/tr/bl/br，null=无）
         private CoreCursorType? _curCursorType;      // 当前生效的全局光标类型（null=系统默认）
@@ -79,6 +87,14 @@ namespace KeyDisplay
         private double _moveStartML, _moveStartMT;     // 移动按下时的 Margin 起点
         private Border _deleteConfirmKey;              // 待确认删除的自定义键（右键弹出）
         private Point _pressPointerRoot;               // 最近一次按下的根坐标（长按移动用）
+
+        // 吸附对齐（0.5.0）：参考线对象池（最多 4 条复用，避免频繁分配）+ 拖动起点的视觉基准坐标（SnapCanvas 坐标系）
+        private readonly Line[] _snapLines = new Line[4];   // 吸参考线池（贯穿线，实线=吸中 / 虚线=接近提示）
+        private bool _snapActiveH, _snapActiveV;            // 水平/垂直轴是否正处吸附态（滞回：吸住后偏离 >SnapRelease 才脱离）
+        private double _moveBaseLeft, _moveBaseTop;         // 移动起点：被拖按键的视觉左/上（SnapCanvas 坐标，用于拖动中免 TransformToVisual 反推）
+        private double _dragBaseLeft, _dragBaseTop;         // 缩放起点：被调按键的视觉左/上（SnapCanvas 坐标）
+        private readonly SolidColorBrush _snapSolid = new SolidColorBrush(SnapLineColor);   // 吸中实线画刷
+        private readonly SolidColorBrush _snapDash = new SolidColorBrush(SnapHintColor);    // 接近提示虚线画刷
 
         // 暗色主题画刷
         private readonly SolidColorBrush _darkDefaultBg = new SolidColorBrush(Colors.Black);
@@ -105,16 +121,36 @@ namespace KeyDisplay
             Loaded += OnLoaded;
             Unloaded += OnUnloaded;
 
+            // 吸附参考线池：预先创建 4 条 Line 加入 SnapCanvas（默认隐藏），吸附时复用对象而非频繁分配。
+            // 实线/虚线、实色/半透明由显示时按距离分级动态切换（见 UpdateSnapLine）。
+            for (int i = 0; i < _snapLines.Length; i++)
+            {
+                var line = new Line
+                {
+                    Stroke = _snapSolid,
+                    StrokeThickness = 1,
+                    StrokeDashArray = new DoubleCollection { 4.0, 3.0 },
+                    Visibility = Visibility.Collapsed
+                };
+                _snapLines[i] = line;
+                SnapCanvas.Children.Add(line);
+            }
+
             _keys["Q"] = KeyQ; _keys["W"] = KeyW; _keys["E"] = KeyE; _keys["R"] = KeyR;
             _keys["A"] = KeyA; _keys["S"] = KeyS; _keys["D"] = KeyD; _keys["F"] = KeyF;
             _keys["Shift"] = KeyShift; _keys["Ctrl"] = KeyCtrl; _keys["Alt"] = KeyAlt; _keys["Space"] = KeySpace;
             _mouse["L"] = MouseL; _mouse["M"] = MouseM; _mouse["MR"] = MouseR;   // MR：避免与键盘 R 的 Layout_R 冲突
             _mouse["X1"] = MouseX1; _mouse["X2"] = MouseX2;
 
-            // 布局自定义：所有按键/鼠标键附加指针处理（边缘/四角拖拽缩放），鼠标垫不参与
+            // 布局自定义：所有按键/鼠标键附加指针处理（边缘/四角拖拽缩放）；鼠标垫也参与（长按移动 + 等比缩放）
             foreach (var kv in _keys) AttachResize(kv.Value);
             foreach (var kv in _mouse) AttachResize(kv.Value);
+            // 鼠标垫：让内部 Canvas/点不拦截指针，保证事件落到 MousePad Border 本身
+            MousePadCanvas.IsHitTestVisible = false;
+            MouseDot.IsHitTestVisible = false;
+            AttachResize(MousePad);
             RestoreLayout();
+            RestorePadCustom();
             object layoutLock = ApplicationData.Current.LocalSettings.Values["LayoutLocked"];
             _layoutLocked = (layoutLock is bool lb) ? lb : true;
 
@@ -305,7 +341,7 @@ namespace KeyDisplay
             foreach (var kv in _keys) SetKey(kv.Value, false);
             foreach (var kv in _mouse) SetKey(kv.Value, false);
             foreach (var kv in _customKeys) SetKey(kv.Value, false);
-            if (_moveKey != null) { SetKey(_moveKey, false); _moveKey = null; }   // 主题切换时清除移动高亮
+            if (_moveKey != null) { EndMoveStyle(_moveKey); _moveKey = null; }   // 主题切换时清除移动高亮（鼠标垫走专属恢复）
             _deleteConfirmKey = null;
             if (DeleteConfirmPanel != null) DeleteConfirmPanel.Visibility = Visibility.Collapsed;
 
@@ -349,6 +385,20 @@ namespace KeyDisplay
             border.BorderBrush = borderBrush;
             var tb = border.Child as TextBlock;
             if (tb != null) tb.Foreground = fg;
+        }
+
+        // 移动落位/丢捕获时恢复按键样式：普通键走 SetKey(false)；鼠标垫恢复其专属半透明背景（避免被默认键样式覆盖）
+        private void EndMoveStyle(Border key)
+        {
+            if (key == MousePad)
+            {
+                MousePad.Background = _dark ? _darkPad : _lightPad;
+                MousePad.BorderBrush = _dark ? _darkBorder : _lightBorder;
+            }
+            else
+            {
+                SetKey(key, false);
+            }
         }
 
         // 每 UI 帧触发；数据帧序号未变化时跳过按键重绘（高帧率下空闲时零开销）
@@ -467,8 +517,10 @@ namespace KeyDisplay
 
         // 鼠标垫尺寸跟随屏幕纵横比：随帧下发的 vs_w/vs_h 就是鼠标坐标的映射基准，
         // 比例天然一致，分辨率/多显示器切换时实时跟随。
+        // 用户自定义过鼠标垫（移动/缩放）后 _padCustomized=true，跳过自动跟随，保留用户尺寸。
         private void UpdatePadSize(int vsW, int vsH)
         {
+            if (_padCustomized) return;
             double w, h;
             ComputePadSize(vsW, vsH, out w, out h);
             if (Math.Abs(w - _padW) < 0.5 && Math.Abs(h - _padH) < 0.5) return;
@@ -490,6 +542,126 @@ namespace KeyDisplay
             h = rh * scale;
             if (w < MinW) { double f = MinW / w; w = MinW; h *= f; }
             if (h < MinH) { double f = MinH / h; h = MinH; w *= f; }
+        }
+
+        // ===================== 鼠标垫等比缩放（0.5.0）=====================
+        // 任意边/四角拖动鼠标垫都等比例变化宽高（比例 = 拖动起点 _dragStartW/_dragStartH）。
+        // 主导轴决定缩放：纯水平边（l/r）由 dx 主导；纯垂直边（t/b）由 dy 主导；
+        // 四角比较 |dx| 与 |dy|（换算到同一量纲）取变化更大的轴，保证比例一致不漂移。
+        // 锚点：左/右/上/下"被拖动的边"移动，其"对边"保持不动（固定锚）。
+        // 最小尺寸：等比同比例钳制到 MinPadW/MinPadH（沿用 ComputePadSize 的 40/36）。
+        private void ComputePadEqualScale(ref double w, ref double h, ref double ml, ref double mt, double dx, double dy)
+        {
+            double w0 = _dragStartW, h0 = _dragStartH;
+            double k = h0 / w0;   // 宽→高比例（等比约束系数）
+            bool hasH = _dragMode.Contains("l") || _dragMode.Contains("r");
+            bool hasV = _dragMode.Contains("t") || _dragMode.Contains("b");
+            bool horizontalDominant;
+            // 决定主导轴：单边直接按其轴；四角按 |dx|/w0 与 |dy|/h0 比较谁更大
+            if (hasH && hasV)
+            {
+                horizontalDominant = (Math.Abs(dx) / w0) >= (Math.Abs(dy) / h0);
+            }
+            else
+            {
+                horizontalDominant = hasH;
+            }
+            if (horizontalDominant)
+            {
+                // 水平主导：w 由 dx 决定，h = w * k
+                double wNew = _dragMode.Contains("l") ? w0 - dx : w0 + dx;
+                double wMin = Math.Max(MinPadW, MinPadH / k);   // 等比同时满足 w、h 下限
+                wNew = Math.Max(wMin, wNew);
+                w = wNew;
+                h = wNew * k;
+                if (_dragMode.Contains("l")) ml = _dragStartML + (w0 - wNew);   // 右缘不动
+                else ml = _dragStartML;                                        // 左缘不动
+                mt = _dragStartMT;   // 顶部固定不动
+            }
+            else
+            {
+                // 垂直主导：h 由 dy 决定，w = h / k
+                double hNew = _dragMode.Contains("t") ? h0 - dy : h0 + dy;
+                double hMin = Math.Max(MinPadH, MinPadW * k);   // 等比同时满足 h、w 下限
+                hNew = Math.Max(hMin, hNew);
+                h = hNew;
+                w = hNew / k;
+                if (_dragMode.Contains("t")) mt = _dragStartMT + (h0 - hNew);   // 下缘不动
+                else mt = _dragStartMT;                                          // 上缘不动
+                ml = _dragStartML;   // 左边固定不动
+            }
+        }
+
+        // 鼠标垫自定义持久化：写 PadPos_left/top、PadW/H（InvariantCulture）、PadCustom_=1，并置 _padCustomized=true
+        private void SavePadCustom()
+        {
+            _padCustomized = true;
+            var v = ApplicationData.Current.LocalSettings.Values;
+            v["PadCustom_"] = 1;
+            v["PadPos_left"] = MousePad.Margin.Left.ToString(CultureInfo.InvariantCulture);
+            v["PadPos_top"] = MousePad.Margin.Top.ToString(CultureInfo.InvariantCulture);
+            v["PadW"] = MousePad.Width.ToString(CultureInfo.InvariantCulture);
+            v["PadH"] = MousePad.Height.ToString(CultureInfo.InvariantCulture);
+            DiagLog("pad customized ml=" + (int)MousePad.Margin.Left + " mt=" + (int)MousePad.Margin.Top
+                    + " w=" + (int)MousePad.Width + " h=" + (int)MousePad.Height);
+        }
+
+        // 启动恢复鼠标垫自定义：PadCustom_=1 时应用保存的 Margin/Width/Height 并置 _padCustomized=true；
+        // 否则保持自动跟随（_padCustomized=false）。
+        private void RestorePadCustom()
+        {
+            try
+            {
+                var v = ApplicationData.Current.LocalSettings.Values;
+                object pc = v["PadCustom_"];
+                if (pc == null) { _padCustomized = false; return; }
+                bool customized = (pc is bool b) ? b : (pc.ToString() == "1" || pc.ToString() == "True");
+                if (!customized) { _padCustomized = false; return; }
+                double ml = ReadSettingDouble(v, "PadPos_left", 0.0);
+                double mt = ReadSettingDouble(v, "PadPos_top", 0.0);
+                double w = ReadSettingDouble(v, "PadW", MousePad.Width);
+                double h = ReadSettingDouble(v, "PadH", MousePad.Height);
+                if (w < MinPadW || h < MinPadH) { _padCustomized = false; return; }
+                MousePad.Margin = new Thickness(ml, mt, 0, 0);
+                MousePad.Width = w;
+                MousePad.Height = h;
+                _padW = w;   // 同步垫面尺寸变量，保证鼠标点映射基准与实际尺寸一致
+                _padH = h;
+                _padCustomized = true;
+                DiagLog("pad restored ml=" + (int)ml + " mt=" + (int)mt + " w=" + (int)w + " h=" + (int)h);
+            }
+            catch (Exception ex)
+            {
+                _padCustomized = false;
+                DiagLog("pad restore fail: " + ex.Message);
+            }
+        }
+
+        // 从 LocalSettings 读 double（值可能是 string 或 double/其他数值类型，统一安全解析）
+        private static double ReadSettingDouble(Windows.Foundation.Collections.IPropertySet values, string key, double fallback)
+        {
+            object o = values[key];
+            if (o == null) return fallback;
+            if (o is double d) return d;
+            if (o is float f) return f;
+            if (o is int i) return i;
+            double r;
+            if (double.TryParse(o.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out r)) return r;
+            return fallback;
+        }
+
+        // 重置鼠标垫后立即恢复自动跟随：用当前快照 vs 尺寸刷新一次（无快照则回退默认 1920×1080）
+        private void RefreshPadAutoSize()
+        {
+            var snap = _latest;
+            int vsW = snap != null ? snap.VsW : 1920;
+            int vsH = snap != null ? snap.VsH : 1080;
+            double w, h;
+            ComputePadSize(vsW, vsH, out w, out h);
+            _padW = w;
+            _padH = h;
+            MousePad.Width = w;
+            MousePad.Height = h;
         }
 
         // 设置子菜单配色：菜单框、标题、主题行、"自定义控件"入口都随当前主题刷新；
@@ -662,6 +834,16 @@ namespace KeyDisplay
                 }
             }
             if (_customKeys.Count == 0) CustomKeysPanel.Visibility = Visibility.Collapsed;
+            // 重置鼠标垫：清除自定义持久化、_padCustomized=false、恢复自动跟随（立即用当前 vs 尺寸刷新）
+            var padVals = ApplicationData.Current.LocalSettings.Values;
+            padVals.Remove("PadCustom_");
+            padVals.Remove("PadPos_left");
+            padVals.Remove("PadPos_top");
+            padVals.Remove("PadW");
+            padVals.Remove("PadH");
+            _padCustomized = false;
+            MousePad.Margin = new Thickness(0, 0, 0, 0);
+            RefreshPadAutoSize();
             ClearHover();
             DiagLog("layout reset (custom keys cleared: " + deadNames.Count + ")");
         }
@@ -692,11 +874,12 @@ namespace KeyDisplay
                 DiagLog("custom key duplicate: " + name);
                 return;
             }
+            bool isPad = name == "触摸板";
             var border = new Border
             {
-                Width = CustomKeyWidth(name),
-                Height = 48,
-                CornerRadius = new CornerRadius(6),
+                Width = isPad ? 80 : CustomKeyWidth(name),
+                Height = isPad ? 80 : 48,
+                CornerRadius = new CornerRadius(isPad ? 8 : 6),
                 BorderThickness = new Thickness(1),
                 Margin = new Thickness(0, 0, 6, 0),
                 Tag = name
@@ -796,7 +979,7 @@ namespace KeyDisplay
                     case '\u2190': return 0x25;   // ←
                     case '\u2192': return 0x27;   // →
                 }
-                return 0;
+                return -1;   // 未识别单字符 → 越界，渲染循环视为未按下
             }
             switch (name)
             {
@@ -837,7 +1020,7 @@ namespace KeyDisplay
                 case "\u53f3Alt": return 0xA5;     // 右Alt
                 case "Menu": return 0x5D;
             }
-            return 0;
+            return -1;   // 未识别键名（如"触摸板"）→ 越界，渲染循环视为未按下，绝不抛异常
         }
 
         // 点击锁定菜单框内部：标记已处理，避免冒泡到遮罩触发关闭
@@ -976,10 +1159,17 @@ namespace KeyDisplay
             if (_layoutLocked) return;      // 锁定布局时禁止移动控件（与缩放一致）
             // 进入移动模式：记录起点（按下时的指针/边距），高亮提示（琥珀色边框）
             _moveKey = b;
+            if (b == MousePad) _padCustomized = true;   // 一旦开始移动鼠标垫即视为自定义，避免操作期间被自动跟随覆盖
             _moveStartX = _pressPointerRoot.X;
             _moveStartY = _pressPointerRoot.Y;
             _moveStartML = b.Margin.Left;
             _moveStartMT = b.Margin.Top;
+            // 记录起点视觉基准（SnapCanvas 坐标），供吸附计算反推被拖按键四边
+            var baseRect = VisualRectOf(b);
+            _moveBaseLeft = baseRect.X;
+            _moveBaseTop = baseRect.Y;
+            _snapActiveH = false;   // 进入移动时重置吸附滞回态
+            _snapActiveV = false;
             b.BorderBrush = new SolidColorBrush(Color.FromArgb(0xFF, 0xFF, 0xD5, 0x4F));   // 琥珀 #FFD54F
             DiagLog("move mode: " + (b.Tag ?? "?"));
         }
@@ -1132,6 +1322,14 @@ namespace KeyDisplay
             _dragStartH = b.Height;
             _dragStartML = b.Margin.Left;
             _dragStartMT = b.Margin.Top;
+            if (b == MousePad) _padCustomized = true;   // 一旦开始缩放鼠标垫即视为自定义，避免操作期间被自动跟随覆盖
+            // 记录起点视觉基准（SnapCanvas 坐标），供缩放吸附反推被调边
+            var baseRect = VisualRectOf(b);
+            _dragBaseLeft = baseRect.X;
+            _dragBaseTop = baseRect.Y;
+            _snapActiveH = false;   // 进入缩放时重置吸附滞回态
+            _snapActiveV = false;
+            HideSnapLines();
             e.Handled = true;
         }
 
@@ -1147,7 +1345,29 @@ namespace KeyDisplay
                 if (b != key) return;
                 double dx = e.GetCurrentPoint(null).Position.X - _moveStartX;
                 double dy = e.GetCurrentPoint(null).Position.Y - _moveStartY;
-                key.Margin = new Thickness(_moveStartML + dx, _moveStartMT + dy, key.Margin.Right, key.Margin.Bottom);
+                // 自由位置（无吸附）作为候选，再按十字方向做边对边软吸附（水平/垂直轴独立）
+                double ml = _moveStartML + dx;
+                double mt = _moveStartMT + dy;
+                double w = (key.ActualWidth > 0 ? key.ActualWidth : key.Width);
+                double h = (key.ActualHeight > 0 ? key.ActualHeight : key.Height);
+                // 被拖按键当前四边（SnapCanvas 坐标）：起点视觉基准 + Margin 位移增量（免布局刷新）
+                double[] ea = new double[4];
+                ea[0] = _moveBaseLeft + (ml - _moveStartML);
+                ea[1] = ea[0] + w;
+                ea[2] = _moveBaseTop + (mt - _moveStartMT);
+                ea[3] = ea[2] + h;
+                var rects = CollectOtherRects(key);
+                var hitH = ComputeAxisSnap(true, ea, rects);
+                var hitV = ComputeAxisSnap(false, ea, rects);
+                // 滞回：未吸附 ≤8 触发、已吸附 ≤10 保持、>10 脱离；两轴独立，只修正吸附到的轴
+                bool snapH = hitH.Active && ShouldSnap(hitH.Delta, ref _snapActiveH);
+                bool snapV = hitV.Active && ShouldSnap(hitV.Delta, ref _snapActiveV);
+                if (snapH) ml += hitH.Delta;
+                if (snapV) mt += hitV.Delta;
+                key.Margin = new Thickness(ml, mt, key.Margin.Right, key.Margin.Bottom);
+                // 参考线分级显示（v2）：吸中=实线、8~40px=半透明虚线、>40px 或无候选=隐藏；每轴最近 1 条
+                UpdateSnapLine(0, false, hitH.LinePos, hitH.Active ? Math.Abs(hitH.Delta) : double.MaxValue, snapH);
+                UpdateSnapLine(1, true, hitV.LinePos, hitV.Active ? Math.Abs(hitV.Delta) : double.MaxValue, snapV);
                 return;
             }
             if (_dragKey != null)
@@ -1157,6 +1377,15 @@ namespace KeyDisplay
                 double dx = e.GetCurrentPoint(null).Position.X - _dragStartX;
                 double dy = e.GetCurrentPoint(null).Position.Y - _dragStartY;
                 double w = _dragStartW, h = _dragStartH, ml = _dragStartML, mt = _dragStartMT;
+                if (key == MousePad)
+                {
+                    // 鼠标垫：任意边/四角拖动都等比例缩放（宽高比 = 起点比例），不做自由缩放、不做缩放吸附。
+                    ComputePadEqualScale(ref w, ref h, ref ml, ref mt, dx, dy);
+                    key.Width = w;
+                    key.Height = h;
+                    key.Margin = new Thickness(ml, mt, key.Margin.Right, key.Margin.Bottom);
+                    return;
+                }
                 if (_dragMode.Contains("l"))
                 {
                     w = Math.Max(MinKeyW, _dragStartW - dx);
@@ -1169,6 +1398,11 @@ namespace KeyDisplay
                     mt = (_dragStartMT + _dragStartH) - h;   // 保持下缘不动
                 }
                 if (_dragMode.Contains("b")) h = Math.Max(MinKeyH, _dragStartH + dy);
+
+                // 缩放吸附：对"被调整的边"做十字方向边对边贴齐（与移动模式同一套判定），
+                // 仍受 MinKeyW/MinKeyH 约束——吸附修正不得缩破最小值。
+                ApplyDragSnap(key, ref w, ref h, ref ml, ref mt);
+
                 key.Width = w;
                 key.Height = h;
                 key.Margin = new Thickness(ml, mt, key.Margin.Right, key.Margin.Bottom);
@@ -1196,11 +1430,16 @@ namespace KeyDisplay
                 var key = _moveKey;
                 _moveKey = null;
                 try { key.ReleasePointerCapture(e.Pointer); } catch { }
-                SetKey(key, false);   // 恢复普通主题样式（清移动高亮）
+                EndMoveStyle(key);   // 恢复样式（鼠标垫走专属恢复，其余 SetKey(false) 清移动高亮）
+                HideSnapLines();      // 落位隐藏吸附参考线
                 string nm = key.Tag as string;
                 if (!string.IsNullOrEmpty(nm))
                 {
-                    if (_customKeys.ContainsKey(nm))
+                    if (nm == "Pad")
+                    {
+                        SavePadCustom();   // 鼠标垫移动：写 Pad 持久化（不影响 Layout_ 键）
+                    }
+                    else if (_customKeys.ContainsKey(nm))
                     {
                         ApplicationData.Current.LocalSettings.Values["CustomPos_" + nm] =
                             (int)key.Margin.Left + ";" + (int)key.Margin.Top;
@@ -1222,7 +1461,18 @@ namespace KeyDisplay
             _dragKey = null;
             _dragMode = null;
             ApplyCursor(null);   // 松开后恢复默认光标
-            SaveLayout();
+            HideSnapLines();     // 缩放结束隐藏吸附参考线
+            if (dragKey == MousePad)
+            {
+                // 鼠标垫缩放落位：持久化并同步垫面尺寸变量（保证点映射基准 = 实际尺寸），不走 SaveLayout
+                _padW = MousePad.Width;
+                _padH = MousePad.Height;
+                SavePadCustom();
+            }
+            else
+            {
+                SaveLayout();
+            }
         }
 
         private void Key_PointerExited(object sender, PointerRoutedEventArgs e)
@@ -1240,15 +1490,352 @@ namespace KeyDisplay
             {
                 var key = _moveKey;
                 _moveKey = null;
-                SetKey(key, false);   // 丢捕获视为落位，恢复样式
+                EndMoveStyle(key);   // 丢捕获视为落位，恢复样式（鼠标垫走专属恢复）
             }
             _dragKey = null;
             _dragMode = null;
             ApplyCursor(null);   // 异常丢捕获（失焦/窗口切换）也恢复默认光标，避免 Size 光标残留
+            HideSnapLines();     // 丢捕获兜底隐藏吸附参考线，防残留
+        }
+
+        // ===================== 吸附对齐（0.5.0）=====================
+        // 统一坐标系：SnapCanvas（最外层覆盖层），与被拖按键所在容器无关，跨 StackPanel 也能正确比较视觉边。
+        // 关键：拖动中只用"起点视觉坐标 + 位移增量"反推被拖按键的边，避免改 Margin 后布局未刷新导致 TransformToVisual 读到旧值。
+
+        // 吸附判定结果：单轴的贴边修正量 + 参考线位置
+        private struct SnapHit
+        {
+            public bool Active;          // 本轴是否吸附
+            public double Delta;         // 修正量（加到被拖按键的 Margin.Left 或 Margin.Top）
+            public double LinePos;       // 参考线贴齐位置（水平吸附=x，垂直吸附=y）
+        }
+
+        // 读取按键在 SnapCanvas 坐标系下的视觉矩形（用于"其他按键 B"——拖动中它们静止，布局稳定，可实时读）
+        private Rect VisualRectOf(Border b)
+        {
+            try
+            {
+                var t = b.TransformToVisual(SnapCanvas);
+                var tl = t.TransformPoint(new Point(0, 0));
+                double w = b.ActualWidth > 0 ? b.ActualWidth : b.Width;
+                double h = b.ActualHeight > 0 ? b.ActualHeight : b.Height;
+                return new Rect(tl.X, tl.Y, w, h);
+            }
+            catch
+            {
+                return Rect.Empty;
+            }
+        }
+
+        // 对单轴做全局参考线吸附（v2）：去掉"投影重叠"限制，所有其他控件的四条边都是候选参考线。
+        //   horizontal：A 左/右缘分别去贴 B 的左/右缘（左对齐/右对齐/贴边自动覆盖）
+        //   vertical  ：A 上/下缘分别去贴 B 的上/下缘（上对齐/下对齐/贴边自动覆盖）
+        // edgesA = 被拖按键当前四边（SnapCanvas 坐标，[0]=左 [1]=右 [2]=上 [3]=下）；rectsB = 其他按键视觉矩形列表。
+        // 遍历全部边对，取 |Delta| 最小者作为该轴候选（隔空也能对齐，如 A 左缘贴远处 B 左缘 = 左对齐）。
+        private SnapHit ComputeAxisSnap(bool horizontal, double[] edgesA, List<Rect> rectsB)
+        {
+            var hit = new SnapHit { Active = false };
+            double best = double.MaxValue;
+            foreach (var r in rectsB)
+            {
+                if (r.Width <= 0 || r.Height <= 0) continue;
+                if (horizontal)
+                {
+                    // A 左缘 vs B 左缘（左对齐）、A 左缘 vs B 右缘（贴边）、A 右缘 vs B 左缘（贴边）、A 右缘 vs B 右缘（右对齐）
+                    double bLeft = r.X, bRight = r.X + r.Width;
+                    double dAL = bLeft - edgesA[0];       // A 左缘贴 B 左缘（左对齐）
+                    double dALR = bRight - edgesA[0];     // A 左缘贴 B 右缘（A 在 B 右侧贴边）
+                    double dARL = bLeft - edgesA[1];      // A 右缘贴 B 左缘（A 在 B 左侧贴边）
+                    double dAR = bRight - edgesA[1];      // A 右缘贴 B 右缘（右对齐）
+                    double d = MinAbs4(dAL, dALR, dARL, dAR);
+                    if (Math.Abs(d) < Math.Abs(best))
+                    {
+                        best = d;
+                        hit.Delta = d;
+                        if (d == dAL || d == dALR) hit.LinePos = (d == dAL) ? bLeft : bRight;   // 由 A 左缘吸附
+                        else hit.LinePos = (d == dARL) ? bLeft : bRight;                         // 由 A 右缘吸附
+                    }
+                }
+                else
+                {
+                    double bTop = r.Y, bBot = r.Y + r.Height;
+                    double dAT = bTop - edgesA[2];        // A 上缘贴 B 上缘（上对齐）
+                    double dATB = bBot - edgesA[2];       // A 上缘贴 B 下缘（A 在 B 下方贴边）
+                    double dABT = bTop - edgesA[3];       // A 下缘贴 B 上缘（A 在 B 上方贴边）
+                    double dAB = bBot - edgesA[3];        // A 下缘贴 B 下缘（下对齐）
+                    double d = MinAbs4(dAT, dATB, dABT, dAB);
+                    if (Math.Abs(d) < Math.Abs(best))
+                    {
+                        best = d;
+                        hit.Delta = d;
+                        if (d == dAT || d == dATB) hit.LinePos = (d == dAT) ? bTop : bBot;   // 由 A 上缘吸附
+                        else hit.LinePos = (d == dABT) ? bTop : bBot;                         // 由 A 下缘吸附
+                    }
+                }
+            }
+            if (best != double.MaxValue) hit.Active = true;
+            return hit;
+        }
+
+        // 四个距离里取绝对值最小者（符号保留，用于确定修正方向与贴合的边）
+        private static double MinAbs4(double a, double b, double c, double d)
+        {
+            double r = a;
+            if (Math.Abs(b) < Math.Abs(r)) r = b;
+            if (Math.Abs(c) < Math.Abs(r)) r = c;
+            if (Math.Abs(d) < Math.Abs(r)) r = d;
+            return r;
+        }
+
+        // 滞回判定：未吸附时 |Delta|≤SnapNear 才触发；已吸附时 |Delta|≤SnapRelease 保持（>SnapRelease 脱离）。
+        // 永不锁死：一旦偏离超 SnapRelease，本轴立即回到自由位置。
+        private static bool ShouldSnap(double delta, ref bool active)
+        {
+            double a = Math.Abs(delta);
+            if (active)
+            {
+                if (a > SnapRelease) { active = false; return false; }
+                return true;
+            }
+            if (a <= SnapNear) { active = true; return true; }
+            return false;
+        }
+
+        // 收集"其他按键"（除 exclude 外全部参与按键）在 SnapCanvas 坐标系下的视觉矩形
+        private List<Rect> CollectOtherRects(Border exclude)
+        {
+            var rects = new List<Rect>();
+            foreach (var kv in _keys) if (kv.Value != exclude) rects.Add(VisualRectOf(kv.Value));
+            foreach (var kv in _mouse) if (kv.Value != exclude) rects.Add(VisualRectOf(kv.Value));
+            foreach (var kv in _customKeys) if (kv.Value != exclude) rects.Add(VisualRectOf(kv.Value));
+            return rects;
+        }
+
+        // 缩放吸附：对"被调整的边"做十字方向边对边贴齐（统一 SnapCanvas 坐标）。
+        // 被调边由 _dragMode 决定（含 l/r/t/b）；只吸附被调整的那条边（对应的固定边不动）。
+        // 修正直接写回 w/h/ml/mt，仍受调用方的最小尺寸保护。
+        private void ApplyDragSnap(Border key, ref double w, ref double h, ref double ml, ref double mt)
+        {
+            // 被调按键当前四边（SnapCanvas 坐标）：起点视觉基准 + 缩放增量反推
+            double baseL = _dragBaseLeft, baseT = _dragBaseTop;
+            double baseRight = baseL + _dragStartW, baseBot = baseT + _dragStartH;
+            double left = baseL + (ml - _dragStartML);
+            double top = baseT + (mt - _dragStartMT);
+            double right = left + w;
+            double bot = top + h;
+            var rects = CollectOtherRects(key);
+            bool anyH = false, anyV = false;
+            SnapHit hitH = new SnapHit(), hitV = new SnapHit();
+
+            // 水平被调边：l（左缘移动，右缘固定）或 r（右缘移动，左缘固定）
+            if (_dragMode.Contains("r"))
+            {
+                // 右缘贴 B 左缘（A 在 B 左）或 B 右缘（A 在 B 右取更近）——只比较右缘 vs 对方左/右缘
+                hitH = SnapRightEdge(left, right, top, bot, rects);
+                anyH = true;
+            }
+            else if (_dragMode.Contains("l"))
+            {
+                hitH = SnapLeftEdge(left, right, top, bot, rects);
+                anyH = true;
+            }
+            // 垂直被调边：t（上缘移动）或 b（下缘移动）
+            if (_dragMode.Contains("b"))
+            {
+                hitV = SnapBottomEdge(left, right, top, bot, rects);
+                anyV = true;
+            }
+            else if (_dragMode.Contains("t"))
+            {
+                hitV = SnapTopEdge(left, right, top, bot, rects);
+                anyV = true;
+            }
+
+            // 保存原始 |Delta|（ShouldSnap 前），用于参考线分级；吸中换算进 w/h 后 hitX.Delta 会清零
+            double absH = hitH.Active ? Math.Abs(hitH.Delta) : double.MaxValue;
+            double absV = hitV.Active ? Math.Abs(hitV.Delta) : double.MaxValue;
+
+            bool snappedH = anyH && hitH.Active && ShouldSnap(hitH.Delta, ref _snapActiveH);
+            bool snappedV = anyV && hitV.Active && ShouldSnap(hitV.Delta, ref _snapActiveV);
+            if (snappedH)
+            {
+                if (_dragMode.Contains("r"))
+                {
+                    // 右缘移动：delta 加到宽度（左缘固定）
+                    w = Math.Max(MinKeyW, w + hitH.Delta);
+                }
+                else
+                {
+                    // 左缘移动：delta 加到 ml，宽度反向收缩（右缘固定）
+                    ml += hitH.Delta;
+                    w = Math.Max(MinKeyW, w - hitH.Delta);
+                }
+            }
+            if (snappedV)
+            {
+                if (_dragMode.Contains("b"))
+                {
+                    h = Math.Max(MinKeyH, h + hitV.Delta);
+                }
+                else
+                {
+                    mt += hitV.Delta;
+                    h = Math.Max(MinKeyH, h - hitV.Delta);
+                }
+            }
+
+            // 参考线分级显示（v2）：吸中=实线、8~40px=半透明虚线、>40px 或无候选=隐藏；每轴最近 1 条
+            // 池索引 0=垂直参考线、1=水平参考线（对应水平/垂直吸附）
+            UpdateSnapLine(0, false, hitH.LinePos, absH, snappedH);
+            UpdateSnapLine(1, true, hitV.LinePos, absV, snappedV);
+        }
+
+        // 缩放右缘（r）：全局模式——A 右缘贴 B 左缘（贴边）或 B 右缘（右对齐），取最近者
+        private SnapHit SnapRightEdge(double left, double right, double top, double bot, List<Rect> rects)
+        {
+            var hit = new SnapHit();
+            double best = double.MaxValue;
+            foreach (var r in rects)
+            {
+                if (r.Width <= 0 || r.Height <= 0) continue;
+                double d1 = r.X - right;                 // 贴对方左缘
+                double d2 = (r.X + r.Width) - right;     // 贴对方右缘
+                double d = Math.Abs(d1) <= Math.Abs(d2) ? d1 : d2;
+                if (Math.Abs(d) < Math.Abs(best))
+                {
+                    best = d;
+                    hit.Delta = d;
+                    hit.LinePos = (d == d1) ? r.X : (r.X + r.Width);
+                }
+            }
+            hit.Active = best != double.MaxValue;
+            return hit;
+        }
+
+        // 缩放左缘（l）：全局模式——A 左缘贴 B 右缘（贴边）或 B 左缘（左对齐），取最近者
+        private SnapHit SnapLeftEdge(double left, double right, double top, double bot, List<Rect> rects)
+        {
+            var hit = new SnapHit();
+            double best = double.MaxValue;
+            foreach (var r in rects)
+            {
+                if (r.Width <= 0 || r.Height <= 0) continue;
+                double d1 = (r.X + r.Width) - left;   // 贴对方右缘
+                double d2 = r.X - left;               // 贴对方左缘
+                double d = Math.Abs(d1) <= Math.Abs(d2) ? d1 : d2;
+                if (Math.Abs(d) < Math.Abs(best))
+                {
+                    best = d;
+                    hit.Delta = d;
+                    hit.LinePos = (d == d1) ? (r.X + r.Width) : r.X;
+                }
+            }
+            hit.Active = best != double.MaxValue;
+            return hit;
+        }
+
+        // 缩放下缘（b）：全局模式——A 下缘贴 B 上缘（贴边）或 B 下缘（下对齐），取最近者
+        private SnapHit SnapBottomEdge(double left, double right, double top, double bot, List<Rect> rects)
+        {
+            var hit = new SnapHit();
+            double best = double.MaxValue;
+            foreach (var r in rects)
+            {
+                if (r.Width <= 0 || r.Height <= 0) continue;
+                double d1 = r.Y - bot;                 // 贴对方上缘
+                double d2 = (r.Y + r.Height) - bot;    // 贴对方下缘
+                double d = Math.Abs(d1) <= Math.Abs(d2) ? d1 : d2;
+                if (Math.Abs(d) < Math.Abs(best))
+                {
+                    best = d;
+                    hit.Delta = d;
+                    hit.LinePos = (d == d1) ? r.Y : (r.Y + r.Height);
+                }
+            }
+            hit.Active = best != double.MaxValue;
+            return hit;
+        }
+
+        // 缩放上缘（t）：全局模式——A 上缘贴 B 下缘（贴边）或 B 上缘（上对齐），取最近者
+        private SnapHit SnapTopEdge(double left, double right, double top, double bot, List<Rect> rects)
+        {
+            var hit = new SnapHit();
+            double best = double.MaxValue;
+            foreach (var r in rects)
+            {
+                if (r.Width <= 0 || r.Height <= 0) continue;
+                double d1 = (r.Y + r.Height) - top;   // 贴对方下缘
+                double d2 = r.Y - top;                // 贴对方上缘
+                double d = Math.Abs(d1) <= Math.Abs(d2) ? d1 : d2;
+                if (Math.Abs(d) < Math.Abs(best))
+                {
+                    best = d;
+                    hit.Delta = d;
+                    hit.LinePos = (d == d1) ? (r.Y + r.Height) : r.Y;
+                }
+            }
+            hit.Active = best != double.MaxValue;
+            return hit;
+        }
+
+        // 参考线分级显示（v2）：按距离 |delta| 决定样式，并贯穿 SnapCanvas 全宽/全高（全局线效果）。
+        //   snapped=true（|delta|≤SnapNear 吸中）→ 浅蓝实线；
+        //   8 < |delta| ≤ SnapHintNear → 浅蓝半透明虚线（接近提示）；
+        //   >SnapHintNear 或无候选 → 该轴参考线隐藏。
+        // 每轴只画最近的 1 条（最近线由调用方选出），屏幕最多同时 2 条（水平+垂直）。
+        private void UpdateSnapLine(int lineIndex, bool horizontal, double pos, double absDelta, bool snapped)
+        {
+            if (lineIndex < 0 || lineIndex >= _snapLines.Length) return;
+            var line = _snapLines[lineIndex];
+            bool show = snapped || absDelta <= SnapHintNear;
+            if (!show)
+            {
+                line.Visibility = Visibility.Collapsed;
+                return;
+            }
+            double panelW = SnapCanvas.ActualWidth > 0 ? SnapCanvas.ActualWidth : 1920;
+            double panelH = SnapCanvas.ActualHeight > 0 ? SnapCanvas.ActualHeight : 1080;
+            if (horizontal)
+            {
+                // 水平参考线：贯穿全宽
+                line.X1 = 0; line.Y1 = pos;
+                line.X2 = panelW; line.Y2 = pos;
+            }
+            else
+            {
+                // 垂直参考线：贯穿全高
+                line.X1 = pos; line.Y1 = 0;
+                line.X2 = pos; line.Y2 = panelH;
+            }
+            if (snapped)
+            {
+                // 吸中：实线 + 实色
+                line.Stroke = _snapSolid;
+                line.StrokeDashArray = null;
+            }
+            else
+            {
+                // 接近提示：半透明虚线
+                line.Stroke = _snapDash;
+                line.StrokeDashArray = new DoubleCollection { 4.0, 3.0 };
+            }
+            line.Visibility = Visibility.Visible;
+        }
+
+        // 隐藏全部参考线
+        private void HideSnapLines()
+        {
+            for (int i = 0; i < _snapLines.Length; i++)
+            {
+                if (_snapLines[i] != null) _snapLines[i].Visibility = Visibility.Collapsed;
+            }
+            _snapActiveH = false;
+            _snapActiveV = false;
         }
 
         private string NameOf(Border b)
         {
+            if (b == MousePad) return "Pad";
             foreach (var kv in _keys) if (kv.Value == b) return kv.Key;
             foreach (var kv in _mouse) if (kv.Value == b) return kv.Key;
             foreach (var kv in _customKeys) if (kv.Value == b) return kv.Key;

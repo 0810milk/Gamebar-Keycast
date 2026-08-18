@@ -84,7 +84,7 @@
                     </StackPanel>
                     <!-- 鼠标区 -->
                     <StackPanel Orientation="Vertical" Margin="16,0,0,0">
-                        <Border x:Name="MousePad" Width="80" Height="80" CornerRadius="8" BorderThickness="1">
+                        <Border x:Name="MousePad" Width="80" Height="80" CornerRadius="8" BorderThickness="1" Tag="Pad">
                             <Canvas x:Name="MousePadCanvas">
                                 <Ellipse x:Name="MouseDot" Width="10" Height="10"/>
                             </Canvas>
@@ -151,7 +151,7 @@
                             HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,8,44"
                             Tapped="LockMenu_Tapped">
                         <StackPanel Padding="12">
-                            <TextBlock x:Name="LockMenuTitle" Text="添加控件" FontSize="14" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="LockMenuTitle" Text="自定义控件" FontSize="14" FontWeight="SemiBold"/>
                             <Grid Margin="0,12,0,0">
                                 <TextBlock x:Name="LockSwitchLabel" Text="锁定布局" FontSize="13" VerticalAlignment="Center"/>
                                 <Border x:Name="LockSwitchBtn" Width="44" Height="22" CornerRadius="11"
@@ -161,7 +161,7 @@
                             </Grid>
                             <!-- 键盘折叠开关：点击展开/折叠下方 87 配列键盘布局（初始折叠） -->
                             <Grid x:Name="KeyPickerToggle" Margin="0,12,0,0" Tapped="KeyPickerToggle_Click">
-                                <TextBlock x:Name="KeyPickerToggleText" Text="按键" FontSize="13" VerticalAlignment="Center"/>
+                                <TextBlock x:Name="KeyPickerToggleText" Text="添加按键" FontSize="13" VerticalAlignment="Center"/>
                                 <TextBlock x:Name="KeyPickerToggleArrow" Text="&#x25BC;" FontSize="18" HorizontalAlignment="Right" VerticalAlignment="Center" FontFamily="Segoe UI Symbol"/>
                             </Grid>
                             <!-- 87 配列键盘布局（TKL）：点击任意键 = 添加该键为自定义按键（Tag 记录键名）
@@ -279,6 +279,10 @@
                                         <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="←" Tapped="AddKeyFromLayout_Click"><TextBlock Text="←" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
                                         <Border Width="30" Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Tag="→" Tapped="AddKeyFromLayout_Click"><TextBlock Text="→" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
                                     </StackPanel>
+                                    <!-- 触摸板：作为一个可移动/缩放的 80×80 自定义控件添加（与普通键一致，但不参与按下反色） -->
+                                    <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                        <Border Height="26" CornerRadius="4" BorderThickness="1" Margin="2" Padding="8,0" Tag="触摸板" Tapped="AddKeyFromLayout_Click"><TextBlock Text="触摸板" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                    </StackPanel>
                                 </StackPanel>
                             </ScrollViewer>
                             <Border x:Name="LockResetBtn" Height="26" CornerRadius="6" BorderThickness="1"
@@ -314,5 +318,7 @@
                 </Grid>
             </Grid>
         </Border>
+        <!-- 吸附参考线层：吸附发生时显示浅蓝虚线；置于所有按键之上、不拦截指针，不参与吸附计算 -->
+        <Canvas x:Name="SnapCanvas" IsHitTestVisible="False"/>
     </Grid>
 </Page>
