@@ -100,10 +100,48 @@ python -m unittest test_units -v   # 工作目录 KeyDisplay.Companion，26 测�
 ```
 build-msix.ps1（或直接 MSBuild 编译） → 签名 msix（signtool）→ 删旧 msix（避免通配符混入）
 → 更新 installer/setup.iss 三处版本号 → ISCC 打包 → 归档 release/<版本> + 桌面副本
-→ VERSION.md / README.md 版本号同步 → git commit
+→ VERSION.md / README.md 版本号同步 → git commit → 【推到 GitHub：§3.6】（可选：发 Release）
 ```
 
-### 3.5 每轮完了弹测试窗口
+### 3.6 GitHub 发布（版本更新直接推到 GitHub，含凭据与踩坑）
+
+**本机 GitHub 凭据（仅本机可用，勿外传）：**
+- 仓库：`git@github.com:0810milk/Gamebar-Keycast.git`（owner: 0810milk）
+- 推送方式：**SSH**（不是 HTTPS），默认分支 **`main`**（本机 git 分支名是 `master`，推送用 `master:main`）。
+- SSH key：`C:\Users\恐龙milk\.ssh\id_ed25519`（已加到 GitHub）。
+- ❗ **中文用户名路径坑**（重要）：用户名含中文「恐龙milk」，git 内部的 Git Bash 路径会把 `.ssh` 解析成乱码
+  （`/c/Users/\277\326\301\372milk/.ssh`），导致裸 `git push` 报 host key/权限错误。解决——**push/查远程时必须带 `GIT_SSH_COMMAND`**：
+  ```powershell
+  $env:GIT_SSH_COMMAND="ssh -i `"$env:USERPROFILE\.ssh\id_ed25519`" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+  git push origin master:main
+  # 或 git push origin master  （origin 已指向该 SSH 地址）
+  ```
+
+**换人接手后第一次 push 前**：确认 `git remote -v` 输出是 `git@github.com:0810milk/Gamebar-Keycast.git`；
+不是则 `git remote set-url origin git@github.com:0810milk/Gamebar-Keycast.git`。
+
+**发布 Releases（可选，版本上线用 GitHub CLI）：**
+- 机器已装 `gh`（GitHub CLI）。**gh 认证需要 HTTPS token，不认 SSH**；token 由用户提供（classic PAT、勾 `repo`，或 fine-grained 配该仓库 Contents 读写）。
+- 通过环境变量临时注入（**不要把 token 写进任何仓库文件或 git 历史**）：
+  ```powershell
+  $env:GH_TOKEN="ghp_..."   # 用户提供，用完即忘
+  gh auth status                          # 确认已登录 owner
+  gh release create "0.4.2-beta" "release/0.4.2-beta/KeyDisplaySetup.exe" --repo 0810milk/Gamebar-Keycast --title "0.4.2 beta" --notes "更新说明..."
+  ```
+- 批量发旧版本：循环对每个 `release/<版本>/` 执行上面的 `gh release create`。
+- ⚠️ **Latest 标记坑**：GitHub 按**创建时间倒序**展示 Releases，最后创建的那个会变成「Latest」。
+  若按旧→新顺序逐个创建，最早版本反而成 Latest——**创建完必须把最新版本设为 Latest**：
+  ```powershell
+  gh release edit 0.4.1-beta --repo 0810milk/Gamebar-Keycast --latest=false   # 旧版取消
+  gh release edit 0.4.2-beta --repo 0810milk/Gamebar-Keycast --latest          # 新版设 Latest
+  ```
+
+**权限/密钥红线（用户反复强调）：**
+- ❌ **绝不上传**：大模型 API 密钥（settings.yaml 在 `~/.dsh/`，不在项目内；无 .env）、代码签名私钥 `cert/KeyDisplay.pfx`（cert/ 在 .gitignore，勿 `git add -f`）。
+- 上传前自觉扫描：`git ls-files | findstr /i ".pfx .p12 .env settings.yaml config.yaml"` 应为空。
+- Releases 完成后**提醒用户删除对话里出现过的 token**（GitHub → Settings → Tokens → Delete/Revoke）。
+
+### 3.7 每轮完了弹测试窗口
 - 强制环节（见 AGENT-PROCESS.md §2）：UWP 窗口 `explorer.exe "shell:AppsFolder\KeyDisplay.Widget_hdjf4fqmxxv8g!App"`。
 - 纯后端/文档改动则明确说明"无可视效果"，用测试输出代替。
 
