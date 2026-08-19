@@ -27,103 +27,83 @@
         <Border x:Name="RootPanel" CornerRadius="10" BorderThickness="1" Padding="16">
             <Grid>
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="272"/>
                     <RowDefinition Height="42"/>
                 </Grid.RowDefinitions>
-                <StackPanel Grid.Row="0" Orientation="Vertical">
-                    <StackPanel Orientation="Horizontal">
-                        <StackPanel Orientation="Vertical">
-                        <!-- 第一行 Q W E R -->
-                        <StackPanel Orientation="Horizontal">
-                            <Border x:Name="KeyQ" Width="52" Style="{StaticResource KeyBorder}">
-                                <TextBlock x:Name="KeyQText" Style="{StaticResource KeyText}" Text="Q"/>
-                            </Border>
-                            <Border x:Name="KeyW" Width="52" Style="{StaticResource KeyBorder}">
-                                <TextBlock x:Name="KeyWText" Style="{StaticResource KeyText}" Text="W"/>
-                            </Border>
-                            <Border x:Name="KeyE" Width="52" Style="{StaticResource KeyBorder}">
-                                <TextBlock x:Name="KeyEText" Style="{StaticResource KeyText}" Text="E"/>
-                            </Border>
-                            <Border x:Name="KeyR" Width="52" Style="{StaticResource KeyBorder}" Margin="0,0,0,0">
-                                <TextBlock x:Name="KeyRText" Style="{StaticResource KeyText}" Text="R"/>
-                            </Border>
-                        </StackPanel>
-                        <!-- 第二行 A S D F -->
-                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                            <Border x:Name="KeyA" Width="52" Style="{StaticResource KeyBorder}">
-                                <TextBlock x:Name="KeyAText" Style="{StaticResource KeyText}" Text="A"/>
-                            </Border>
-                            <Border x:Name="KeyS" Width="52" Style="{StaticResource KeyBorder}">
-                                <TextBlock x:Name="KeySText" Style="{StaticResource KeyText}" Text="S"/>
-                            </Border>
-                            <Border x:Name="KeyD" Width="52" Style="{StaticResource KeyBorder}">
-                                <TextBlock x:Name="KeyDText" Style="{StaticResource KeyText}" Text="D"/>
-                            </Border>
-                            <Border x:Name="KeyF" Width="52" Style="{StaticResource KeyBorder}" Margin="0,0,0,0">
-                                <TextBlock x:Name="KeyFText" Style="{StaticResource KeyText}" Text="F"/>
-                            </Border>
-                        </StackPanel>
-                        <!-- 第三行 Shift Ctrl Alt -->
-                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                            <Border x:Name="KeyShift" Width="68" Style="{StaticResource KeyBorder}">
-                                <TextBlock x:Name="KeyShiftText" Style="{StaticResource KeyText}" FontSize="13" Text="左Shift"/>
-                            </Border>
-                            <Border x:Name="KeyCtrl" Width="68" Style="{StaticResource KeyBorder}">
-                                <TextBlock x:Name="KeyCtrlText" Style="{StaticResource KeyText}" FontSize="13" Text="左Ctrl"/>
-                            </Border>
-                            <Border x:Name="KeyAlt" Width="68" Style="{StaticResource KeyBorder}" Margin="0,0,0,0">
-                                <TextBlock x:Name="KeyAltText" Style="{StaticResource KeyText}" FontSize="13" Text="左Alt"/>
-                            </Border>
-                        </StackPanel>
-                        <!-- 第四行 空格（单独一行，标准键盘式底部空格） -->
-                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                            <Border x:Name="KeySpace" Width="176" Style="{StaticResource KeyBorder}" Margin="0,0,0,0">
-                                <TextBlock x:Name="KeySpaceText" Style="{StaticResource KeyText}" FontSize="13" Text="空格"/>
-                            </Border>
-                        </StackPanel>
-                    </StackPanel>
-                    <!-- 鼠标区 -->
-                    <StackPanel Orientation="Vertical" Margin="16,0,0,0">
-                        <StackPanel Orientation="Horizontal">
-                            <Border x:Name="MousePad" Width="80" Height="80" CornerRadius="8" BorderThickness="1" Tag="Pad">
-                                <Canvas x:Name="MousePadCanvas">
-                                    <Ellipse x:Name="MouseDot" Width="10" Height="10"/>
-                                </Canvas>
-                            </Border>
-                            <!-- 滚轮键（0.7.0）：鼠标垫右侧，滚轮上/滚轮下（companion 经 VK 0x07/0x08 点亮 150ms） -->
-                            <StackPanel Orientation="Vertical" Margin="6,0,0,0">
-                                <Border x:Name="MouseWheelUp" Width="36" Height="36" CornerRadius="6" BorderThickness="1" Margin="0,0,0,6">
-                                    <TextBlock x:Name="MouseWheelUpText" Style="{StaticResource KeyText}" FontSize="10" Text="滚轮上" TextWrapping="Wrap" TextAlignment="Center"/>
-                                </Border>
-                                <Border x:Name="MouseWheelDown" Width="36" Height="36" CornerRadius="6" BorderThickness="1" Margin="0,0,0,0">
-                                    <TextBlock x:Name="MouseWheelDownText" Style="{StaticResource KeyText}" FontSize="10" Text="滚轮下" TextWrapping="Wrap" TextAlignment="Center"/>
-                                </Border>
-                            </StackPanel>
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                            <Border x:Name="MouseL" Width="36" Height="36" CornerRadius="6" BorderThickness="1" Margin="0,0,6,0">
-                                <TextBlock x:Name="MouseLText" Style="{StaticResource KeyText}" FontSize="12" Text="左键"/>
-                            </Border>
-                            <Border x:Name="MouseM" Width="36" Height="36" CornerRadius="6" BorderThickness="1" Margin="0,0,6,0">
-                                <TextBlock x:Name="MouseMText" Style="{StaticResource KeyText}" FontSize="12" Text="中键"/>
-                            </Border>
-                            <Border x:Name="MouseR" Width="36" Height="36" CornerRadius="6" BorderThickness="1" Margin="0,0,0,0">
-                                <TextBlock x:Name="MouseRText" Style="{StaticResource KeyText}" FontSize="12" Text="右键"/>
-                            </Border>
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                            <Border x:Name="MouseX1" Width="36" Height="36" CornerRadius="6" BorderThickness="1" Margin="0,0,6,0">
-                                <TextBlock x:Name="MouseX1Text" Style="{StaticResource KeyText}" FontSize="12" Text="侧下"/>
-                            </Border>
-                            <Border x:Name="MouseX2" Width="36" Height="36" CornerRadius="6" BorderThickness="1" Margin="0,0,0,0">
-                                <TextBlock x:Name="MouseX2Text" Style="{StaticResource KeyText}" FontSize="12" Text="侧上"/>
-                            </Border>
-                        </StackPanel>
-                    </StackPanel>
-                </StackPanel>
-                <!-- 自定义按键区：由"自定义控件"菜单从 87 配列布局添加的按键（动态创建、按名去重、持久化恢复） -->
-                <StackPanel x:Name="CustomKeysPanel" Orientation="Horizontal" Margin="0,8,0,0" Visibility="Collapsed"/>
-                </StackPanel>
+                <!-- 键区（0.7.1）：Canvas 自由布局——按键尺寸/位置不再参与流式布局，缩放拉长不会推挤任何兄弟元素；
+                     宽度自适应内容（窗口随内容或固定均可），Row0 固定 272 = 设置行上方，
+                     缩放上限由代码按窗口可视边界钳制（撞边 = 窗口边框，非看不见的墙），设置行（Row1）永不被推出 -->
+                <Canvas x:Name="KeyLayer" Grid.Row="0">
+                    <!-- 键盘列（键距 6、行距 8 已折算进坐标，与原流式布局视觉一致） -->
+                    <Border x:Name="KeyQ" Width="52" Style="{StaticResource KeyBorder}" Canvas.Left="0" Canvas.Top="0">
+                        <TextBlock x:Name="KeyQText" Style="{StaticResource KeyText}" Text="Q"/>
+                    </Border>
+                    <Border x:Name="KeyW" Width="52" Style="{StaticResource KeyBorder}" Canvas.Left="58" Canvas.Top="0">
+                        <TextBlock x:Name="KeyWText" Style="{StaticResource KeyText}" Text="W"/>
+                    </Border>
+                    <Border x:Name="KeyE" Width="52" Style="{StaticResource KeyBorder}" Canvas.Left="116" Canvas.Top="0">
+                        <TextBlock x:Name="KeyEText" Style="{StaticResource KeyText}" Text="E"/>
+                    </Border>
+                    <Border x:Name="KeyR" Width="52" Style="{StaticResource KeyBorder}" Canvas.Left="174" Canvas.Top="0">
+                        <TextBlock x:Name="KeyRText" Style="{StaticResource KeyText}" Text="R"/>
+                    </Border>
+                    <Border x:Name="KeyA" Width="52" Style="{StaticResource KeyBorder}" Canvas.Left="0" Canvas.Top="56">
+                        <TextBlock x:Name="KeyAText" Style="{StaticResource KeyText}" Text="A"/>
+                    </Border>
+                    <Border x:Name="KeyS" Width="52" Style="{StaticResource KeyBorder}" Canvas.Left="58" Canvas.Top="56">
+                        <TextBlock x:Name="KeySText" Style="{StaticResource KeyText}" Text="S"/>
+                    </Border>
+                    <Border x:Name="KeyD" Width="52" Style="{StaticResource KeyBorder}" Canvas.Left="116" Canvas.Top="56">
+                        <TextBlock x:Name="KeyDText" Style="{StaticResource KeyText}" Text="D"/>
+                    </Border>
+                    <Border x:Name="KeyF" Width="52" Style="{StaticResource KeyBorder}" Canvas.Left="174" Canvas.Top="56">
+                        <TextBlock x:Name="KeyFText" Style="{StaticResource KeyText}" Text="F"/>
+                    </Border>
+                    <Border x:Name="KeyShift" Width="68" Style="{StaticResource KeyBorder}" Canvas.Left="0" Canvas.Top="112">
+                        <TextBlock x:Name="KeyShiftText" Style="{StaticResource KeyText}" FontSize="13" Text="左Shift"/>
+                    </Border>
+                    <Border x:Name="KeyCtrl" Width="68" Style="{StaticResource KeyBorder}" Canvas.Left="74" Canvas.Top="112">
+                        <TextBlock x:Name="KeyCtrlText" Style="{StaticResource KeyText}" FontSize="13" Text="左Ctrl"/>
+                    </Border>
+                    <Border x:Name="KeyAlt" Width="68" Style="{StaticResource KeyBorder}" Canvas.Left="148" Canvas.Top="112">
+                        <TextBlock x:Name="KeyAltText" Style="{StaticResource KeyText}" FontSize="13" Text="左Alt"/>
+                    </Border>
+                    <!-- 第四行 空格（标准键盘式底部空格） -->
+                    <Border x:Name="KeySpace" Width="176" Style="{StaticResource KeyBorder}" Canvas.Left="0" Canvas.Top="168">
+                        <TextBlock x:Name="KeySpaceText" Style="{StaticResource KeyText}" FontSize="13" Text="空格"/>
+                    </Border>
+                    <!-- 鼠标区（X 起点 = 键盘列右缘 226 + 16 间距） -->
+                    <Border x:Name="MousePad" Width="80" Height="80" CornerRadius="8" BorderThickness="1" Tag="Pad" Canvas.Left="242" Canvas.Top="0">
+                        <Canvas x:Name="MousePadCanvas">
+                            <Ellipse x:Name="MouseDot" Width="10" Height="10"/>
+                        </Canvas>
+                    </Border>
+                    <!-- 滚轮键（0.7.0）：鼠标垫右侧，滚轮上/滚轮下（companion 经 VK 0x07/0x08 点亮 150ms） -->
+                    <Border x:Name="MouseWheelUp" Width="36" Height="36" CornerRadius="6" BorderThickness="1" Canvas.Left="328" Canvas.Top="0">
+                        <TextBlock x:Name="MouseWheelUpText" Style="{StaticResource KeyText}" FontSize="10" Text="滚轮上" TextWrapping="Wrap" TextAlignment="Center"/>
+                    </Border>
+                    <Border x:Name="MouseWheelDown" Width="36" Height="36" CornerRadius="6" BorderThickness="1" Canvas.Left="328" Canvas.Top="42">
+                        <TextBlock x:Name="MouseWheelDownText" Style="{StaticResource KeyText}" FontSize="10" Text="滚轮下" TextWrapping="Wrap" TextAlignment="Center"/>
+                    </Border>
+                    <Border x:Name="MouseL" Width="36" Height="36" CornerRadius="6" BorderThickness="1" Canvas.Left="242" Canvas.Top="88">
+                        <TextBlock x:Name="MouseLText" Style="{StaticResource KeyText}" FontSize="12" Text="左键"/>
+                    </Border>
+                    <Border x:Name="MouseM" Width="36" Height="36" CornerRadius="6" BorderThickness="1" Canvas.Left="284" Canvas.Top="88">
+                        <TextBlock x:Name="MouseMText" Style="{StaticResource KeyText}" FontSize="12" Text="中键"/>
+                    </Border>
+                    <Border x:Name="MouseR" Width="36" Height="36" CornerRadius="6" BorderThickness="1" Canvas.Left="326" Canvas.Top="88">
+                        <TextBlock x:Name="MouseRText" Style="{StaticResource KeyText}" FontSize="12" Text="右键"/>
+                    </Border>
+                    <Border x:Name="MouseX1" Width="36" Height="36" CornerRadius="6" BorderThickness="1" Canvas.Left="242" Canvas.Top="132">
+                        <TextBlock x:Name="MouseX1Text" Style="{StaticResource KeyText}" FontSize="12" Text="侧下"/>
+                    </Border>
+                    <Border x:Name="MouseX2" Width="36" Height="36" CornerRadius="6" BorderThickness="1" Canvas.Left="284" Canvas.Top="132">
+                        <TextBlock x:Name="MouseX2Text" Style="{StaticResource KeyText}" FontSize="12" Text="侧上"/>
+                    </Border>
+                    <!-- 自定义按键区：由"自定义控件"菜单从 87 配列布局添加的按键（动态创建、按名去重、持久化恢复；
+                         Canvas 内相对 (0,224) 定位，实际位置 = (224 行) + 位置 transform） -->
+                    <Canvas x:Name="CustomKeysPanel" Canvas.Left="0" Canvas.Top="224" Visibility="Collapsed"/>
+                </Canvas>
                 <!-- 底部工具条：设置按钮（右对齐，固定不参与移动/锁定） -->
                 <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
                     <Border x:Name="SettingsBtn" Width="52" Height="26" CornerRadius="13" BorderThickness="1"
@@ -213,11 +193,21 @@
                                        Visibility="Collapsed" Margin="0,8,0,0"/>
                             <!-- 预设列表容器：动态项由 C# 添加 -->
                             <StackPanel x:Name="ThemePresetList" Margin="0,8,0,0"/>
-                            <!-- 添加预设按钮：点击展开输入行 -->
-                            <Border x:Name="ThemePresetAddBtn" Height="26" CornerRadius="6" BorderThickness="1"
-                                    Margin="0,10,0,0" Tapped="ThemePresetAdd_Click">
-                                <TextBlock x:Name="ThemePresetAddText" Text="添加预设" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
-                            </Border>
+                            <!-- 添加预设 + 导入按钮行：导入（0.7.1）读取用户分享的预设文件 -->
+                            <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <Border x:Name="ThemePresetAddBtn" Grid.Column="0" Height="26" CornerRadius="6" BorderThickness="1"
+                                        Tapped="ThemePresetAdd_Click">
+                                    <TextBlock x:Name="ThemePresetAddText" Text="添加预设" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border x:Name="ThemePresetImportBtn" Grid.Column="1" Height="26" CornerRadius="6" BorderThickness="1"
+                                        Margin="8,0,0,0" Padding="14,0,14,0" Tapped="ThemePresetImport_Click">
+                                    <TextBlock Text="导入" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
                             <!-- 预设名输入行：初始隐藏，点"添加预设"展开 -->
                             <Grid x:Name="ThemePresetNameRow" Visibility="Collapsed" Margin="0,8,0,0">
                                 <Grid.ColumnDefinitions>
@@ -254,11 +244,21 @@
                                        Visibility="Collapsed" Margin="0,8,0,0"/>
                             <!-- 预设列表容器：动态项由 C# 添加 -->
                             <StackPanel x:Name="LayoutPresetList" Margin="0,8,0,0"/>
-                            <!-- 添加布局预设按钮：点击展开输入行 -->
-                            <Border x:Name="LayoutPresetAddBtn" Height="26" CornerRadius="6" BorderThickness="1"
-                                    Margin="0,10,0,0" Tapped="LayoutPresetAdd_Click">
-                                <TextBlock x:Name="LayoutPresetAddText" Text="添加布局预设" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
-                            </Border>
+                            <!-- 添加布局预设 + 导入按钮行：导入（0.7.1）读取用户分享的预设文件 -->
+                            <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <Border x:Name="LayoutPresetAddBtn" Grid.Column="0" Height="26" CornerRadius="6" BorderThickness="1"
+                                        Tapped="LayoutPresetAdd_Click">
+                                    <TextBlock x:Name="LayoutPresetAddText" Text="添加布局预设" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border x:Name="LayoutPresetImportBtn" Grid.Column="1" Height="26" CornerRadius="6" BorderThickness="1"
+                                        Margin="8,0,0,0" Padding="14,0,14,0" Tapped="LayoutPresetImport_Click">
+                                    <TextBlock Text="导入" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </Grid>
                             <!-- 预设名输入行：初始隐藏，点"添加布局预设"展开 -->
                             <Grid x:Name="LayoutPresetNameRow" Visibility="Collapsed" Margin="0,8,0,0">
                                 <Grid.ColumnDefinitions>
@@ -415,12 +415,16 @@
                         <!-- 垂直排列（从上到下：标题 → 色相条 → 透明度条 → 色方块 → 常用色块），避免 Grid 默认同格重叠 -->
                         <StackPanel x:Name="PickerArea" Margin="12">
                             <TextBlock x:Name="PickerTitle" Text="面板" FontSize="11"/>
-                            <Grid x:Name="HueBar" Width="160" Height="16" Margin="0,8,0,0" HorizontalAlignment="Left"
-                                  PointerPressed="HueBar_PointerPressed" PointerMoved="HueBar_PointerMoved" PointerReleased="HueBar_PointerReleased">
-                                <Rectangle Fill="White" Stroke="Gray" StrokeThickness="1"/>
-                                <Ellipse x:Name="HueMarker" Width="4" Height="16" Fill="White" Stroke="Black" StrokeThickness="1"
-                                         HorizontalAlignment="Left" VerticalAlignment="Top" IsHitTestVisible="False"/>
-                            </Grid>
+                            <!-- 色相条：与透明度条同款 标签+条 结构（0.7.1 补上缺失的"色相"标签） -->
+                            <StackPanel Margin="0,8,0,0" HorizontalAlignment="Left">
+                                <TextBlock Text="色相" FontSize="10"/>
+                                <Grid x:Name="HueBar" Width="160" Height="16" Margin="0,2,0,0"
+                                      PointerPressed="HueBar_PointerPressed" PointerMoved="HueBar_PointerMoved" PointerReleased="HueBar_PointerReleased">
+                                    <Rectangle Fill="White" Stroke="Gray" StrokeThickness="1"/>
+                                    <Ellipse x:Name="HueMarker" Width="4" Height="16" Fill="White" Stroke="Black" StrokeThickness="1"
+                                             HorizontalAlignment="Left" VerticalAlignment="Top" IsHitTestVisible="False"/>
+                                </Grid>
+                            </StackPanel>
                             <StackPanel Margin="0,6,0,0" HorizontalAlignment="Left">
                                 <TextBlock Text="透明度" FontSize="10"/>
                                 <Grid x:Name="AlphaBar" Width="160" Height="16" Margin="0,2,0,0"

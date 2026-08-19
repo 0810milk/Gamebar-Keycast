@@ -28,3 +28,9 @@ KeyDisplay.Widget/Generated Files/
 .zcode/
 # release dir: only official per-version installers may be tracked
 release/*.bad-*
+
+# �������ݽ���Ŀ¼��Ĭ��Ԥ���ļ��ȣ�����⣩
+������/
+
+# 本机数据交换目录（默认预设文件等，不入库）
+数据区/

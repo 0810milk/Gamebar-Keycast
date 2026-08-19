@@ -6,6 +6,7 @@ using Microsoft.Gaming.XboxGameBar;
 using Windows.Data.Json;
 using Windows.Foundation;
 using Windows.Storage;
+using Windows.Storage.Pickers;
 using Windows.System;
 using Windows.UI;
 using Windows.UI.Core;
@@ -66,6 +67,7 @@ namespace KeyDisplay
         // 吸附对齐（0.5.0）：拖动/缩放时按周边按键十字方向边对边贴齐；软化——接近 SnapNear 触发、偏离 SnapRelease 脱离
         private const double SnapNear = 8.0;         // 触发吸附的边距（px）
         private const double SnapRelease = 10.0;     // 脱离吸附的边距（px，大于 SnapNear 形成滞回，避免抖动）
+        private const double SnapGap = 10.0;         // 间隔吸附（0.7.1）：每个候选键四边外扩一圈参考线，吸附"相邻但不接触"的 10px 间距，美观排布
         private const double SnapHintNear = 40.0;    // 接近提示阈值（px）：8~40 显示半透明虚线，>40 不显示
         private static readonly Color SnapLineColor = Color.FromArgb(0xFF, 0x4A, 0x9E, 0xFF);   // 浅蓝 #4A9EFF（吸中实线）
         private static readonly Color SnapHintColor = Color.FromArgb(0x80, 0x4A, 0x9E, 0xFF);   // 半透明浅蓝（接近提示虚线，约 50%）
@@ -96,6 +98,7 @@ namespace KeyDisplay
         private bool _snapActiveH, _snapActiveV;            // 水平/垂直轴是否正处吸附态（滞回：吸住后偏离 >SnapRelease 才脱离）
         private double _moveBaseLeft, _moveBaseTop;         // 移动起点：被拖按键的视觉左/上（SnapCanvas 坐标，用于拖动中免 TransformToVisual 反推）
         private double _dragBaseLeft, _dragBaseTop;         // 缩放起点：被调按键的视觉左/上（SnapCanvas 坐标）
+        private double _dragStartTx, _dragStartTy;          // 缩放按下时的 TranslateTransform 偏移起点（缩放 l/t 边补偿走 transform，不写 Margin 避免推挤兄弟）
         private readonly SolidColorBrush _snapSolid = new SolidColorBrush(SnapLineColor);   // 吸中实线画刷
         private readonly SolidColorBrush _snapDash = new SolidColorBrush(SnapHintColor);    // 接近提示虚线画刷
 
@@ -164,6 +167,9 @@ namespace KeyDisplay
         private bool _syncing = false;         // 程序性文本更新标志（防 TextChanged 递归）
         private Color? _lastPickColor;         // 拖动中最后取色（释放时固化用，避免依赖拖动中不更新的 hex 框）
         private int _lastPickMs;               // 拖动节流时间戳（Environment.TickCount，ms）
+        private bool _picking = false;         // 调色盘拖动中标志（0.7.1：拖动期间屏蔽 SizeChanged/配色刷新等旁路重置，防止"变蓝瞬间被打回旧色"）
+        private long _lastPickDiagTicks;       // 拖动取色诊断日志节流（500ms 一条，避免刷屏）
+        private bool _defaultPadPending = false;   // 内置默认预设的垫尺寸待首帧快照按本机屏幕比例重算（宽度沿用发布者，高度=宽×本机屏高/宽）
 
         // ===================== 用户预设（0.7.0）：主题预设 / 布局预设 =====================
         // 数据落点 %LOCALAPPDATA%\KeyDisplay\presets.json（companion 中转存储，重装不丢），
@@ -182,6 +188,10 @@ namespace KeyDisplay
             public bool LayoutLocked;   // 布局预设：LayoutLocked
             public int KeyOpacity;      // 布局预设：KeyOpacity_（0~100）
             public bool PadVisible;     // 布局预设：PadVisible_
+            public double PadW;         // 布局预设：鼠标垫宽度（0=未提供/旧版）
+            public double PadH;         // 布局预设：鼠标垫高度（仅比例参考，导入端按本机屏幕比例重算）
+            public double? PadPosX;     // 布局预设：鼠标垫位置 tx（null=未提供/旧版）
+            public double? PadPosY;     // 布局预设：鼠标垫位置 ty（null=未提供/旧版）
             public Dictionary<string, string> Keys;        // 布局预设：Layout_<键名> → 原始值串（"w;h;tx;ty"）
             public Dictionary<string, KeyPos> CustomKeys;  // 布局预设：自定义键名 → 位置/尺寸
             public List<string> DeletedKeys;               // 布局预设：Deleted_<键名> 的键名列表
@@ -215,6 +225,87 @@ namespace KeyDisplay
         private Brush InvertKeyBgB() => _theme == "custom" ? _customBrushes[3] : (_theme == "dark" ? _lightDefaultBg : _darkDefaultBg);
         private Brush InvertKeyFgB() => _theme == "custom" ? _customBrushes[2] : (_theme == "dark" ? _lightDefaultFg : _darkDefaultFg);
 
+        // 内置默认布局预设（0.7.1）：来自发布者提供的"默认2.json"（导出格式，PresetIO 可解析），
+        // 并补入鼠标垫位置 padPos(94,0)（发布者实际摆放位置）。
+        // 启动时若用户从未自定义过布局（无 Layout_* 持久化）自动套用；「重置布局」也回到这套。
+        private const string BuiltInDefaultLayoutJson =
+            @"{""app"":""KeyDisplay"",""formatVersion"":1,""type"":""layout"",""name"":""默认2"",""savedAt"":""2026-08-19T15:14:44"",""data"":{""keyOpacity"":100,""padVisible"":true,""padW"":222.651641845703,""padH"":139.173580462428,""padPosX"":94,""padPosY"":0,""keys"":{""Layout_W"":""52;48;55.9999923706055;1.9073486328125E-06"",""Layout_M"":""36;36;98;51.3333358764648"",""Layout_WheelUp"":""36;36;230.666732788086;57.3333358764648"",""Layout_F"":""52;48;72;2.00000381469727"",""Layout_S"":""52;48;66.0000076293945;2"",""Layout_WheelDown"":""36;36;230.666702270508;61.3333320617676"",""Layout_MR"":""36;36;102;51.3333435058594"",""Layout_X2"":""36;36;190;7.33332824707031"",""Layout_L"":""36;36;94;51.3333358764648"",""Layout_Alt"":""51;48;-96;3.99998474121094"",""Layout_E"":""52;48;60;1.9073486328125E-06"",""Layout_Shift"":""68;48;-13.9999904632568;-54"",""Layout_R"":""52;48;62;1.9073486328125E-06"",""Layout_Space"":""176;48;113.333335876465;-52.0000228881836"",""Layout_A"":""52;48;62.0000076293945;1.99999046325684"",""Layout_X1"":""36;36;278;5.99996948242188"",""Layout_D"":""52;48;68;1.99999809265137"",""Layout_Ctrl"":""58;48;-90;3.99998474121094"",""Layout_Q"":""52;48;52.6666793823242;1.9073486328125E-06""},""customKeys"":{""Tab"":{""pos"":""-13.9999904632568;-224"",""size"":""74;48""}},""deletedKeys"":[]}}";
+
+        // 首次启动初始化默认布局：仅当用户从未自定义过布局（无 Layout_* 键）时，把内置默认预设写入持久化。
+        // 只写持久化不重建 UI——构造函数场景由后续 Restore* 恢复链应用；重置场景由调用方补重建。
+        private void ApplyBuiltInDefaultLayoutIfNeeded()
+        {
+            try
+            {
+                var v = ApplicationData.Current.LocalSettings.Values;
+                foreach (var kv in v)
+                    if (kv.Key.StartsWith(LayoutPrefix, StringComparison.Ordinal)) return;   // 用户已有布局自定义，尊重用户
+                string err;
+                var p = PresetIO.ParseExport(BuiltInDefaultLayoutJson, out err);
+                if (p == null) { DiagLog("builtin default layout parse fail: " + err); return; }
+                if (p.Keys != null)
+                    foreach (var kv in p.Keys)
+                        if (kv.Value != null) v[kv.Key] = kv.Value;
+                if (p.CustomKeys != null)
+                    foreach (var kv in p.CustomKeys)
+                    {
+                        v["Custom_" + kv.Key] = "1";
+                        v["CustomPos_" + kv.Key] = string.IsNullOrEmpty(kv.Value.Pos) ? "0;0" : kv.Value.Pos;
+                        v["CustomSize_" + kv.Key] = string.IsNullOrEmpty(kv.Value.Size) ? "" : kv.Value.Size;
+                    }
+                if (p.DeletedKeys != null)
+                    foreach (var nm in p.DeletedKeys)
+                        if (!string.IsNullOrEmpty(nm)) v["Deleted_" + nm] = 1;
+                v["KeyOpacity_"] = Math.Max(10, Math.Min(100, p.KeyOpacity));
+                v["PadVisible_"] = p.PadVisible ? 1 : 0;
+                // 鼠标垫：宽度沿用发布者，高度待首帧快照按本机虚拟屏幕比例重算（与预设导入语义一致：同步尺寸、比例跟随本机）
+                if (p.PadW > 0 && p.PadH > 0)
+                {
+                    v["PadCustom_"] = 1;
+                    v["PadW"] = p.PadW.ToString(CultureInfo.InvariantCulture);
+                    v["PadH"] = p.PadH.ToString(CultureInfo.InvariantCulture);
+                    // 鼠标垫位置（0.7.1）：预设带 padPos 时同步发布者位置
+                    if (p.PadPosX.HasValue)
+                        v["PadPos_left"] = p.PadPosX.Value.ToString(CultureInfo.InvariantCulture);
+                    if (p.PadPosY.HasValue)
+                        v["PadPos_top"] = p.PadPosY.Value.ToString(CultureInfo.InvariantCulture);
+                    _defaultPadPending = true;
+                }
+                DiagLog("builtin default layout applied: keys=" + (p.Keys != null ? p.Keys.Count : 0)
+                        + " custom=" + (p.CustomKeys != null ? p.CustomKeys.Count : 0)
+                        + " padW=" + (int)p.PadW);
+            }
+            catch (Exception ex)
+            {
+                DiagLog("builtin default layout fail: " + ex.Message);
+            }
+        }
+
+        // 首帧快照到达后按本机虚拟屏幕比例修正默认垫高度（宽度不变，比例跟随本机）
+        private void ApplyDefaultPadRatio(int vsW, int vsH)
+        {
+            try
+            {
+                _defaultPadPending = false;
+                var v = ApplicationData.Current.LocalSettings.Values;
+                double pw = ReadSettingDouble(v, "PadW", MousePad.Width);
+                double ph = pw * vsH / vsW;
+                if (ph < MinPadH) { double f = MinPadH / ph; ph = MinPadH; pw *= f; }
+                if (pw < MinPadW) { double f = MinPadW / pw; pw = MinPadW; ph *= f; }
+                v["PadW"] = pw.ToString(CultureInfo.InvariantCulture);
+                v["PadH"] = ph.ToString(CultureInfo.InvariantCulture);
+                MousePad.Width = pw;
+                MousePad.Height = ph;
+                _padW = pw;
+                _padH = ph;
+                DiagLog("default pad ratio applied: " + (int)pw + "x" + (int)ph + " (vs " + vsW + "x" + vsH + ")");
+            }
+            catch (Exception ex)
+            {
+                DiagLog("default pad ratio fail: " + ex.Message);
+            }
+        }
+
         public Widget1()
         {
             this.InitializeComponent();
@@ -237,6 +328,9 @@ namespace KeyDisplay
             }
 
             RegisterDefaultKeys();   // 登记全部默认键（键盘 12 键 + 鼠标 5 键）到字典
+
+            // 0.7.1：首次启动（无用户布局自定义）自动套用内置默认预设（写入持久化，由下方 Restore* 链应用）
+            ApplyBuiltInDefaultLayoutIfNeeded();
 
             // 布局自定义：所有按键/鼠标键附加指针处理（边缘/四角拖拽缩放）；鼠标垫也参与（长按移动 + 等比缩放）
             foreach (var kv in _keys) AttachResize(kv.Value);
@@ -343,8 +437,8 @@ namespace KeyDisplay
             CompositionTarget.Rendering += OnRendering;
             _modeTimer.Start();
             _reader.Start();
-            LoadPresetsAsync();   // 启动拉取用户预设（companion 未就绪则静默降级，不影响其他功能）
-            TryStartCompanion();
+            TryStartCompanion();          // 先确保伴生进程在跑（协议拉起，含系统重启后首次启动），再拉取预设
+            LoadPresetsAsync();           // 启动拉取用户预设（companion 冷启动期间重试数次，静默降级不影响其他功能）
         }
 
         private void OnGameBarDisplayModeChanged(object sender, object e)
@@ -599,6 +693,8 @@ namespace KeyDisplay
                 }
 
                 UpdatePadSize(snap.VsW, snap.VsH);
+                // 0.7.1：内置默认预设的垫尺寸在首帧快照到达后按本机虚拟屏幕比例重算（宽度沿用发布者，比例跟随本机）
+                if (_defaultPadPending && snap.VsW > 0 && snap.VsH > 0) ApplyDefaultPadRatio(snap.VsW, snap.VsH);
                 // 目标点：绝对屏幕坐标 → 垫面位置（点 = 屏幕的真实镜像）
                 double vw = snap.VsW > 0 ? snap.VsW : 1920;
                 double vh = snap.VsH > 0 ? snap.VsH : 1080;
@@ -733,6 +829,7 @@ namespace KeyDisplay
         private void SavePadCustom()
         {
             _padCustomized = true;
+            _defaultPadPending = false;   // 用户手动调整过垫：放弃默认预设的比例修正
             double tx, ty;
             GetTransformXY(MousePad, out tx, out ty);
             var v = ApplicationData.Current.LocalSettings.Values;
@@ -920,8 +1017,12 @@ namespace KeyDisplay
                     SlotInput(k).Text = ToHex(GetSlotDisplayColor(k));
                     _syncing = false;
                 }
-                if (_activeSlot >= 0 && PickerMenu.Visibility == Visibility.Visible)
-                    SyncPickerToColor(GetSlotDisplayColor(_activeSlot));
+                if (_activeSlot >= 0 && PickerMenu.Visibility == Visibility.Visible && !_picking)
+                {
+                    var syncC = GetSlotDisplayColor(_activeSlot);
+                    DiagLog("picker settingsColorsSync -> " + ToHex(syncC) + " (hue=" + _hue + ")");
+                    SyncPickerToColor(syncC);
+                }
             }
         }
 
@@ -1090,6 +1191,7 @@ namespace KeyDisplay
                     CustomKeysPanel.Children.Remove(cb);
                     ApplicationData.Current.LocalSettings.Values.Remove("Custom_" + nm);
                     ApplicationData.Current.LocalSettings.Values.Remove("CustomPos_" + nm);
+                    ApplicationData.Current.LocalSettings.Values.Remove("CustomSize_" + nm);
                 }
             }
             if (_customKeys.Count == 0) CustomKeysPanel.Visibility = Visibility.Collapsed;
@@ -1111,8 +1213,22 @@ namespace KeyDisplay
                 if (kv.Key.StartsWith("Deleted_", StringComparison.Ordinal)) delNames.Add(kv.Key);
             }
             foreach (var k in delNames) ApplicationData.Current.LocalSettings.Values.Remove(k);
+            // 0.7.1：重置 = 回到内置默认预设布局（启动无自定义布局时也自动套用同一套）。
+            // 必须先清 Layout_*（ResetKeyLayout 刚写入了出厂坐标，否则 ApplyBuiltInDefaultLayoutIfNeeded 会误判"用户已自定义"而跳过），
+            // 再重建 UI 应用预设内容（键位/自定义键/鼠标垫尺寸与位置/透明度/垫可见）
+            var layoutKeys = new List<string>();
+            foreach (var kv in ApplicationData.Current.LocalSettings.Values)
+                if (kv.Key.StartsWith(LayoutPrefix, StringComparison.Ordinal)) layoutKeys.Add(kv.Key);
+            foreach (var k in layoutKeys) ApplicationData.Current.LocalSettings.Values.Remove(k);
+            ApplyBuiltInDefaultLayoutIfNeeded();
+            RestoreLayout();
+            RestoreDeletions();
+            RestorePadCustom();
+            RestorePadVisibility();
+            RestoreCustomKeys();
+            ApplyKeyOpacity();
             ClearHover();
-            DiagLog("layout reset (custom keys cleared: " + deadNames.Count + ")");
+            DiagLog("layout reset -> builtin default preset (custom keys cleared: " + deadNames.Count + ")");
         }
 
         // 二级控件菜单的"自定义控件"按键点击，展开控件菜单（覆盖层在设置面板之上，外观一致）
@@ -1141,18 +1257,35 @@ namespace KeyDisplay
                 DiagLog("custom key duplicate: " + name);
                 return;
             }
+            // 自定义键尺寸（0.7.1）：CustomSize_<名>（w;h）持久化，恢复精确尺寸（默认按名称宽度计算）
+            string csize = ApplicationData.Current.LocalSettings.Values["CustomSize_" + name] as string;
+            double cw = CustomKeyWidth(name), ch = 48;
+            if (!string.IsNullOrEmpty(csize))
+            {
+                try
+                {
+                    var sp = csize.Split(';');
+                    if (sp.Length == 2)
+                    {
+                        double w0 = double.Parse(sp[0], CultureInfo.InvariantCulture);
+                        double h0 = double.Parse(sp[1], CultureInfo.InvariantCulture);
+                        if (w0 >= 10 && w0 <= 2000 && h0 >= 10 && h0 <= 2000) { cw = w0; ch = h0; }
+                    }
+                }
+                catch { }
+            }
             var border = new Border
             {
-                Width = CustomKeyWidth(name),
-                Height = 48,
+                Width = cw,
+                Height = ch,
                 CornerRadius = new CornerRadius(6),
                 BorderThickness = new Thickness(1),
-                Margin = new Thickness(0, 0, 6, 0),
+                Margin = new Thickness(0),   // 0.7.1 Canvas 自由布局：间距走坐标/transform，不再用 Margin 参与布局
                 Tag = name
             };
             border.Child = new TextBlock
             {
-                Text = name,
+                Text = (name == "Space") ? "\u7a7a\u683c" : name,   // 空格键显示「空格」（内部名保持 Space，持久化/映射不受影响）
                 FontSize = 18,
                 FontWeight = Windows.UI.Text.FontWeights.SemiBold,
                 HorizontalAlignment = HorizontalAlignment.Center,
@@ -1160,6 +1293,8 @@ namespace KeyDisplay
             };
             _customKeys[name] = border;
             CustomKeysPanel.Children.Add(border);
+            Canvas.SetLeft(border, 0);   // 0.7.1 Canvas 自由布局：自定义键定位 = 面板相对 (0,0)（面板位于键区 (0,224)）+ 位置 transform
+            Canvas.SetTop(border, 0);
             CustomKeysPanel.Visibility = Visibility.Visible;
             AttachResize(border);       // 复用拖拽缩放/hover/锁定/长按移动机制
             SetKey(border, false);      // 初始主题样式
@@ -1182,7 +1317,18 @@ namespace KeyDisplay
             }
             else
             {
-                ApplicationData.Current.LocalSettings.Values["CustomPos_" + name] = "0;0";
+                // 0.7.1 无已存位置：默认排布到已有自定义键右侧（自动避让），避免全部叠在起点
+                double ax = 0;
+                foreach (var kv in _customKeys)
+                {
+                    if (kv.Value == border) continue;
+                    var tt = kv.Value.RenderTransform as TranslateTransform;
+                    double tx = tt != null ? tt.X : 0;
+                    ax = Math.Max(ax, tx + kv.Value.Width);
+                }
+                SetTransformXY(border, ax + 6, 0);
+                ApplicationData.Current.LocalSettings.Values["CustomPos_" + name] =
+                    (ax + 6).ToString(CultureInfo.InvariantCulture) + ";0";
             }
             DiagLog("custom key added: " + name);
         }
@@ -1557,6 +1703,7 @@ namespace KeyDisplay
             if (!c.HasValue) c = ParseHex(SlotInput(_activeSlot).Text);   // 兜底：未拖动直接点开再收起
             if (c.HasValue)
             {
+                DiagLog("picker finalize slot=" + _activeSlot + " lastPick=" + (_lastPickColor.HasValue ? ToHex(_lastPickColor.Value) : "null") + " -> " + ToHex(c.Value));
                 CommitSlotColor(_activeSlot, c.Value);
                 var tb = SlotInput(_activeSlot);
                 _syncing = true;
@@ -1607,6 +1754,7 @@ namespace KeyDisplay
                 else h = 60 * ((r - g) / delta + 4);
                 if (h < 0) h += 360;
             }
+            DiagLog("picker sync -> " + ToHex(c) + " h=" + h + " (old hue=" + _hue + ")");
             _hue = h;
             UpdateSvBase();
             double sx = s, sy = 1 - v;
@@ -1704,6 +1852,7 @@ namespace KeyDisplay
         private void SvBox_PointerPressed(object sender, PointerRoutedEventArgs e)
         {
             EnsureCustomTheme();
+            _picking = true;
             if (SvBox.CapturePointer(e.Pointer)) UpdateSvPick(e);
         }
 
@@ -1717,6 +1866,7 @@ namespace KeyDisplay
             if (SvBox.PointerCaptures != null && SvBox.PointerCaptures.Count > 0)
             {
                 SvBox.ReleasePointerCapture(e.Pointer);
+                _picking = false;   // 先清标志再固化：FinalizePick 内部 ApplySettingsColors 的盘同步用新色，属期望行为
                 FinalizePick();
             }
         }
@@ -1741,6 +1891,7 @@ namespace KeyDisplay
         private void HueBar_PointerPressed(object sender, PointerRoutedEventArgs e)
         {
             EnsureCustomTheme();
+            _picking = true;
             if (HueBar.CapturePointer(e.Pointer)) UpdateHuePick(e);
         }
 
@@ -1754,6 +1905,7 @@ namespace KeyDisplay
             if (HueBar.PointerCaptures != null && HueBar.PointerCaptures.Count > 0)
             {
                 HueBar.ReleasePointerCapture(e.Pointer);
+                _picking = false;   // 先清标志再固化（见 SvBox_PointerReleased 注释）
                 FinalizePick();
             }
         }
@@ -1762,6 +1914,7 @@ namespace KeyDisplay
         private void AlphaBar_PointerPressed(object sender, PointerRoutedEventArgs e)
         {
             EnsureCustomTheme();
+            _picking = true;
             if (AlphaBar.CapturePointer(e.Pointer)) UpdateAlphaPick(e);
         }
 
@@ -1775,6 +1928,7 @@ namespace KeyDisplay
             if (AlphaBar.PointerCaptures != null && AlphaBar.PointerCaptures.Count > 0)
             {
                 AlphaBar.ReleasePointerCapture(e.Pointer);
+                _picking = false;   // 先清标志再固化（见 SvBox_PointerReleased 注释）
                 FinalizePick();
             }
         }
@@ -1857,6 +2011,12 @@ namespace KeyDisplay
                 _lastPickColor = c;
                 _customBrushes[_activeSlot].Color = c;   // 引用即改，组件实时变色
                 UpdateAlphaBar();   // RGB 变了，透明度条渐变同步
+                // 诊断（500ms 节流）：确认拖动中取色链路
+                if (Environment.TickCount - _lastPickDiagTicks > 500)
+                {
+                    _lastPickDiagTicks = Environment.TickCount;
+                    DiagLog("picker huePick h=" + _hue + " sv=" + Math.Round(sx, 2) + "," + Math.Round(sy, 2) + " -> " + ToHex(c));
+                }
             }
         }
 
@@ -1923,12 +2083,18 @@ namespace KeyDisplay
             (HueBar.Children[0] as Rectangle).Fill = hueGrad;
 
             // 调色区刚展开时 SvBox 可能尚未布局（ActualWidth=0），marker 定位会被跳过——布局完成后补一次
+            // 0.7.1：拖动中（_picking）跳过——延迟补发的 SizeChanged 会用 hex 旧色重置整盘，造成"变蓝瞬间被打回"。
             SvBox.SizeChanged += (s2, e2) =>
             {
+                if (_picking) return;
                 if (PickerMenu.Visibility == Visibility.Visible && _activeSlot >= 0)
                 {
                     var cur = ParseHex(SlotInput(_activeSlot).Text);
-                    if (cur.HasValue) SyncPickerToColor(cur.Value);
+                    if (cur.HasValue)
+                    {
+                        DiagLog("picker svSizeChanged -> " + ToHex(cur.Value) + " (hue=" + _hue + ")");
+                        SyncPickerToColor(cur.Value);
+                    }
                 }
             };
         }
@@ -2005,6 +2171,7 @@ namespace KeyDisplay
                 CustomKeysPanel.Children.Remove(b);
                 ApplicationData.Current.LocalSettings.Values.Remove("Custom_" + name);
                 ApplicationData.Current.LocalSettings.Values.Remove("CustomPos_" + name);
+                ApplicationData.Current.LocalSettings.Values.Remove("CustomSize_" + name);
                 if (_customKeys.Count == 0) CustomKeysPanel.Visibility = Visibility.Collapsed;
                 DiagLog("custom key deleted: " + name);
             }
@@ -2155,6 +2322,9 @@ namespace KeyDisplay
             _dragStartH = b.Height;
             _dragStartML = b.Margin.Left;
             _dragStartMT = b.Margin.Top;
+            var tt0 = b.RenderTransform as TranslateTransform;
+            _dragStartTx = tt0 != null ? tt0.X : 0;
+            _dragStartTy = tt0 != null ? tt0.Y : 0;
             if (b == MousePad) _padCustomized = true;   // 一旦开始缩放鼠标垫即视为自定义，避免操作期间被自动跟随覆盖
             // 记录起点视觉基准（SnapCanvas 坐标），供缩放吸附反推被调边
             var baseRect = VisualRectOf(b);
@@ -2214,9 +2384,38 @@ namespace KeyDisplay
                 {
                     // 鼠标垫：任意边/四角拖动都等比例缩放（宽高比 = 起点比例），不做自由缩放、不做缩放吸附。
                     ComputePadEqualScale(ref w, ref h, ref ml, ref mt, dx, dy);
+                    // 0.7.1 尺寸上限：鼠标垫同样按窗口可视边界钳制（等比保比例，锚定边补偿按主导轴重算）。
+                    // 宽 = RootPanel 可视边界；高 = 设置行上方（不遮挡设置行）。
+                    if (_dragBaseLeft < RootPanel.ActualWidth - 8 && _dragBaseTop < RootPanel.ActualHeight - 16 - 42 - 8)
+                    {
+                        double padL = _dragBaseLeft + (ml - _dragStartML), padT = _dragBaseTop + (mt - _dragStartMT);
+                        double maxW = RootPanel.ActualWidth - 8 - padL, maxH = RootPanel.ActualHeight - 16 - 42 - 8 - padT;
+                        double f = 1.0;
+                        if (w > maxW) f = Math.Min(f, maxW / w);
+                        if (h > maxH) f = Math.Min(f, maxH / h);
+                        if (f < 1.0)
+                        {
+                            w = Math.Max(MinPadW, w * f);
+                            h = Math.Max(MinPadH, h * f);
+                            bool hasH = _dragMode.Contains("l") || _dragMode.Contains("r");
+                            bool hasV = _dragMode.Contains("t") || _dragMode.Contains("b");
+                            bool hDom = hasH && (!hasV || (Math.Abs(dx) / _dragStartW) >= (Math.Abs(dy) / _dragStartH));
+                            if (hDom)
+                            {
+                                ml = _dragMode.Contains("l") ? _dragStartML + (_dragStartW - w) : _dragStartML;
+                                mt = _dragStartMT;
+                            }
+                            else
+                            {
+                                mt = _dragMode.Contains("t") ? _dragStartMT + (_dragStartH - h) : _dragStartMT;
+                                ml = _dragStartML;
+                            }
+                        }
+                    }
                     key.Width = w;
                     key.Height = h;
-                    key.Margin = new Thickness(ml, mt, key.Margin.Right, key.Margin.Bottom);
+                    // 缩放补偿走 transform（Margin 保持起点）——避免 StackPanel 流式布局推挤兄弟按键（0.7.1）
+                    SetTransformXY(key, _dragStartTx + (ml - _dragStartML), _dragStartTy + (mt - _dragStartMT));
                     return;
                 }
                 if (_dragMode.Contains("l"))
@@ -2236,9 +2435,26 @@ namespace KeyDisplay
                 // 仍受 MinKeyW/MinKeyH 约束——吸附修正不得缩破最小值。
                 ApplyDragSnap(key, ref w, ref h, ref ml, ref mt);
 
+                // 0.7.1 尺寸上限：宽度钳制 = 窗口实际可视边界（RootPanel 内容区；窗口固定=撞窗口边框，窗口随内容自适应=可拉很大）；
+                // 高度钳制 = 设置行上方（Row0 底，不遮挡设置行）。钳制仅在"锚定边未出界"时生效，
+                // 避免把已拖出界的键突然压小；钳制触发时按锚定规则重算 l/t 补偿（保持对边不动）。
+                // 窗口可视边界（页面坐标）：宽 = RootPanel.ActualWidth - 8；设置行顶 = RootPanel.ActualHeight - 16(Padding 底) - 42(Row1)
+                double clampW = double.MaxValue, clampH = double.MaxValue;
+                if (_dragMode.Contains("r") && _dragBaseLeft + _dragStartW <= RootPanel.ActualWidth - 8)
+                    clampW = RootPanel.ActualWidth - 8 - _dragBaseLeft;
+                else if (_dragMode.Contains("l") && _dragBaseLeft >= 8)
+                    clampW = (_dragBaseLeft + _dragStartW) - 8;
+                if (_dragMode.Contains("b") && _dragBaseTop + _dragStartH <= RootPanel.ActualHeight - 16 - 42 - 8)
+                    clampH = RootPanel.ActualHeight - 16 - 42 - 8 - _dragBaseTop;
+                else if (_dragMode.Contains("t") && _dragBaseTop >= 16 + 8)
+                    clampH = (_dragBaseTop + _dragStartH) - (16 + 8);
+                if (w > clampW) { w = Math.Max(MinKeyW, clampW); if (_dragMode.Contains("l")) ml = (_dragStartML + _dragStartW) - w; }
+                if (h > clampH) { h = Math.Max(MinKeyH, clampH); if (_dragMode.Contains("t")) mt = (_dragStartMT + _dragStartH) - h; }
+
                 key.Width = w;
                 key.Height = h;
-                key.Margin = new Thickness(ml, mt, key.Margin.Right, key.Margin.Bottom);
+                // 缩放补偿走 transform（Margin 保持起点）——避免 StackPanel 流式布局推挤兄弟按键（0.7.1）
+                SetTransformXY(key, _dragStartTx + (ml - _dragStartML), _dragStartTy + (mt - _dragStartMT));
                 return;
             }
             // 长按计时中：位移超阈值（15px）才取消长按
@@ -2445,10 +2661,21 @@ namespace KeyDisplay
         private List<Rect> CollectOtherRects(Border exclude)
         {
             var rects = new List<Rect>();
-            foreach (var kv in _keys) if (kv.Value != exclude) rects.Add(VisualRectOf(kv.Value));
-            foreach (var kv in _mouse) if (kv.Value != exclude) rects.Add(VisualRectOf(kv.Value));
-            foreach (var kv in _customKeys) if (kv.Value != exclude) rects.Add(VisualRectOf(kv.Value));
+            foreach (var kv in _keys) if (kv.Value != exclude) AddSnapRects(rects, kv.Value);
+            foreach (var kv in _mouse) if (kv.Value != exclude) AddSnapRects(rects, kv.Value);
+            foreach (var kv in _customKeys) if (kv.Value != exclude) AddSnapRects(rects, kv.Value);
+            if (MousePad != exclude) AddSnapRects(rects, MousePad);   // 0.7.1：鼠标垫也是吸附目标（靠近鼠标垫有参考线）
             return rects;
+        }
+
+        // 0.7.1 间隔吸附：每个候选生成两个矩形——原矩形（0px 贴边/对齐）+ 四边外扩 SnapGap 的间隔矩形
+        // （"相邻但不接触"的 10px 间距吸附）。参考线显示在命中矩形边沿，即按键四边外 10px 处。
+        private void AddSnapRects(List<Rect> rects, Border b)
+        {
+            var r = VisualRectOf(b);
+            if (r.Width <= 0 || r.Height <= 0) return;
+            rects.Add(r);
+            rects.Add(new Rect(r.X - SnapGap, r.Y - SnapGap, r.Width + 2 * SnapGap, r.Height + 2 * SnapGap));
         }
 
         // 缩放吸附：对"被调整的边"做十字方向边对边贴齐（统一 SnapCanvas 坐标）。
@@ -2968,6 +3195,14 @@ namespace KeyDisplay
             var b = sender as Border;
             if (b == null || b.Tag == null) return;
             string tag = b.Tag.ToString();
+            if (tag.StartsWith("EXP|", StringComparison.Ordinal))
+            {
+                // 导出（0.7.1）：条目「导出」→ 文件保存对话框 → 单预设 JSON 分享文件
+                string[] parts = tag.Split('|');
+                if (parts.Length >= 3) ExportPresetAsync(parts[1], parts[2]);
+                e.Handled = true;
+                return;
+            }
             if (tag.StartsWith("DEL|", StringComparison.Ordinal))
             {
                 string[] parts = tag.Split('|');
@@ -3005,6 +3240,153 @@ namespace KeyDisplay
                 PersistPresetsAsync();
                 DiagLog("preset deleted: " + type + " / " + name);
             }
+        }
+
+        // ===================== 预设导出/导入（0.7.1）：分享预设 =====================
+
+        // 面板「导入」按钮 → 文件打开对话框 → 校验 → 入列 → 全量写回（不自动应用）
+        private void ThemePresetImport_Click(object sender, TappedRoutedEventArgs e)
+        {
+            ImportPresetAsync("theme");
+            e.Handled = true;
+        }
+
+        private void LayoutPresetImport_Click(object sender, TappedRoutedEventArgs e)
+        {
+            ImportPresetAsync("layout");
+            e.Handled = true;
+        }
+
+        // 导出：条目「导出」→ 文件保存对话框 → 单预设 JSON 分享文件
+        private async void ExportPresetAsync(string type, string name)
+        {
+            try
+            {
+                var list = type == "theme" ? _themePresets : _layoutPresets;
+                PresetEntry p = null;
+                foreach (var x in list) if (x.Name == name) { p = x; break; }
+                if (p == null) return;
+                var root = PresetIO.BuildExport(ToIoEntry(p));
+                var picker = new FileSavePicker
+                {
+                    SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
+                    SuggestedFileName = PresetIO.SanitizeFileName(p.Name)
+                };
+                picker.FileTypeChoices.Add("KeyDisplay 预设", new List<string> { ".json" });
+                var file = await picker.PickSaveFileAsync();
+                if (file == null) return;   // 用户取消
+                await FileIO.WriteTextAsync(file, root.Stringify());
+                DiagLog("preset exported: " + type + " / " + p.Name);
+            }
+            catch (Exception ex)
+            {
+                DiagLog("preset export error: " + ex.Message);
+            }
+        }
+
+        // 导入：文件打开对话框 → PresetIO 校验解析 → 重名自动改名 → 入列 → 渲染 → 全量写回
+        private async void ImportPresetAsync(string type)
+        {
+            try
+            {
+                var picker = new FileOpenPicker
+                {
+                    SuggestedStartLocation = PickerLocationId.Downloads,
+                    ViewMode = PickerViewMode.List
+                };
+                picker.FileTypeFilter.Add(".json");
+                var file = await picker.PickSingleFileAsync();
+                if (file == null) return;   // 用户取消
+                if ((await file.GetBasicPropertiesAsync()).Size > 262144) { ShowPresetMsg(type, "文件过大（超过 256KB）"); return; }
+                string text = await FileIO.ReadTextAsync(file);
+                JsonObject root;
+                if (!JsonObject.TryParse(text, out root)) { ShowPresetMsg(type, "无效的预设文件"); return; }
+                string error;
+                var p = PresetIO.ParseExport(root, out error);
+                if (p == null) { ShowPresetMsg(type, error ?? "无效的预设文件"); return; }
+                if (p.Type != type)
+                {
+                    ShowPresetMsg(type, "文件类型不符（这是" + (p.Type == "theme" ? "主题" : "布局") + "预设）");
+                    return;
+                }
+                var list = type == "theme" ? _themePresets : _layoutPresets;
+                var existing = new HashSet<string>();
+                foreach (var x in list) existing.Add(x.Name);
+                string finalName = PresetIO.UniqueName(p.Name, existing);
+                var e = FromIoEntry(p);   // PresetIO DTO → UI PresetEntry（private 嵌套类不可跨文件引用）
+                e.Name = finalName;
+                list.Add(e);
+                if (type == "theme") RenderThemePresets(); else RenderLayoutPresets();
+                PersistPresetsAsync();
+                DiagLog("preset imported: " + type + " / " + finalName);
+                // 不显示"已导入：xxx"提示（0.7.1：列表已直观展示，提示冗余）
+            }
+            catch (Exception ex)
+            {
+                DiagLog("preset import error: " + ex.Message);
+                ShowPresetMsg(type, "导入失败");
+            }
+        }
+
+        // 面板消息区提示（红字区，成功/失败共用）
+        private void ShowPresetMsg(string type, string text)
+        {
+            var msg = type == "theme" ? ThemePresetMsg : LayoutPresetMsg;
+            if (msg == null) return;
+            msg.Text = text;
+            msg.Visibility = Visibility.Visible;
+        }
+
+        // PresetIO 使用自包含 DTO（UI 的 PresetEntry/KeyPos 是 private 嵌套类，跨文件不可引用），进出各做一次字段拷贝；
+        // LayoutLocked 不参与拷贝（0.7.1 语义：预设不保留锁定状态）
+        private static PresetIO.PresetEntry ToIoEntry(PresetEntry p)
+        {
+            var io = new PresetIO.PresetEntry
+            {
+                Name = p.Name,
+                Type = p.Type,
+                SavedAt = p.SavedAt,
+                Theme = p.Theme,
+                Colors = p.Colors,
+                KeyOpacity = p.KeyOpacity,
+                PadVisible = p.PadVisible,
+                PadW = p.PadW,
+                PadH = p.PadH,
+                PadPosX = p.PadPosX,
+                PadPosY = p.PadPosY,
+                Keys = p.Keys,
+                DeletedKeys = p.DeletedKeys,
+                CustomKeys = new Dictionary<string, PresetIO.KeyPos>()
+            };
+            if (p.CustomKeys != null)
+                foreach (var kv in p.CustomKeys)
+                    io.CustomKeys[kv.Key] = new PresetIO.KeyPos { Pos = kv.Value.Pos, Size = kv.Value.Size };
+            return io;
+        }
+
+        private static PresetEntry FromIoEntry(PresetIO.PresetEntry p)
+        {
+            var e = new PresetEntry
+            {
+                Name = p.Name,
+                Type = p.Type,
+                SavedAt = p.SavedAt,
+                Theme = p.Theme,
+                Colors = p.Colors,
+                KeyOpacity = p.KeyOpacity,
+                PadVisible = p.PadVisible,
+                PadW = p.PadW,
+                PadH = p.PadH,
+                PadPosX = p.PadPosX,
+                PadPosY = p.PadPosY,
+                Keys = p.Keys,
+                DeletedKeys = p.DeletedKeys,
+                CustomKeys = new Dictionary<string, KeyPos>()
+            };
+            if (p.CustomKeys != null)
+                foreach (var kv in p.CustomKeys)
+                    e.CustomKeys[kv.Key] = new KeyPos { Pos = kv.Value.Pos, Size = kv.Value.Size };
+            return e;
         }
 
         // ===================== 用户预设（0.7.0）：列表渲染 =====================
@@ -3055,16 +3437,45 @@ namespace KeyDisplay
                 Tag = (type == "theme" ? "THEME|" : "LAYOUT|") + p.Name
             };
             row.Tapped += PresetItem_Tapped;
+            // 三列布局：名称(拉伸) | 导出(Auto) | 删除(Auto)——两按钮靠 HorizontalAlignment.Right 会重叠（修复 0.7.1）
             var grid = new Grid();
-            grid.Children.Add(new TextBlock
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var nameTb = new TextBlock
             {
                 Text = p.Name,
                 FontSize = 12,
                 Foreground = KeyFgB(),
                 VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(8, 0, 0, 0),
+                Margin = new Thickness(8, 0, 6, 0),
                 TextTrimming = TextTrimming.CharacterEllipsis
-            });
+            };
+            Grid.SetColumn(nameTb, 0);
+            grid.Children.Add(nameTb);
+            var exp = new Border
+            {
+                Width = 46,
+                Height = 22,
+                CornerRadius = new CornerRadius(3),
+                BorderThickness = new Thickness(1),
+                BorderBrush = BorderB(),
+                Background = KeyBgB(),
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 6, 0),
+                Tag = "EXP|" + type + "|" + p.Name
+            };
+            Grid.SetColumn(exp, 1);
+            exp.Tapped += PresetItem_Tapped;
+            exp.Child = new TextBlock
+            {
+                Text = "\u5bfc\u51fa",   // 导出
+                FontSize = 11,
+                Foreground = KeyFgB(),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            grid.Children.Add(exp);
             var del = new Border
             {
                 Width = 46,
@@ -3073,11 +3484,11 @@ namespace KeyDisplay
                 BorderThickness = new Thickness(1),
                 BorderBrush = BorderB(),
                 Background = KeyBgB(),
-                HorizontalAlignment = HorizontalAlignment.Right,
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(0, 0, 4, 0),
                 Tag = "DEL|" + type + "|" + p.Name
             };
+            Grid.SetColumn(del, 2);
             del.Tapped += PresetItem_Tapped;
             del.Child = new TextBlock
             {
@@ -3117,14 +3528,22 @@ namespace KeyDisplay
         {
             SaveLayout();
             var v = ApplicationData.Current.LocalSettings.Values;
+            double padTx, padTy;
+            GetTransformXY(MousePad, out padTx, out padTy);
             var p = new PresetEntry
             {
                 Name = name,
                 Type = "layout",
                 SavedAt = DateTime.Now.ToString("s", CultureInfo.InvariantCulture),
-                LayoutLocked = _layoutLocked,
+                // 不保存 LayoutLocked（0.7.1）：锁定是临时游玩开关，不属于布局预设内容
                 KeyOpacity = (int)_keyOpacity,
                 PadVisible = _padVisible,
+                // 鼠标垫尺寸（0.7.1）：同步当前垫面宽高（自动跟随或自定义均取实际值）；比例不导出，导入端按本机屏幕重算
+                PadW = _padW,
+                PadH = _padH,
+                // 鼠标垫位置（0.7.1）：同步当前 transform 位置（发布者的垫位置随预设走）
+                PadPosX = padTx,
+                PadPosY = padTy,
                 Keys = new Dictionary<string, string>(),
                 CustomKeys = new Dictionary<string, KeyPos>(),
                 DeletedKeys = new List<string>()
@@ -3215,6 +3634,7 @@ namespace KeyDisplay
                     if (kv.Key.StartsWith(LayoutPrefix, StringComparison.Ordinal) ||
                         kv.Key.StartsWith("Custom_", StringComparison.Ordinal) ||
                         kv.Key.StartsWith("CustomPos_", StringComparison.Ordinal) ||
+                        kv.Key.StartsWith("CustomSize_", StringComparison.Ordinal) ||
                         kv.Key.StartsWith("Deleted_", StringComparison.Ordinal))
                         rmKeys.Add(kv.Key);
                 }
@@ -3229,16 +3649,38 @@ namespace KeyDisplay
                     {
                         v["Custom_" + kv.Key] = "1";
                         v["CustomPos_" + kv.Key] = string.IsNullOrEmpty(kv.Value.Pos) ? "0;0" : kv.Value.Pos;
+                        // 0.7.1：自定义键尺寸一并同步（预设 size 字段 → CustomSize_ 持久化，AddCustomKey 恢复）
+                        v["CustomSize_" + kv.Key] = string.IsNullOrEmpty(kv.Value.Size) ? "" : kv.Value.Size;
                     }
                 if (p.DeletedKeys != null)
                     foreach (var nm in p.DeletedKeys)
                         if (!string.IsNullOrEmpty(nm)) v["Deleted_" + nm] = 1;
-                v["LayoutLocked"] = p.LayoutLocked;
-                _layoutLocked = p.LayoutLocked;
+                // 预设不保留"锁定布局"状态（0.7.1）：锁定是游玩中的临时开关，加载预设不改变当前锁定/解锁选择
                 int opacity = Math.Max(10, Math.Min(100, p.KeyOpacity));
                 v["KeyOpacity_"] = opacity;
                 _keyOpacity = opacity;
                 v["PadVisible_"] = p.PadVisible ? 1 : 0;
+
+                // 鼠标垫尺寸（0.7.1）：同步发布者尺寸，但【不同步比例】——宽度沿用发布者，高度按本机虚拟屏幕比例重算，
+                // 保证导入后垫面形状始终匹配用户本机屏幕；旧版预设（无 padW/padH）跳过，保持本机鼠标垫状态。
+                if (p.PadW > 0 && p.PadH > 0)
+                {
+                    var snap0 = _latest;
+                    double vsW = snap0 != null && snap0.VsW > 0 ? snap0.VsW : 1920;
+                    double vsH = snap0 != null && snap0.VsH > 0 ? snap0.VsH : 1080;
+                    double pw = p.PadW;
+                    double ph = pw * vsH / vsW;   // 比例 = 本机虚拟屏幕
+                    if (ph < MinPadH) { double f = MinPadH / ph; ph = MinPadH; pw *= f; }
+                    if (pw < MinPadW) { double f = MinPadW / pw; pw = MinPadW; ph *= f; }
+                    v["PadCustom_"] = 1;
+                    v["PadW"] = pw.ToString(CultureInfo.InvariantCulture);
+                    v["PadH"] = ph.ToString(CultureInfo.InvariantCulture);
+                    // 鼠标垫位置（0.7.1）：预设带 padPos 时同步发布者位置；否则保持本机已有位置（不清 PadPos）
+                    if (p.PadPosX.HasValue)
+                        v["PadPos_left"] = p.PadPosX.Value.ToString(CultureInfo.InvariantCulture);
+                    if (p.PadPosY.HasValue)
+                        v["PadPos_top"] = p.PadPosY.Value.ToString(CultureInfo.InvariantCulture);
+                }
 
                 // 4) 重建 UI（复用启动恢复路径，顺序与构造函数一致：登记默认键 → 布局 → 删除 → 鼠标垫可见 → 自定义键）
                 RegisterDefaultKeys();
@@ -3246,13 +3688,36 @@ namespace KeyDisplay
                 RestoreDeletions();
                 RestorePadVisibility();
                 RestoreCustomKeys();
+                // 应用鼠标垫尺寸（0.7.1）：预设带尺寸时置自定义模式并立即套用（宽高已在写回阶段按本机比例重算并落盘）
+                if (p.PadW > 0 && p.PadH > 0)
+                {
+                    double pw = ReadSettingDouble(v, "PadW", MousePad.Width);
+                    double ph = ReadSettingDouble(v, "PadH", MousePad.Height);
+                    if (pw >= MinPadW && ph >= MinPadH)
+                    {
+                        _padCustomized = true;
+                        MousePad.Width = pw;
+                        MousePad.Height = ph;
+                        _padW = pw;   // 同步垫面尺寸变量，保证鼠标点映射基准与实际尺寸一致
+                        _padH = ph;
+                        // 位置（0.7.1）：预设带 padPos 时套用发布者位置
+                        if (p.PadPosX.HasValue || p.PadPosY.HasValue)
+                        {
+                            double px = p.PadPosX.HasValue ? p.PadPosX.Value : ReadSettingDouble(v, "PadPos_left", 0.0);
+                            double py = p.PadPosY.HasValue ? p.PadPosY.Value : ReadSettingDouble(v, "PadPos_top", 0.0);
+                            SetTransformXY(MousePad, px, py);
+                        }
+                        DiagLog("pad sized by preset: " + (int)pw + "x" + (int)ph);
+                    }
+                }
                 if (OpacitySlider != null) OpacitySlider.Value = _keyOpacity;
                 ApplyKeyOpacity();
                 ApplySettingsColors();
                 ApplyPresetMenuColors();
                 DiagLog("layout preset applied: " + p.Name + " keys=" + (p.Keys != null ? p.Keys.Count : 0)
                         + " custom=" + (p.CustomKeys != null ? p.CustomKeys.Count : 0)
-                        + " deleted=" + (p.DeletedKeys != null ? p.DeletedKeys.Count : 0));
+                        + " deleted=" + (p.DeletedKeys != null ? p.DeletedKeys.Count : 0)
+                        + " pad=" + (p.PadW > 0 ? "size" : "keep"));
             }
             catch (Exception ex)
             {
@@ -3299,9 +3764,15 @@ namespace KeyDisplay
         private static JsonObject LayoutPresetToJson(PresetEntry p)
         {
             var data = new JsonObject();
-            data.SetNamedValue("layoutLocked", JsonValue.CreateBooleanValue(p.LayoutLocked));
+            // 不序列化 layoutLocked（0.7.1）：锁定是临时游玩开关，不属于布局预设内容（旧预设含该字段时加载端忽略）
             data.SetNamedValue("keyOpacity", JsonValue.CreateNumberValue(p.KeyOpacity));
             data.SetNamedValue("padVisible", JsonValue.CreateBooleanValue(p.PadVisible));
+            // 0.7.1：鼠标垫尺寸同步（比例不存，导入端按本机屏幕重算）
+            data.SetNamedValue("padW", JsonValue.CreateNumberValue(p.PadW));
+            data.SetNamedValue("padH", JsonValue.CreateNumberValue(p.PadH));
+            // 0.7.1：鼠标垫位置同步（可空）
+            if (p.PadPosX.HasValue) data.SetNamedValue("padPosX", JsonValue.CreateNumberValue(p.PadPosX.Value));
+            if (p.PadPosY.HasValue) data.SetNamedValue("padPosY", JsonValue.CreateNumberValue(p.PadPosY.Value));
             var keys = new JsonObject();
             if (p.Keys != null)
                 foreach (var kv in p.Keys) keys.SetNamedValue(kv.Key, JsonValue.CreateStringValue(kv.Value ?? ""));
@@ -3394,6 +3865,10 @@ namespace KeyDisplay
                     LayoutLocked = d.GetNamedBoolean("layoutLocked", true),
                     KeyOpacity = Math.Max(10, Math.Min(100, (int)Math.Round(d.GetNamedNumber("keyOpacity", 100.0)))),
                     PadVisible = d.GetNamedBoolean("padVisible", true),
+                    PadW = d.GetNamedNumber("padW", 0.0),
+                    PadH = d.GetNamedNumber("padH", 0.0),
+                    PadPosX = d.GetNamedValue("padPosX", null) != null ? (double?)d.GetNamedNumber("padPosX", 0.0) : null,
+                    PadPosY = d.GetNamedValue("padPosY", null) != null ? (double?)d.GetNamedNumber("padPosY", 0.0) : null,
                     Keys = new Dictionary<string, string>(),
                     CustomKeys = new Dictionary<string, KeyPos>(),
                     DeletedKeys = new List<string>()
@@ -3425,19 +3900,23 @@ namespace KeyDisplay
         // 启动拉取预设列表（OnLoaded 末尾调用）：companion 未就绪时重试数次，失败静默降级
         private async void LoadPresetsAsync()
         {
-            for (int attempt = 0; attempt < 5; attempt++)
+            // 重试窗口放大：companion 冷启动（PyInstaller 首启 2~4s）+ 协议拉起延迟，给足 ~30s 窗口；
+            // 若最终仍失败则静默降级（预设菜单为空），不影响其他功能。
+            for (int attempt = 0; attempt < 10; attempt++)
             {
                 try
                 {
                     // 不 ConfigureAwait(false)：续体回 UI 线程，便于解析后按需刷新已打开菜单
-                    string resp = await _reader.RequestPresetAsync("GET_PRESETS", "", 2000);
+                    string resp = await _reader.RequestPresetAsync("GET_PRESETS", "", 2500);
                     if (resp == null)
                     {
-                        if (attempt < 4) await Task.Delay(800);
+                        if (attempt < 9) await Task.Delay(1000);
                         continue;
                     }
                     if (resp.StartsWith("DATA|", StringComparison.Ordinal)) ParsePresetsJson(resp.Substring(5));
                     else if (resp.StartsWith("DATA:", StringComparison.Ordinal)) ParsePresetsJson(resp.Substring(5));
+                    else if (resp.StartsWith("|DATA|", StringComparison.Ordinal)) ParsePresetsJson(resp.Substring(6));   // 兼容旧版残留前导 '|'
+                    else if (resp.StartsWith("|DATA:", StringComparison.Ordinal)) ParsePresetsJson(resp.Substring(6));
                     else DiagLog("presets load resp: " + resp);
                     // 若预设菜单已打开则刷新列表（加载通常先于用户操作完成，此处兜底）
                     if (ThemePresetPanel != null && ThemePresetPanel.Visibility == Visibility.Visible) RenderThemePresets();

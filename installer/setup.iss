@@ -12,7 +12,7 @@
 
 #define MyAppName "按键显示"
 ; 版本号与 VERSION.md 保持一致（当前 0.6.0 beta），发布时同步修改
-#define MyAppVersion "0.7.0"
+#define MyAppVersion "0.8.0"
 #define MyAppPublisher "KeyDisplay"
 #define MyAppExeName "KeyDisplayCompanion.exe"
 

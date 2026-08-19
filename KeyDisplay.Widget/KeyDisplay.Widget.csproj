@@ -108,6 +108,7 @@
     <Compile Include="Widget1.xaml.cs">
       <DependentUpon>Widget1.xaml</DependentUpon>
     </Compile>
+    <Compile Include="PresetIO.cs" />
     <Compile Include="InputStateReader.cs" />
     <Compile Include="NativeMethods.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

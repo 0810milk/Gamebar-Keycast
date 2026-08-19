@@ -191,7 +191,8 @@ namespace KeyDisplay
                                     buf[2] == (byte)'S' && buf[3] == (byte)'P')
                                 {
                                     // 应答帧（0.7.0 预设协议）：RESP|OK / RESP|ERR|<msg> / RESP|DATA|<json>
-                                    string body = Encoding.UTF8.GetString(buf, 4, n - 4).TrimEnd('\0', '\r', '\n');
+                                    // 剥掉 "RESP|" 5 字符，body = OK / ERR|<msg> / DATA|<json>（0.7.1 修复：原剥 4 字符残留前导 '|' 导致 LoadPresetsAsync 解析不匹配）
+                                    string body = Encoding.UTF8.GetString(buf, 5, n - 5).TrimEnd('\0', '\r', '\n');
                                     PresetResponse?.Invoke(this, body);
                                 }
                                 else if (n >= 36 && buf[0] == (byte)'K' && buf[1] == (byte)'D' &&
