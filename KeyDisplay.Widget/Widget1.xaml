@@ -114,7 +114,7 @@
                 </StackPanel>
                 <TextBlock x:Name="StatusText" Text="" HorizontalAlignment="Right" VerticalAlignment="Top" FontSize="10" Opacity="0.6"/>
                 <!-- 设置子菜单覆盖层：点击设置图标展开，点遮罩收起（不用系统 Flyout，避免 Game Bar 宿主崩溃） -->
-                <Grid x:Name="SettingsPanel" Grid.RowSpan="2" Visibility="Collapsed" Background="#40000000"
+                <Grid x:Name="SettingsPanel" Grid.RowSpan="2" Visibility="Collapsed" Background="Transparent"
                       Tapped="SettingsPanel_Tapped">
                     <Border x:Name="SettingsMenu" Width="190" CornerRadius="8" BorderThickness="1"
                             HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,8,44"
@@ -178,7 +178,7 @@
                     </Border>
                 </Grid>
                 <!-- 主题预设子菜单覆盖层：设置菜单"主题预设"入口弹出；点遮罩/关闭收起（与 SettingsPanel 同级覆盖层，不嵌套） -->
-                <Grid x:Name="ThemePresetPanel" Grid.RowSpan="2" Visibility="Collapsed" Background="#40000000"
+                <Grid x:Name="ThemePresetPanel" Grid.RowSpan="2" Visibility="Collapsed" Background="Transparent"
                       Tapped="ThemePresetPanel_Tapped">
                     <Border x:Name="ThemePresetMenu" Width="260" CornerRadius="8" BorderThickness="1"
                             HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,8,44"
@@ -229,7 +229,7 @@
                     </Border>
                 </Grid>
                 <!-- 布局预设子菜单覆盖层：设置菜单"布局预设"入口弹出；点遮罩/关闭收起（与 SettingsPanel 同级覆盖层，不嵌套） -->
-                <Grid x:Name="LayoutPresetPanel" Grid.RowSpan="2" Visibility="Collapsed" Background="#40000000"
+                <Grid x:Name="LayoutPresetPanel" Grid.RowSpan="2" Visibility="Collapsed" Background="Transparent"
                       Tapped="LayoutPresetPanel_Tapped">
                     <Border x:Name="LayoutPresetMenu" Width="260" CornerRadius="8" BorderThickness="1"
                             HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,8,44"
@@ -280,7 +280,7 @@
                     </Border>
                 </Grid>
                 <!-- 主题颜色子菜单覆盖层：设置菜单"自定义"按钮弹出；点遮罩收起（8 个调色目标 + 独立调色盘子菜单） -->
-                <Grid x:Name="ThemeColorPanel" Grid.RowSpan="2" Visibility="Collapsed" Background="#40000000"
+                <Grid x:Name="ThemeColorPanel" Grid.RowSpan="2" Visibility="Collapsed" Background="Transparent"
                       Tapped="ThemeColorPanel_Tapped">
                     <!-- 双栏容器：列0=调色盘、列1=主题颜色；整体右下对齐，由布局引擎保证两子菜单并排、永不重叠 -->
                     <Grid HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,8,44">
@@ -291,6 +291,7 @@
                     <Border x:Name="ThemeColorMenu" Grid.Column="1" Width="320" CornerRadius="8" BorderThickness="1"
                             Margin="8,0,0,0"
                             Tapped="ThemeColorMenu_Tapped">
+                        <ScrollViewer x:Name="ThemeColorScroll" VerticalScrollBarVisibility="Auto" MaxHeight="360">
                         <StackPanel Padding="12">
                             <TextBlock x:Name="ThemeColorTitle" Text="主题颜色" FontSize="14" FontWeight="SemiBold"/>
                             <!-- 8 行调色目标：目标名 | hex 输入框 | 颜色盘按钮 -->
@@ -407,12 +408,14 @@
                                 </Border>
                             </Grid>
                         </StackPanel>
+                        </ScrollViewer>
                     </Border>
                     <!-- 独立调色盘子菜单：点某行"颜色盘"在主题颜色菜单左侧弹出；双栏 Grid 布局保证并排、永不重叠 -->
                     <Border x:Name="PickerMenu" Grid.Column="0" Width="200" CornerRadius="8" BorderThickness="1" Visibility="Collapsed"
                             Margin="0,0,8,0"
                             Tapped="ThemeColorMenu_Tapped">
                         <!-- 垂直排列（从上到下：标题 → 色相条 → 透明度条 → 色方块 → 常用色块），避免 Grid 默认同格重叠 -->
+                        <ScrollViewer x:Name="PickerScroll" VerticalScrollBarVisibility="Auto" MaxHeight="360">
                         <StackPanel x:Name="PickerArea" Margin="12">
                             <TextBlock x:Name="PickerTitle" Text="面板" FontSize="11"/>
                             <!-- 色相条：与透明度条同款 标签+条 结构（0.7.1 补上缺失的"色相"标签） -->
@@ -444,15 +447,17 @@
                             </Grid>
                             <Grid x:Name="ColorGrid" Width="160" Margin="0,10,0,0" HorizontalAlignment="Left"/>
                         </StackPanel>
+                        </ScrollViewer>
                     </Border>
                     </Grid>
                 </Grid>
                 <!-- 二级控件菜单覆盖层：从设置面板的"自定义控件"按键弹出；点遮罩/关闭按钮收起（与 SettingsPanel 同一覆盖层网格，保证两菜单位置对齐） -->
-                <Grid x:Name="LockPanel" Grid.RowSpan="2" Visibility="Collapsed" Background="#40000000"
+                <Grid x:Name="LockPanel" Grid.RowSpan="2" Visibility="Collapsed" Background="Transparent"
                       Tapped="LockPanel_Tapped">
                     <Border x:Name="LockMenu" Width="610" CornerRadius="8" BorderThickness="1"
                             HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,8,44"
                             Tapped="LockMenu_Tapped">
+                        <ScrollViewer x:Name="LockMenuScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" MaxHeight="360">
                         <StackPanel Padding="12">
                             <TextBlock x:Name="LockMenuTitle" Text="自定义控件" FontSize="14" FontWeight="SemiBold"/>
                             <Grid Margin="0,12,0,0">
@@ -598,15 +603,35 @@
                                     Margin="0,12,0,0" Tapped="LockReset_Click">
                                 <TextBlock x:Name="LockResetText" Text="重置按键布局" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
                             </Border>
-                            <Border x:Name="LockCloseBtn" Height="26" CornerRadius="6" BorderThickness="1"
-                                    Margin="0,12,0,0" Tapped="LockClose_Click">
-                                <TextBlock x:Name="LockCloseText" Text="关闭" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
-                            </Border>
+                        </StackPanel>
+                        </ScrollViewer>
+                    </Border>
+                </Grid>
+                <!-- 按键右键菜单覆盖层：右键按键弹出（删除/复制/修改显示名）；点遮罩关闭 -->
+                <Grid x:Name="KeyMenuPanel" Grid.RowSpan="2" Visibility="Collapsed" Background="Transparent" Tapped="KeyMenuPanel_Tapped">
+                    <Border x:Name="KeyMenu" Width="130" CornerRadius="8" BorderThickness="1" Tapped="KeyMenu_Tapped">
+                        <StackPanel x:Name="KeyMenuItems" Padding="6"/>
+                    </Border>
+                </Grid>
+                <!-- 修改显示名覆盖层：右键菜单「修改显示名」弹出；确定/取消/点遮罩关闭 -->
+                <Grid x:Name="RenamePanel" Grid.RowSpan="2" Visibility="Collapsed" Background="Transparent" Tapped="RenamePanel_Tapped">
+                    <Border x:Name="RenameBox" Width="220" CornerRadius="8" BorderThickness="1" HorizontalAlignment="Center" VerticalAlignment="Center" Tapped="KeyMenu_Tapped">
+                        <StackPanel Padding="14">
+                            <TextBlock x:Name="RenameTitle" Text="修改显示名" FontSize="13" HorizontalAlignment="Center"/>
+                            <TextBox x:Name="RenameInput" FontSize="13" Margin="0,12,0,0" MaxLength="12"/>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,14,0,0">
+                                <Border x:Name="RenameConfirm" Width="64" Height="26" CornerRadius="6" BorderThickness="1" Tapped="RenameConfirm_Click">
+                                    <TextBlock x:Name="RenameConfirmText" Text="确定" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
+                                </Border>
+                                <Border x:Name="RenameCancel" Width="64" Height="26" CornerRadius="6" BorderThickness="1" Margin="12,0,0,0" Tapped="RenameCancel_Click">
+                                    <TextBlock x:Name="RenameCancelText" Text="取消" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12"/>
+                                </Border>
+                            </StackPanel>
                         </StackPanel>
                     </Border>
                 </Grid>
                 <!-- 删除确认框覆盖层：右键自定义键弹出；确认/取消/点遮罩关闭 -->
-                <Grid x:Name="DeleteConfirmPanel" Grid.RowSpan="2" Visibility="Collapsed" Background="#40000000"
+                <Grid x:Name="DeleteConfirmPanel" Grid.RowSpan="2" Visibility="Collapsed" Background="Transparent"
                       Tapped="DeleteConfirmPanel_Tapped">
                     <Border x:Name="DeleteConfirmBox" Width="210" CornerRadius="8" BorderThickness="1"
                             HorizontalAlignment="Center" VerticalAlignment="Center" Tapped="LockMenu_Tapped">
@@ -626,7 +651,7 @@
                     </Border>
                 </Grid>
                 <!-- 关于面板覆盖层：设置菜单 ⓘ 按钮点击弹出；点遮罩收起（同在 SettingsPanel 覆盖层网格内，层级更高覆盖其上） -->
-                <Grid x:Name="AboutPanel" Grid.RowSpan="2" Visibility="Collapsed" Background="#40000000"
+                <Grid x:Name="AboutPanel" Grid.RowSpan="2" Visibility="Collapsed" Background="Transparent"
                       Tapped="AboutPanel_Tapped">
                     <Border x:Name="AboutMenu" Width="240" CornerRadius="8" BorderThickness="1"
                             HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,8,44"
@@ -640,16 +665,22 @@
                                 </Ellipse.Fill>
                             </Ellipse>
                             <TextBlock x:Name="AboutAuthor" Text="恐龙milk" HorizontalAlignment="Center" FontSize="13" Margin="0,10,0,0"/>
-                            <!-- GitHub 行：点击打开浏览器（链接文本显示，可点击） -->
+                            <!-- GitHub 行：点击打开浏览器；Game Bar 拦截时自动复制链接（文本可选中复制兜底） -->
                             <Border x:Name="AboutGitHubRow" Margin="0,12,0,0" Tapped="GitHubRow_Tapped" Background="Transparent">
                                 <TextBlock x:Name="AboutGitHubText" Text="https://github.com/0810milk/Gamebar-Keycast"
-                                           FontSize="11" TextWrapping="Wrap" TextDecorations="Underline" Foreground="#4A9EFF"/>
+                                           FontSize="11" TextWrapping="Wrap" TextDecorations="Underline" Foreground="#4A9EFF"
+                                           IsTextSelectionEnabled="True"/>
                             </Border>
                             <!-- QQ 反馈群行：点击跳群链接（只显示群号文本，链接不显示） -->
                             <Border x:Name="AboutQqRow" Margin="0,8,0,0" Tapped="QqRow_Tapped" Background="Transparent">
                                 <TextBlock x:Name="AboutQqText" Text="QQ 反馈群：2152061189"
-                                           FontSize="12" TextDecorations="Underline" Foreground="#4A9EFF"/>
+                                           FontSize="12" TextDecorations="Underline" Foreground="#4A9EFF"
+                                           IsTextSelectionEnabled="True"/>
                             </Border>
+                            <!-- 复制降级提示：链接被宿主拦截时显示（1.5s） -->
+                            <TextBlock x:Name="AboutCopyTip" Text="链接已复制，请在浏览器粘贴打开"
+                                       FontSize="11" Foreground="#4A9EFF" TextWrapping="Wrap"
+                                       Visibility="Collapsed" Margin="0,10,0,0"/>
                         </StackPanel>
                     </Border>
                 </Grid>

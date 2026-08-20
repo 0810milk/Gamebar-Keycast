@@ -9,6 +9,7 @@
 import ctypes
 import ctypes.wintypes as wt
 import json
+import os
 import threading
 import time
 
@@ -132,6 +133,8 @@ def _parse_cmd(raw):
         return ("GET_PRESETS", None)
     if rest.startswith("PUT_PRESETS|"):
         return ("PUT_PRESETS", rest[len("PUT_PRESETS|"):])
+    if rest.startswith("OPEN_URL|"):
+        return ("OPEN_URL", rest[len("OPEN_URL|"):])
     return (None, None)
 
 
@@ -329,6 +332,13 @@ class PipeServer:
                 if not isinstance(obj, dict):
                     raise ValueError("presets 数据必须是 JSON 对象")
                 presets.save(obj)
+                self._send_reply(handle, "RESP|OK")
+            elif kind == "OPEN_URL":
+                # 0.8.2：widget 经管道请求打开浏览器（Game Bar 沙箱内 LaunchUriAsync 常被宿主拦截；
+                # companion 是桌面进程，os.startfile 走系统默认浏览器，无 UWP 沙箱限制）
+                if not payload or "://" not in payload:
+                    raise ValueError("无效链接")
+                os.startfile(payload)
                 self._send_reply(handle, "RESP|OK")
         except Exception as exc:  # noqa: BLE001
             debuglog.log("[pipe] cmd error: %s: %s" % (type(exc).__name__, exc))

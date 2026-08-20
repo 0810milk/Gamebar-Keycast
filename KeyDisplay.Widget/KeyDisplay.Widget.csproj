@@ -111,6 +111,10 @@
     <Compile Include="PresetIO.cs" />
     <Compile Include="InputStateReader.cs" />
     <Compile Include="NativeMethods.cs" />
+    <Compile Include="Widget1.KeyMenu.cs" />
+    <Compile Include="Widget1.KeyCopyPaste.cs" />
+    <Compile Include="Widget1.KeyRename.cs" />
+    <Compile Include="Widget1.Anim.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>

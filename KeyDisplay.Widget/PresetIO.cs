@@ -48,11 +48,12 @@ namespace KeyDisplay
             public List<string> DeletedKeys;               // layout 预设：已删除的默认键名
         }
 
-        /// <summary>布局预设中的自定义键：pos="tx;ty"（transform 偏移），size="w;h"</summary>
+        /// <summary>布局预设中的自定义键：pos="tx;ty"（transform 偏移），size="w;h"，displayName=自定义显示名（null/缺省=无）</summary>
         public sealed class KeyPos
         {
             public string Pos;
             public string Size;
+            public string DisplayName;
         }
 
         // ===================== 1) 导出 =====================
@@ -111,6 +112,8 @@ namespace KeyDisplay
                     var pos = new JsonObject();
                     pos.SetNamedValue("pos", JsonValue.CreateStringValue(kv.Value != null && kv.Value.Pos != null ? kv.Value.Pos : "0;0"));
                     pos.SetNamedValue("size", JsonValue.CreateStringValue(kv.Value != null && kv.Value.Size != null ? kv.Value.Size : ""));
+                    if (kv.Value != null && !string.IsNullOrEmpty(kv.Value.DisplayName))
+                        pos.SetNamedValue("displayName", JsonValue.CreateStringValue(kv.Value.DisplayName));
                     cks.SetNamedValue(kv.Key, pos);
                 }
             data.SetNamedValue("customKeys", cks);
@@ -249,7 +252,7 @@ namespace KeyDisplay
                         string size = GetStringValue(ck, "size", "0;0");
                         if (string.IsNullOrEmpty(pos)) pos = "0;0";
                         if (string.IsNullOrEmpty(size)) size = "0;0";
-                        p.CustomKeys[kv.Key] = new KeyPos { Pos = pos, Size = size };
+                        p.CustomKeys[kv.Key] = new KeyPos { Pos = pos, Size = size, DisplayName = GetStringValue(ck, "displayName", null) };
                     }
                     catch { }
                 }

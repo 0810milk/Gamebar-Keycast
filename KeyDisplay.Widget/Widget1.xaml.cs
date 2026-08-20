@@ -30,6 +30,8 @@ namespace KeyDisplay
 
         private readonly Dictionary<string, Border> _keys = new Dictionary<string, Border>();
         private readonly Dictionary<string, Border> _mouse = new Dictionary<string, Border>();
+        // 默认键 XAML 初始文本缓存（0.8.2）：RegisterDefaultKeys 首次登记时捕获，供重置按键布局还原显示名
+        private readonly Dictionary<string, string> _defaultKeyTexts = new Dictionary<string, string>();
         // 自定义按键（"自定义控件"菜单从 87 配列布局添加）：按名字去重、动态创建、LocalSettings 持久化
         private readonly Dictionary<string, Border> _customKeys = new Dictionary<string, Border>();
         private readonly DispatcherTimer _modeTimer;
@@ -83,6 +85,7 @@ namespace KeyDisplay
         private string _hoverMode;                   // 当前悬停的边缘模式（l/r/t/b/tl/tr/bl/br，null=无）
         private CoreCursorType? _curCursorType;      // 当前生效的全局光标类型（null=系统默认）
         private CoreCursor _defaultCursor;           // 加载时保存的初始默认光标（恢复用，不赋 null）
+        private CoreCursor _cursorRef;               // 0.8.2：持有当前赋给 CoreWindow 的光标强引用，防止 GC 回收导致光标消失
 
         // 长按移动 + 右键删除：200ms 长按进入移动模式（拖动改变位置）；右键自定义键弹删除确认框
         private DispatcherTimer _longPressTimer;
@@ -197,11 +200,12 @@ namespace KeyDisplay
             public List<string> DeletedKeys;               // 布局预设：Deleted_<键名> 的键名列表
         }
 
-        /// <summary>布局预设中的自定义键：pos="tx;ty"（transform 偏移），size="w;h"（整型）</summary>
+        /// <summary>布局预设中的自定义键：pos="tx;ty"（transform 偏移），size="w;h"（整型），displayName=自定义显示名（null=无）</summary>
         private sealed class KeyPos
         {
             public string Pos;
             public string Size;
+            public string DisplayName;
         }
 
         // ===================== 主题配色查询（数据驱动，扩展性）=====================
@@ -225,11 +229,50 @@ namespace KeyDisplay
         private Brush InvertKeyBgB() => _theme == "custom" ? _customBrushes[3] : (_theme == "dark" ? _lightDefaultBg : _darkDefaultBg);
         private Brush InvertKeyFgB() => _theme == "custom" ? _customBrushes[2] : (_theme == "dark" ? _lightDefaultFg : _darkDefaultFg);
 
-        // 内置默认布局预设（0.7.1）：来自发布者提供的"默认2.json"（导出格式，PresetIO 可解析），
-        // 并补入鼠标垫位置 padPos(94,0)（发布者实际摆放位置）。
-        // 启动时若用户从未自定义过布局（无 Layout_* 持久化）自动套用；「重置布局」也回到这套。
+        // ===================== 浮层派生色（0.8.2）：右键菜单/改名面板等浮层 =====================
+        // 浮层直接复用面板色会与主面板融为一体，层次不清；这里按基准色亮度自适应偏移
+        // （深底提亮 ~18%、浅底压暗 ~18%，边框再外扩一档），让浮层立体、美观且不抢主界面。
+
+        // RGB 亮度缩放：factor>1 提亮、<1 变暗（保持色相/饱和度比例，A 原样保留）
+        private static Color ShiftLuminance(Color c, double factor)
+        {
+            double r = c.R * factor, g = c.G * factor, b = c.B * factor;
+            return Color.FromArgb(c.A, (byte)Math.Min(255.0, r), (byte)Math.Min(255.0, g), (byte)Math.Min(255.0, b));
+        }
+
+        // 基准色亮度（0~1，感知加权）
+        private static double Luma(Color c)
+        {
+            return (0.299 * c.R + 0.587 * c.G + 0.114 * c.B) / 255.0;
+        }
+
+        // 浮层背景：由面板色派生的对比色（Bright solid brush，失败回落灰）
+        private Brush FloatPanelB()
+        {
+            try
+            {
+                var c = ((SolidColorBrush)PanelB()).Color;
+                return new SolidColorBrush(ShiftLuminance(c, Luma(c) > 0.5 ? 0.8 : 1.2));
+            }
+            catch { return new SolidColorBrush(Colors.Gray); }
+        }
+
+        // 浮层边框：由边框色派生（偏移比背景更大一档，增强描边立体感）
+        private Brush FloatBorderB()
+        {
+            try
+            {
+                var c = ((SolidColorBrush)BorderB()).Color;
+                return new SolidColorBrush(ShiftLuminance(c, Luma(c) > 0.5 ? 0.7 : 1.35));
+            }
+            catch { return new SolidColorBrush(Colors.DarkGray); }
+        }
+
+        // 内置默认布局预设（0.8.2 更新）：来自用户提供的"数据区\默认.json"（导出格式，PresetIO 可解析），
+// 含鼠标垫位置 padPos(94,0) 与 Tab 键尺寸 56;48（用户当前实际配置，以此为准）。
+// 启动时若用户从未自定义过布局（无 Layout_* 持久化）自动套用；「重置布局」也回到这套。
         private const string BuiltInDefaultLayoutJson =
-            @"{""app"":""KeyDisplay"",""formatVersion"":1,""type"":""layout"",""name"":""默认2"",""savedAt"":""2026-08-19T15:14:44"",""data"":{""keyOpacity"":100,""padVisible"":true,""padW"":222.651641845703,""padH"":139.173580462428,""padPosX"":94,""padPosY"":0,""keys"":{""Layout_W"":""52;48;55.9999923706055;1.9073486328125E-06"",""Layout_M"":""36;36;98;51.3333358764648"",""Layout_WheelUp"":""36;36;230.666732788086;57.3333358764648"",""Layout_F"":""52;48;72;2.00000381469727"",""Layout_S"":""52;48;66.0000076293945;2"",""Layout_WheelDown"":""36;36;230.666702270508;61.3333320617676"",""Layout_MR"":""36;36;102;51.3333435058594"",""Layout_X2"":""36;36;190;7.33332824707031"",""Layout_L"":""36;36;94;51.3333358764648"",""Layout_Alt"":""51;48;-96;3.99998474121094"",""Layout_E"":""52;48;60;1.9073486328125E-06"",""Layout_Shift"":""68;48;-13.9999904632568;-54"",""Layout_R"":""52;48;62;1.9073486328125E-06"",""Layout_Space"":""176;48;113.333335876465;-52.0000228881836"",""Layout_A"":""52;48;62.0000076293945;1.99999046325684"",""Layout_X1"":""36;36;278;5.99996948242188"",""Layout_D"":""52;48;68;1.99999809265137"",""Layout_Ctrl"":""58;48;-90;3.99998474121094"",""Layout_Q"":""52;48;52.6666793823242;1.9073486328125E-06""},""customKeys"":{""Tab"":{""pos"":""-13.9999904632568;-224"",""size"":""74;48""}},""deletedKeys"":[]}}";
+            @"{""app"":""KeyDisplay"",""formatVersion"":1,""type"":""layout"",""name"":""默认"",""savedAt"":""2026-08-20T08:34:58"",""data"":{""keyOpacity"":100,""padVisible"":true,""padW"":223.58695983886719,""padH"":139.75822448730469,""padPosX"":94,""padPosY"":0,""keys"":{""Layout_X2"":""36;36;190;7.33332824707031"",""Layout_WheelUp"":""36;36;230.666732788086;57.3333358764648"",""Layout_M"":""36;36;98;51.3333358764648"",""Layout_D"":""52;48;68;1.99999809265137"",""Layout_S"":""52;48;66.0000076293945;2"",""Layout_Alt"":""51;48;-96;3.99998474121094"",""Layout_A"":""52;48;62.0000076293945;1.99999046325684"",""Layout_Shift"":""68;48;-13.9999904632568;-54"",""Layout_X1"":""36;36;278;5.99996948242188"",""Layout_Ctrl"":""58;48;-90;3.99998474121094"",""Layout_MR"":""36;36;102;51.3333435058594"",""Layout_WheelDown"":""36;36;230.666702270508;61.3333320617676"",""Layout_F"":""52;48;72;2.00000381469727"",""Layout_L"":""36;36;94;51.3333358764648"",""Layout_R"":""52;48;62;1.9073486328125E-06"",""Layout_Space"":""176;48;113.333335876465;-52.0000228881836"",""Layout_E"":""52;48;60;1.9073486328125E-06"",""Layout_Q"":""52;48;52.6666793823242;1.9073486328125E-06"",""Layout_W"":""52;48;55.9999923706055;1.9073486328125E-06""},""customKeys"":{""Tab"":{""pos"":""-13.9999904632568;-224"",""size"":""56;48""}},""deletedKeys"":[]}}";
 
         // 首次启动初始化默认布局：仅当用户从未自定义过布局（无 Layout_* 键）时，把内置默认预设写入持久化。
         // 只写持久化不重建 UI——构造函数场景由后续 Restore* 恢复链应用；重置场景由调用方补重建。
@@ -418,7 +461,10 @@ namespace KeyDisplay
                 DiagLog("widget null");
             }
             ApplyTheme();
+            MigrateTabSize();          // 0.8.2：修复 1.6.0.0 版改名宽度自适应对 Tab 尺寸的污染（须在 RestoreCustomKeys 之前）
             RestoreCustomKeys();
+            HookKeyLayerPaste();          // 0.8.1：键区空白右键 = 粘贴已复制的按键
+            ApplyDisplayNamesToDefaults();   // 0.8.1：恢复默认键的自定义显示名
             // 保存初始默认光标：恢复时赋回它，而不是赋 null（沙箱内 null 会导致光标不显示）
             try
             {
@@ -439,6 +485,7 @@ namespace KeyDisplay
             _reader.Start();
             TryStartCompanion();          // 先确保伴生进程在跑（协议拉起，含系统重启后首次启动），再拉取预设
             LoadPresetsAsync();           // 启动拉取用户预设（companion 冷启动期间重试数次，静默降级不影响其他功能）
+            StartupFadeIn(RootPanel);     // 0.8.2 整体启动淡入（320ms，透明度动画无残留）
         }
 
         private void OnGameBarDisplayModeChanged(object sender, object e)
@@ -912,8 +959,15 @@ namespace KeyDisplay
             LockMenu.BorderBrush = BorderB();
             AboutMenu.Background = PanelB();
             AboutMenu.BorderBrush = BorderB();
-            DeleteConfirmBox.Background = PanelB();
-            DeleteConfirmBox.BorderBrush = BorderB();
+            DeleteConfirmBox.Background = FloatPanelB();   // 0.8.2：删除确认框与右键链路浮层统一派生色
+            DeleteConfirmBox.BorderBrush = FloatBorderB();
+            // 0.8.2：改名面板配色（0.8.2 起用浮层派生色，与面板/按键拉开层次，非纯面板色）
+            RenameBox.Background = FloatPanelB();
+            RenameBox.BorderBrush = FloatBorderB();
+            RenameTitle.Foreground = KeyFgB();
+            RenameInput.Background = KeyBgB();
+            RenameInput.Foreground = KeyFgB();
+            RenameInput.BorderBrush = BorderB();
 
             // 标题/标签文字（默认文字，FollowKeyFg）
             SettingsTitle.Foreground = KeyFgB();
@@ -989,9 +1043,6 @@ namespace KeyDisplay
             LockResetBtn.Background = KeyBgB();
             LockResetBtn.BorderBrush = BorderB();
             LockResetText.Foreground = KeyFgB();
-            LockCloseBtn.Background = KeyBgB();
-            LockCloseBtn.BorderBrush = BorderB();
-            LockCloseText.Foreground = KeyFgB();
             DeleteConfirmYes.Background = KeyBgB();
             DeleteConfirmYes.BorderBrush = BorderB();
             DeleteConfirmYesText.Foreground = KeyFgB();
@@ -1059,6 +1110,7 @@ namespace KeyDisplay
         private void Settings_Click(object sender, TappedRoutedEventArgs e)
         {
             ApplySettingsColors();
+            FadeIn(SettingsPanel);   // 0.8.2 弹层淡入
             SettingsPanel.Visibility = Visibility.Visible;
             DiagLog("settings opened theme=" + _theme);
         }
@@ -1082,7 +1134,9 @@ namespace KeyDisplay
         private void SettingsInfo_Click(object sender, TappedRoutedEventArgs e)
         {
             ApplySettingsColors();
+            FadeIn(AboutPanel);   // 0.8.2 弹层淡入
             AboutPanel.Visibility = Visibility.Visible;
+            AboutCopyTip.Visibility = Visibility.Collapsed;   // 重置上次的复制提示
             DiagLog("about opened");
         }
 
@@ -1102,29 +1156,63 @@ namespace KeyDisplay
             }
         }
 
-        // GitHub 行点击：调用系统浏览器打开仓库页；Game Bar 沙箱可能拦截，失败静默降级为仅显示
+        // GitHub 行点击：优先经 companion 管道打开浏览器（桌面进程 os.startfile，绕开 Game Bar 沙箱拦截）；
+        // companion 不可用则回退 LaunchUriAsync；再失败自动复制链接到剪贴板 + 提示
         private async void GitHubRow_Tapped(object sender, TappedRoutedEventArgs e)
         {
-            try
-            {
-                await Windows.System.Launcher.LaunchUriAsync(new Uri("https://github.com/0810milk/Gamebar-Keycast"));
-            }
-            catch
-            {
-                // 静默降级：仅显示地址文本，不崩溃
-            }
+            e.Handled = true;
+            await OpenUrlBestEffort("https://github.com/0810milk/Gamebar-Keycast");
         }
 
-        // QQ 群行点击：调用系统打开 QQ 群快捷链接（链接不显示在界面，仅群号文本），失败静默
+        // QQ 群行点击：同上（打开 QQ 群快捷链接）
         private async void QqRow_Tapped(object sender, TappedRoutedEventArgs e)
+        {
+            e.Handled = true;
+            await OpenUrlBestEffort("https://qun.qq.com/universal-share/share?ac=1&authKey=O");
+        }
+
+        // 0.8.2 链接打开三级通道：①companion 管道 OPEN_URL（最可靠）→ ②LaunchUriAsync → ③复制剪贴板
+        private async System.Threading.Tasks.Task OpenUrlBestEffort(string url)
+        {
+            // ① companion 桌面进程打开（无 UWP 沙箱限制）
+            try
+            {
+                string resp = await _reader.RequestPresetAsync("OPEN_URL", url, 2000).ConfigureAwait(false);
+                if (resp != null && resp.StartsWith("OK", StringComparison.Ordinal))
+                {
+                    DiagLog("browser opened via companion: " + url);
+                    return;
+                }
+                DiagLog("companion open url resp: " + (resp ?? "<null>"));
+            }
+            catch { }
+            // ② 直接 LaunchUriAsync（Game Bar 宿主可能拦截）
+            bool ok = false;
+            try { ok = await Windows.System.Launcher.LaunchUriAsync(new Uri(url)); }
+            catch { ok = false; }
+            DiagLog("launch uri ok=" + ok + " : " + url);
+            if (ok) return;
+            // ③ 复制到剪贴板兜底
+            await CopyLinkFallback(url);
+        }
+
+        // 0.8.2 链接降级兜底：复制到剪贴板并显示提示（1.5s 后隐藏）；剪贴板为 UWP 沙箱内 API，比外部启动更可能被放行
+        private async System.Threading.Tasks.Task CopyLinkFallback(string url)
         {
             try
             {
-                await Windows.System.Launcher.LaunchUriAsync(new Uri("https://qun.qq.com/universal-share/share?ac=1&authKey=O"));
+                var dp = new Windows.ApplicationModel.DataTransfer.DataPackage();
+                dp.SetText(url);
+                Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dp);
+                DiagLog("link copied: " + url);
+                AboutCopyTip.Text = "链接已复制，请在浏览器粘贴打开";
+                AboutCopyTip.Visibility = Visibility.Visible;
+                await System.Threading.Tasks.Task.Delay(1500);
+                AboutCopyTip.Visibility = Visibility.Collapsed;
             }
             catch
             {
-                // 静默降级：仅显示群号文本，不崩溃
+                DiagLog("link copy fail: " + url);
             }
         }
 
@@ -1154,9 +1242,30 @@ namespace KeyDisplay
             DiagLog("pad visible=" + (_padVisible ? "on" : "off"));
         }
 
+        // 0.8.2 菜单定向控制：隐藏鼠标垫（仅切 Visibility + 持久化，位置/尺寸/transform 保留）
+        private void HidePad()
+        {
+            _padVisible = false;
+            MousePad.Visibility = Visibility.Collapsed;
+            ApplicationData.Current.LocalSettings.Values["PadVisible_"] = 0;
+            DiagLog("pad hidden by menu");
+        }
+
+        // 0.8.2 菜单定向控制：显示鼠标垫（恢复 Visibility + 持久化）
+        private void ShowPad()
+        {
+            _padVisible = true;
+            MousePad.Visibility = Visibility.Visible;
+            ApplicationData.Current.LocalSettings.Values["PadVisible_"] = 1;
+            DiagLog("pad shown by menu");
+        }
+
         // 重置按键布局共用逻辑（设置面板与二级锁定菜单的重置按钮都走这里）
         private void PerformLayoutReset()
         {
+            // 0.8.2：重置前收起全部弹层（含设置面板/二级锁定菜单/右键菜单/改名/删除确认等），
+            // 否则锁定菜单遮罩与展开的键盘选择区会挡住重置后的按键（用户反馈"重置后按键显示不出来"）
+            CloseAllOverlays();
             // 重新登记全部默认键（含被删的），恢复其可见性由下方 ResetKeyLayout 统一处理
             RegisterDefaultKeys();
             ResetKeyLayout("Q", KeyQ, 52, 48, new Thickness(0, 0, 6, 0));
@@ -1220,6 +1329,23 @@ namespace KeyDisplay
             foreach (var kv in ApplicationData.Current.LocalSettings.Values)
                 if (kv.Key.StartsWith(LayoutPrefix, StringComparison.Ordinal)) layoutKeys.Add(kv.Key);
             foreach (var k in layoutKeys) ApplicationData.Current.LocalSettings.Values.Remove(k);
+            // 0.8.2 重置显示名：清除全部 DisplayName_ 持久化（含自定义键残留），默认键文本还原为 XAML 初始文本
+            var dnKeys = new List<string>();
+            foreach (var kv in ApplicationData.Current.LocalSettings.Values)
+                if (kv.Key.StartsWith("DisplayName_", StringComparison.Ordinal)) dnKeys.Add(kv.Key);
+            foreach (var k in dnKeys) ApplicationData.Current.LocalSettings.Values.Remove(k);
+            foreach (var kv in _keys)
+            {
+                var tb = kv.Value.Child as TextBlock;
+                string t;
+                if (tb != null && _defaultKeyTexts.TryGetValue(kv.Key, out t)) tb.Text = t;
+            }
+            foreach (var kv in _mouse)
+            {
+                var tb = kv.Value.Child as TextBlock;
+                string t;
+                if (tb != null && _defaultKeyTexts.TryGetValue(kv.Key, out t)) tb.Text = t;
+            }
             ApplyBuiltInDefaultLayoutIfNeeded();
             RestoreLayout();
             RestoreDeletions();
@@ -1227,14 +1353,92 @@ namespace KeyDisplay
             RestorePadVisibility();
             RestoreCustomKeys();
             ApplyKeyOpacity();
+            ApplyTheme();   // 0.8.2 修复：重置后全量刷新所有键的配色（文字色跟随主题/自定义色彩）
             ClearHover();
             DiagLog("layout reset -> builtin default preset (custom keys cleared: " + deadNames.Count + ")");
+        }
+
+        // 0.8.2 一次性迁移：1.6.0.0 版的改名宽度自适应曾把自定义键尺寸改写为 CustomKeyWidth(显示名)
+        // （污染 CustomSize_）。启动时检测污染特征并恢复为内置默认布局中的 Tab 尺寸 56;48（0.8.2 新默认，
+        // 见 BuiltInDefaultLayoutJson；此前误恢复 74;48 已废弃）。须在 RestoreCustomKeys（AddCustomKey 读取 CustomSize_）之前调用。
+        private void MigrateTabSize()
+        {
+            try
+            {
+                var v = ApplicationData.Current.LocalSettings.Values;
+                string size = v["CustomSize_Tab"] as string;
+                if (string.IsNullOrEmpty(size)) return;
+                string repaired = RepairTabSize(size, v["DisplayName_Tab"] as string);
+                if (repaired != size)
+                {
+                    v["CustomSize_Tab"] = repaired;
+                    DiagLog("migrate: CustomSize_Tab restored to " + repaired + " (was " + size + ")");
+                }
+            }
+            catch { }
+        }
+
+        // 0.8.2 Tab 尺寸污染检测：1.6.0.0 改名宽度自适应会把 Tab 尺寸写成 CustomKeyWidth(显示名) 的公式值
+        // （52/68/96 等）；此外历史版本可能残留 68;48（v1 污染）与 74;48（0.8.2 早期误恢复值）。
+        // 检测到任一特征 → 恢复为内置默认布局的 Tab 尺寸 56;48。
+        // 在启动迁移 / 预设保存 / 预设应用三处统一使用，杜绝污染值再次进入预设文件与本地持久化。
+        private static string RepairTabSize(string size, string disp)
+        {
+            if (string.IsNullOrEmpty(size)) return size;
+            var sp = size.Split(';');
+            if (sp.Length != 2) return size;
+            double w;
+            if (!double.TryParse(sp[0], NumberStyles.Float, CultureInfo.InvariantCulture, out w)) return size;
+            bool polluted = false;
+            if (size == "68;48" || size == "74;48")
+            {
+                // v1 污染残留 / 0.8.2 早期误恢复值
+                polluted = true;
+            }
+            else if (!string.IsNullOrEmpty(disp))
+            {
+                // 改过名：宽度恰为按显示名计算的默认宽度 = 污染（用户手动缩放不会恰好等于公式值）
+                polluted = ((int)w) == (int)CustomKeyWidth(disp);
+            }
+            return polluted ? "56;48" : size;
+        }
+
+        // 收起全部弹层覆盖（0.8.2）：重置布局/应用预设等全局操作前调用，避免残留覆盖层挡住按键区
+        private void CloseAllOverlays()
+        {
+            SettingsPanel.Visibility = Visibility.Collapsed;
+            LockPanel.Visibility = Visibility.Collapsed;
+            ThemePresetPanel.Visibility = Visibility.Collapsed;
+            LayoutPresetPanel.Visibility = Visibility.Collapsed;
+            ThemeColorPanel.Visibility = Visibility.Collapsed;
+            PickerMenu.Visibility = Visibility.Collapsed;
+            KeyMenuPanel.Visibility = Visibility.Collapsed;
+            RenamePanel.Visibility = Visibility.Collapsed;
+            DeleteConfirmPanel.Visibility = Visibility.Collapsed;
+            AboutPanel.Visibility = Visibility.Collapsed;
+            _deleteConfirmKey = null;
+            _ctxKey = null;
+        }
+
+        // 0.8.2 子菜单窗口自适应：宽度不超窗口（保留最小宽度），内容滚动区高度随窗口动态设定。
+        // 解决主题颜色/自定义控件等子菜单在 Game Bar 小窗下功能显示不全的问题。
+        private void FitMenuToWindow(FrameworkElement menu, double maxW, ScrollViewer scroll)
+        {
+            try
+            {
+                double w = Math.Min(maxW, Math.Max(240, ActualWidth - 16));
+                if (menu != null) menu.Width = w;
+                if (scroll != null) scroll.MaxHeight = Math.Max(160, ActualHeight - 64);   // 底部工具条 44 + 上下安全边距
+            }
+            catch { }
         }
 
         // 二级控件菜单的"自定义控件"按键点击，展开控件菜单（覆盖层在设置面板之上，外观一致）
         private void LockKey_Click(object sender, TappedRoutedEventArgs e)
         {
             ApplySettingsColors();
+            FitMenuToWindow(LockMenu, 610, LockMenuScroll);   // 0.8.2：宽度/高度随窗口自适应
+            FadeIn(LockPanel);   // 0.8.2 弹层淡入
             LockPanel.Visibility = Visibility.Visible;
             DiagLog("control menu opened");
         }
@@ -1285,7 +1489,7 @@ namespace KeyDisplay
             };
             border.Child = new TextBlock
             {
-                Text = (name == "Space") ? "\u7a7a\u683c" : name,   // 空格键显示「空格」（内部名保持 Space，持久化/映射不受影响）
+                Text = KeyDisplayName(name),   // 显示名（0.8.1）：DisplayName_<名> 持久化，无则默认（空格键显示「空格」）
                 FontSize = 18,
                 FontWeight = Windows.UI.Text.FontWeights.SemiBold,
                 HorizontalAlignment = HorizontalAlignment.Center,
@@ -1367,6 +1571,18 @@ namespace KeyDisplay
         private static int VkFromName(string name)
         {
             if (string.IsNullOrEmpty(name)) return 0;
+            // 0.8.1 粘贴副本命名 "名(n)"：循环剥离序号后缀，映射到基名 VK（"Q(2)" 映射 VK_Q，与原键同时点亮；
+            // 副本再复制再粘贴产生 "Q(2)(2)" 等多层后缀，循环剥到基名为止）
+            while (name.Length > 3 && name[name.Length - 1] == ')')
+            {
+                int ip = name.LastIndexOf('(');
+                if (ip <= 0) break;
+                bool digits = true;
+                for (int i = ip + 1; i < name.Length - 1; i++)
+                    if (name[i] < '0' || name[i] > '9') { digits = false; break; }
+                if (!digits) break;
+                name = name.Substring(0, ip);
+            }
             if (name.Length == 1)
             {
                 char c = name[0];
@@ -1495,14 +1711,7 @@ namespace KeyDisplay
             DiagLog("lock menu closed by mask");
         }
 
-        // 点击锁定菜单的关闭按钮：收起锁定菜单
-        private void LockClose_Click(object sender, TappedRoutedEventArgs e)
-        {
-            LockPanel.Visibility = Visibility.Collapsed;
-            DiagLog("lock menu closed by btn");
-        }
-
-        // 锁定菜单里的布局锁定开关：与设置面板的锁定开关共用同一逻辑（两处"开/关"文本由 ApplySettingsColors 统一刷新）
+        // 点击锁定菜单的锁定开关与重置按钮各自收起菜单：由各自 handler 调用 CloseAllOverlays 前先关闭自身
         private void LockSwitch_Click(object sender, TappedRoutedEventArgs e)
         {
             ToggleLayoutLock();
@@ -1522,6 +1731,7 @@ namespace KeyDisplay
             b.Margin = m;
             b.RenderTransform = null;   // 清 transform（恢复默认位置）
             b.Visibility = Visibility.Visible;   // 恢复可见（重置 = 恢复被删内置键）
+            SetKey(b, false);   // 0.8.2 修复：恢复键文字/背景/边框跟随当前主题（此前保持 XAML 默认黑字透明底，dark/自定义主题下按键名看不见）
             ApplicationData.Current.LocalSettings.Values[LayoutPrefix + name] =
                 ((int)w) + ";" + ((int)h) + ";0;0";   // 位置=transform，归零
         }
@@ -1754,10 +1964,15 @@ namespace KeyDisplay
                 else h = 60 * ((r - g) / delta + 4);
                 if (h < 0) h += 360;
             }
+            else
+            {
+                h = _hue;   // 0.8.2 修复：白/黑/灰（无色相）保留当前色相，SV 块与色相条不再跳回红
+            }
             DiagLog("picker sync -> " + ToHex(c) + " h=" + h + " (old hue=" + _hue + ")");
             _hue = h;
             UpdateSvBase();
             double sx = s, sy = 1 - v;
+            if (sx < 0.05) { sx = 1.0; sy = 0.0; }   // 0.8.2 修复：无色相时 marker 定位满饱和满亮（右上角），拖色相立即出纯色
             if (SvBox.ActualWidth > 0)
             {
                 // 父级是 Grid，Canvas.SetLeft/Top 无效，必须用 Margin 定位
@@ -1793,6 +2008,8 @@ namespace KeyDisplay
             // 重置调色区，避免上次残留的展开状态
             _activeSlot = -1;
             PickerMenu.Visibility = Visibility.Collapsed;
+            FitMenuToWindow(ThemeColorMenu, 320, ThemeColorScroll);   // 0.8.2：宽度/高度随窗口自适应
+            FadeIn(ThemeColorPanel);   // 0.8.2 弹层淡入
             ThemeColorPanel.Visibility = Visibility.Visible;
             DiagLog("theme color menu opened");
         }
@@ -1824,6 +2041,19 @@ namespace KeyDisplay
             }
             _activeSlot = i;
             PickerTitle.Text = SlotNames[_activeSlot];
+            // 0.8.2：窗口窄时（双栏并排会溢出被裁）调色盘叠到主题颜色菜单同格并置顶；宽窗保持原并排
+            if (ActualWidth < 560)
+            {
+                Grid.SetColumn(PickerMenu, 1);
+                var pg = PickerMenu.Parent as Grid;
+                if (pg != null) { pg.Children.Remove(PickerMenu); pg.Children.Add(PickerMenu); }
+            }
+            else
+            {
+                Grid.SetColumn(PickerMenu, 0);
+            }
+            FitMenuToWindow(PickerMenu, 200, PickerScroll);
+            FadeIn(PickerMenu);   // 0.8.2 弹层淡入
             PickerMenu.Visibility = Visibility.Visible;
             SyncPickerToColor(GetSlotDisplayColor(_activeSlot));
         }
@@ -2006,6 +2236,12 @@ namespace KeyDisplay
                     sx = Math.Max(0.0, Math.Min(1.0, (SvMarker.Margin.Left + SvMarker.Width / 2) / SvBox.ActualWidth));
                     sy = Math.Max(0.0, Math.Min(1.0, (SvMarker.Margin.Top + SvMarker.Height / 2) / SvBox.ActualHeight));
                 }
+                // 0.8.2 修复：白/灰/黑（饱和度≈0）时拖色相条取色恒为黑白——自动升满饱和满亮并同步 marker，立即出纯色
+                if (sx < 0.05)
+                {
+                    sx = 1.0; sy = 0.0;
+                    SvMarker.Margin = new Thickness(SvBox.ActualWidth - SvMarker.Width / 2, -SvMarker.Height / 2, 0, 0);
+                }
                 var c = HsvToRgb(_hue, sx, sy);
                 c.A = (byte)Math.Round(_alpha);
                 _lastPickColor = c;
@@ -2030,6 +2266,12 @@ namespace KeyDisplay
         // 构建 16 常用色块（4 × 4 列）与调色盘渐变（初始化时调用一次）
         private void InitPickerControls()
         {
+            // 0.8.2 修复：调色盘包进 ScrollViewer 后，其 Manipulation 系统会抢占色相条/透明度条/SV 块的指针捕获，
+            // 导致拖动被当成滚动手势、_hue 永远停在初始 0（红色）。这三个拖动控件禁用 Manipulation，
+            // 裸 Pointer 事件恢复直通（ScrollViewer 滚动仍可从色块区/空白处开始）。
+            HueBar.ManipulationMode = ManipulationModes.None;
+            AlphaBar.ManipulationMode = ManipulationModes.None;
+            SvBox.ManipulationMode = ManipulationModes.None;
             string[] hexes = { "#000000", "#FFFFFF", "#808080", "#C0C0C0",
                                "#FF0000", "#FF8000", "#FFFF00", "#80FF00",
                                "#00FF00", "#00FF80", "#00FFFF", "#0080FF",
@@ -2164,7 +2406,11 @@ namespace KeyDisplay
         {
             string name = NameOf(b);
             if (string.IsNullOrEmpty(name) || name == "?" || name == "Pad") return;
-            if (_customKeys.ContainsKey(name))
+            // 0.8.1 防同名误删：默认键与自定义键可同名（配列选择器可添加自定义 Q），分支须按 Border 实例身份判定，
+            // 不能只查字典 ContainsKey（否则右键默认 Q 会误删自定义 Q）
+            Border cb;
+            bool isCustom = _customKeys.TryGetValue(name, out cb) && ReferenceEquals(cb, b);
+            if (isCustom)
             {
                 // 自定义键：移除面板 + 清 Custom_/CustomPos_ 持久化
                 _customKeys.Remove(name);
@@ -2251,11 +2497,14 @@ namespace KeyDisplay
                 {
                     var def = _defaultCursor;
                     if (def == null) def = new CoreCursor(CoreCursorType.Arrow, 0);
-                    cw.PointerCursor = def;
+                    _cursorRef = def;
+                    cw.PointerCursor = _cursorRef;
                 }
                 else
                 {
-                    cw.PointerCursor = new CoreCursor(target.Value, 0);
+                    // 持有强引用：Game Bar 合成环境下 CoreCursor 被 GC 回收会导致光标消失（0.8.2 修复）
+                    _cursorRef = new CoreCursor(target.Value, 0);
+                    cw.PointerCursor = _cursorRef;
                 }
             }
             catch { /* 静默降级 */ }
@@ -2269,7 +2518,7 @@ namespace KeyDisplay
             _hoverKey = b;
             _hoverMode = mode;
             b.BorderBrush = _theme == "dark" ? _darkDefaultFg : _darkDefaultBg;   // 深色主题白高亮，浅色主题黑高亮
-            ApplyCursor(mode);
+            ApplyCursor(mode);   // 鼠标垫边缘同样显示拉伸样式（0.8.2 恢复；消失问题由 ApplyCursor 持有引用修复）   // 0.8.2 鼠标垫不设自定义光标（Game Bar 宿主下自定义光标渲染异常→消失）
         }
 
         private void ClearHover()
@@ -2286,7 +2535,7 @@ namespace KeyDisplay
         {
             var b = sender as Border;
             if (b == null) return;
-            // 右键：自定义键与内置键（_keys/_mouse）均可删除确认；鼠标垫（Pad）不可删
+            // 右键：按键→按键菜单（删除/复制/修改显示名）；鼠标垫→鼠标垫菜单（隐藏鼠标垫）；0.8.2
             if (e.GetCurrentPoint(b).Properties.IsRightButtonPressed)
             {
                 CancelLongPress();
@@ -2296,12 +2545,13 @@ namespace KeyDisplay
                     return;
                 }
                 string nm = NameOf(b);
-                if (nm != "?" && nm != "Pad")
+                if (nm == "Pad")
                 {
-                    _deleteConfirmKey = b;
-                    DeleteConfirmText.Text = "\u5220\u9664\u63a7\u4ef6 " + nm + " \uff1f";   // 删除控件 <名> ？
-                    DeleteConfirmPanel.Visibility = Visibility.Visible;
-                    DiagLog("delete confirm: " + nm);
+                    ShowPadContextMenu(e.GetCurrentPoint(KeyLayer).Position);
+                }
+                else if (nm != "?")
+                {
+                    ShowKeyContextMenu(b, e.GetCurrentPoint(KeyLayer).Position);
                 }
                 e.Handled = true;
                 return;
@@ -2313,7 +2563,7 @@ namespace KeyDisplay
             if (_layoutLocked) return;
             string mode = HitTestEdge(b, e.GetCurrentPoint(b).Position);
             if (mode == null) return;
-            ApplyCursor(mode);
+            ApplyCursor(mode);   // 0.8.2 鼠标垫边缘同样设置拉伸样式（恢复）；消失问题由 ApplyCursor 持有引用修复
             _dragKey = b;
             _dragMode = mode;
             _dragStartX = _pressPointerRoot.X;
@@ -2918,6 +3168,20 @@ namespace KeyDisplay
             _mouse["L"] = MouseL; _mouse["M"] = MouseM; _mouse["MR"] = MouseR;   // MR：避免与键盘 R 的 Layout_R 冲突
             _mouse["X1"] = MouseX1; _mouse["X2"] = MouseX2;
             _mouse["WheelUp"] = MouseWheelUp; _mouse["WheelDown"] = MouseWheelDown;   // 0.7.0 滚轮上/下（VK 0x07/0x08）
+            // 0.8.2 缓存 XAML 初始文本（仅首次）：重置按键布局时按此还原显示名（改名只写运行时 Text，XAML 初始值仍可从控件读到）
+            if (_defaultKeyTexts.Count == 0)
+            {
+                foreach (var kv in _keys)
+                {
+                    var tb0 = kv.Value.Child as TextBlock;
+                    if (tb0 != null && !string.IsNullOrEmpty(tb0.Text)) _defaultKeyTexts[kv.Key] = tb0.Text;
+                }
+                foreach (var kv in _mouse)
+                {
+                    var tb0 = kv.Value.Child as TextBlock;
+                    if (tb0 != null && !string.IsNullOrEmpty(tb0.Text)) _defaultKeyTexts[kv.Key] = tb0.Text;
+                }
+            }
         }
 
         // 删除一个默认键（内置 _keys/_mouse）：字典移除 + 清 Layout_ 持久化 + 记录 Deleted_ + Collapsed（不销毁，便于重置恢复）
@@ -3040,6 +3304,7 @@ namespace KeyDisplay
             LayoutPresetPanel.Visibility = Visibility.Collapsed;
             ApplyPresetMenuColors();
             RenderThemePresets();
+            FadeIn(ThemePresetPanel);   // 0.8.2 弹层淡入
             ThemePresetPanel.Visibility = Visibility.Visible;
             e.Handled = true;
             DiagLog("theme preset menu opened, count=" + _themePresets.Count);
@@ -3051,6 +3316,7 @@ namespace KeyDisplay
             ThemePresetPanel.Visibility = Visibility.Collapsed;
             ApplyPresetMenuColors();
             RenderLayoutPresets();
+            FadeIn(LayoutPresetPanel);   // 0.8.2 弹层淡入
             LayoutPresetPanel.Visibility = Visibility.Visible;
             e.Handled = true;
             DiagLog("layout preset menu opened, count=" + _layoutPresets.Count);
@@ -3558,10 +3824,14 @@ namespace KeyDisplay
             foreach (var kv in _customKeys)
             {
                 string pos = v["CustomPos_" + kv.Key] as string;
+                // 0.8.2：尺寸入库前经 RepairTabSize 去污染（杜绝 v1 污染值进入预设文件）；显示名一并保存
+                string size = RepairTabSize(((int)kv.Value.Width) + ";" + ((int)kv.Value.Height),
+                    v["DisplayName_" + kv.Key] as string);
                 p.CustomKeys[kv.Key] = new KeyPos
                 {
                     Pos = string.IsNullOrEmpty(pos) ? "0;0" : pos,
-                    Size = ((int)kv.Value.Width) + ";" + ((int)kv.Value.Height)
+                    Size = size,
+                    DisplayName = v["DisplayName_" + kv.Key] as string
                 };
             }
             return p;
@@ -3627,7 +3897,7 @@ namespace KeyDisplay
                 }
                 if (_customKeys.Count == 0) CustomKeysPanel.Visibility = Visibility.Collapsed;
 
-                // 2) 清空布局/自定义/删除持久化（全量重建，防止预设之外残留）
+                // 2) 清空布局/自定义/删除/显示名持久化（全量重建，防止预设之外残留）
                 var rmKeys = new List<string>();
                 foreach (var kv in v)
                 {
@@ -3635,6 +3905,7 @@ namespace KeyDisplay
                         kv.Key.StartsWith("Custom_", StringComparison.Ordinal) ||
                         kv.Key.StartsWith("CustomPos_", StringComparison.Ordinal) ||
                         kv.Key.StartsWith("CustomSize_", StringComparison.Ordinal) ||
+                        kv.Key.StartsWith("DisplayName_", StringComparison.Ordinal) ||
                         kv.Key.StartsWith("Deleted_", StringComparison.Ordinal))
                         rmKeys.Add(kv.Key);
                 }
@@ -3649,8 +3920,13 @@ namespace KeyDisplay
                     {
                         v["Custom_" + kv.Key] = "1";
                         v["CustomPos_" + kv.Key] = string.IsNullOrEmpty(kv.Value.Pos) ? "0;0" : kv.Value.Pos;
-                        // 0.7.1：自定义键尺寸一并同步（预设 size 字段 → CustomSize_ 持久化，AddCustomKey 恢复）
-                        v["CustomSize_" + kv.Key] = string.IsNullOrEmpty(kv.Value.Size) ? "" : kv.Value.Size;
+                        // 0.7.1：自定义键尺寸一并同步（预设 size 字段 → CustomSize_ 持久化，AddCustomKey 恢复）；
+                        // 0.8.2：Tab 尺寸经 RepairTabSize 去污染（预设文件里可能存有 v1 污染值）；显示名写回 DisplayName_
+                        string disp = kv.Value != null ? kv.Value.DisplayName : null;
+                        if (string.IsNullOrEmpty(disp)) v.Remove("DisplayName_" + kv.Key);
+                        else v["DisplayName_" + kv.Key] = disp;
+                        string sz = kv.Value != null && kv.Value.Size != null ? kv.Value.Size : "";
+                        v["CustomSize_" + kv.Key] = RepairTabSize(sz, disp);
                     }
                 if (p.DeletedKeys != null)
                     foreach (var nm in p.DeletedKeys)
