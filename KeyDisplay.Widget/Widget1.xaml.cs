@@ -56,7 +56,11 @@ namespace KeyDisplay
         private string _theme = "dark";   // 五态主题："dark"/"gray"/"light"/"pink"/"blue"（黑/灰/白/粉/蓝）+ custom，持久化到 Theme
         private bool _docked;
         private XboxGameBarWidget _widget;   // 本实例自己的 widget（由 App 导航传入），不用共享 App.Widget
-        private static bool s_companionLaunched;
+        // 0.8.3：companion 可能被 Game Bar 宿主回收/系统清理。原"单次拉起"flag 导致会话中途
+        // companion 退出后 widget 永久断连（按键映射无效+圆点消失+预设空）。改记最近拉起时间戳，
+        // 允许断线时重新拉起（30s 窗口内最多一次，防风暴）。
+        private static long s_lastCompanionLaunchTicks = long.MinValue;
+        private DispatcherTimer _companionWatch;   // 断线监视：持续连不上管道时重拉 companion
 
         // 布局自定义：边缘/四角拖拽缩放（窗口式），鼠标垫不参与；默认锁定。
         // 光标：悬停/拖拽边缘时用 CoreWindow.PointerCursor 映射成 Size 光标（拉放窗口那种），
@@ -484,6 +488,7 @@ namespace KeyDisplay
             _modeTimer.Start();
             _reader.Start();
             TryStartCompanion();          // 先确保伴生进程在跑（协议拉起，含系统重启后首次启动），再拉取预设
+            StartCompanionWatch();        // 0.8.3：断线自动重拉（companion 被外部回收后按键/圆点/预设自动恢复）
             LoadPresetsAsync();           // 启动拉取用户预设（companion 冷启动期间重试数次，静默降级不影响其他功能）
             StartupFadeIn(RootPanel);     // 0.8.2 整体启动淡入（320ms，透明度动画无残留）
         }
@@ -564,14 +569,18 @@ namespace KeyDisplay
             CompositionTarget.Rendering -= OnRendering;
             _modeTimer.Stop();
             if (_longPressTimer != null) _longPressTimer.Stop();
+            if (_companionWatch != null) _companionWatch.Stop();   // 0.8.3：页面卸载停断线监视
             _reader.Dispose();
             _latest = null;
         }
 
         private async void TryStartCompanion()
         {
-            if (s_companionLaunched) return;
-            s_companionLaunched = true;
+            // 0.8.3：可重复拉起。30s 窗口内最多触发一次协议拉起（companion 冷启动 2~4s，间隔足够），
+            // 防在高频断连监视下反复弹起进程。
+            long now = DateTime.UtcNow.Ticks;   // UWP 环境无 Environment.TickCount64，用 UtcNow.Ticks
+            if (now - s_lastCompanionLaunchTicks < TimeSpan.FromSeconds(30).Ticks) return;
+            s_lastCompanionLaunchTicks = now;
             try
             {
                 await Launcher.LaunchUriAsync(new Uri("keydisplay://start"));
@@ -579,6 +588,25 @@ namespace KeyDisplay
             catch
             {
             }
+        }
+
+        // 0.8.3 断线监视：companion 被 Game Bar 回收/系统清理后，widget 侧持续连不上管道
+        // （CreateFileW err=2）→ 定时重拉 companion，自动恢复按键映射/圆点/预设，无需重开 Game Bar。
+        private void StartCompanionWatch()
+        {
+            if (_companionWatch != null) { _companionWatch.Start(); return; }
+            _companionWatch = new DispatcherTimer { Interval = TimeSpan.FromSeconds(15) };
+            _companionWatch.Tick += (s, e) =>
+            {
+                try
+                {
+                    if (!_reader.Connected) TryStartCompanion();
+                }
+                catch
+                {
+                }
+            };
+            _companionWatch.Start();
         }
 
         private void ApplyTheme()
@@ -1385,22 +1413,8 @@ namespace KeyDisplay
         private static string RepairTabSize(string size, string disp)
         {
             if (string.IsNullOrEmpty(size)) return size;
-            var sp = size.Split(';');
-            if (sp.Length != 2) return size;
-            double w;
-            if (!double.TryParse(sp[0], NumberStyles.Float, CultureInfo.InvariantCulture, out w)) return size;
-            bool polluted = false;
-            if (size == "68;48" || size == "74;48")
-            {
-                // v1 污染残留 / 0.8.2 早期误恢复值
-                polluted = true;
-            }
-            else if (!string.IsNullOrEmpty(disp))
-            {
-                // 改过名：宽度恰为按显示名计算的默认宽度 = 污染（用户手动缩放不会恰好等于公式值）
-                polluted = ((int)w) == (int)CustomKeyWidth(disp);
-            }
-            return polluted ? "56;48" : size;
+            if (size == "68;48" || size == "74;48") return "56;48";
+            return size;
         }
 
         // 收起全部弹层覆盖（0.8.2）：重置布局/应用预设等全局操作前调用，避免残留覆盖层挡住按键区

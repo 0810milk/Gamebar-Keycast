@@ -39,6 +39,9 @@ namespace KeyDisplay
         // 预设协议（0.7.0）应答事件：读循环线程触发，参数 = RESP 帧体（"OK" / "ERR|<msg>" / "DATA|<json>"）
         public event EventHandler<string> PresetResponse;
 
+        /// <summary>0.8.3：当前是否已连上管道（断线监视用；未连接时写请求返回 null）。</summary>
+        public bool Connected { get { return _connected; } }
+
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
         private Task _task;
         private int _failCount;
