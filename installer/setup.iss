@@ -11,8 +11,8 @@
 ; 卸载流程：先结束伴生进程与小组件进程 → 移除 UWP 包与证书 → Inno 删除文件与注册表。
 
 #define MyAppName "按键显示"
-; 版本号与 VERSION.md 保持一致（当前 0.9.1 beta），发布时同步修改
-#define MyAppVersion "0.9.1"
+; 版本号与 VERSION.md 保持一致（当前 0.9.2 beta），发布时同步修改
+#define MyAppVersion "0.9.2"
 #define MyAppPublisher "KeyDisplay"
 #define MyAppExeName "KeyDisplayCompanion.exe"
 
@@ -87,6 +87,8 @@ Root: HKCU; Subkey: "Software\Classes\keydisplay"; ValueType: string; ValueName:
 Root: HKCU; Subkey: "Software\Classes\keydisplay"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
 Root: HKCU; Subkey: "Software\Classes\keydisplay\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\keydisplay\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"",0"; Flags: uninsdeletekey
+; 0.8.3：开机自启伴生进程（Game Bar 沙箱内协议拉起不可靠；低层钩子无需管理员，普通权限常驻即可）
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "KeyDisplayCompanion"; ValueData: """{app}\{#MyAppExeName}"""; Flags: uninsdeletevalue
 
 ; ---- 安装前：结束残留进程（伴生进程 + Game Bar 宿主），避免文件占用导致"要求重启" ----
 [Code]

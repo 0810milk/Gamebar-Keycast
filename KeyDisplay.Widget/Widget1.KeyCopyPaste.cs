@@ -91,7 +91,13 @@ namespace KeyDisplay
 
             // 恢复显示名（DisplayName 为空则保持 AddCustomKey 的默认文本）
             var tb = b.Child as TextBlock;
-            if (tb != null && !string.IsNullOrEmpty(_keyClipboard.DisplayName)) tb.Text = _keyClipboard.DisplayName;
+            if (tb != null && !string.IsNullOrEmpty(_keyClipboard.DisplayName))
+            {
+                tb.Text = _keyClipboard.DisplayName;
+                // 0.8.3 修复：显示名一并持久化——此前只改运行时文本，副本显示名重启即丢
+                // （改名/预设/重置三条路径都走 DisplayName_<内部名>，粘贴是唯一不对称的）
+                ApplicationData.Current.LocalSettings.Values["DisplayName_" + nm] = _keyClipboard.DisplayName;
+            }
 
             // 键中心对准鼠标点：面板坐标 = KeyLayer 坐标 - (0,224)；允许负值（现有键也有负 transform）
             double tx = layerPos.X - _keyClipboard.Width / 2;
@@ -101,6 +107,7 @@ namespace KeyDisplay
                 tx.ToString(CultureInfo.InvariantCulture) + ";" + ty.ToString(CultureInfo.InvariantCulture);
 
             DiagLog("key pasted: " + nm + " at " + (int)tx + "," + (int)ty);
+            OffsetKeyLayerForNegativeKeys();   // 0.8.3：新键可能带负坐标，粘贴后重算左缘补偿
         }
 
         // 订阅键区空白右键粘贴；由主文件 OnLoaded 调用（Widget1.xaml.cs 已挂 HookKeyLayerPaste()）

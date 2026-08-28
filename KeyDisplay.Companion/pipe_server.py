@@ -207,18 +207,21 @@ class PipeServer:
                                        wt.DWORD, ctypes.POINTER(wt.DWORD), ctypes.c_void_p]
         kernel32.WriteFile.restype = wt.BOOL
         debuglog.log("[pipe] client connected")
+        # 0.8.3 写锁：同一连接的 STATE 推送线程与 RESP 应答（读线程）并发写同一句柄，
+        # 消息模式不保证原子交错——两个方向写前必须串行。
+        wlock = threading.Lock()
         # 读线程：处理客户端 CMD 请求并应答（管道已 PIPE_ACCESS_DUPLEX），
         # 与下方 STATE 推送线程互不阻塞；STATE 帧推送逻辑与字节布局一律不动
-        threading.Thread(target=self._read_loop, args=(handle,), daemon=True).start()
+        threading.Thread(target=self._read_loop, args=(handle, wlock), daemon=True).start()
         try:
-            self._pump_loop(handle)
+            self._pump_loop(handle, wlock)
         except Exception as exc:  # noqa: BLE001 泵线程异常必须落盘，否则连接静默抖动
             debuglog.log("[pipe] pump error: %s: %s" % (type(exc).__name__, exc))
         finally:
             kernel32.CloseHandle(handle)
             debuglog.log("[pipe] client disconnected")
 
-    def _pump_loop(self, handle):
+    def _pump_loop(self, handle, wlock):
         user32 = ctypes.WinDLL("user32", use_last_error=True)
         frames = 0
         summary_at = time.monotonic()
@@ -235,14 +238,16 @@ class PipeServer:
             # 滚轮瞬时点亮自动熄灭（0x07/0x08 位）
             expire_wheel()
             blob = self._state.serialize()
-            self._state.seq += 1
+            # 0.8.3：seq 32 位回绕（240Hz 连续约 207 天后 struct.pack('I') 溢出抛错 → 永久瘫痪）
+            self._state.seq = (self._state.seq + 1) & 0xFFFFFFFF
             written = wt.DWORD()
             buf = ctypes.create_string_buffer(blob)
-            if not kernel32.WriteFile(handle, buf, SNAPSHOT_SIZE,
-                                      ctypes.byref(written), None):
-                debuglog.log("[pipe] write failed err=%d"
-                             % ctypes.get_last_error())
-                return  # 客户端断开，返回等待重新连接
+            with wlock:
+                if not kernel32.WriteFile(handle, buf, SNAPSHOT_SIZE,
+                                          ctypes.byref(written), None):
+                    debuglog.log("[pipe] write failed err=%d"
+                                 % ctypes.get_last_error())
+                    return  # 客户端断开，返回等待重新连接
             frames += 1
             # 每 0.5s 记一条坐标链路摘要（原生输入/限频/坐标来源/坐标，均为本周期增量）
             now = time.monotonic()
@@ -263,19 +268,19 @@ class PipeServer:
                 frames = 0
             time.sleep(self._interval)
 
-    def _read_loop(self, handle):
+    def _read_loop(self, handle, wlock):
         """读线程：阻塞等待客户端 CMD 请求帧并应答；与 STATE 推送互不阻塞。
 
         管道为 message 模式 + 重叠句柄，读用 OVERLAPPED 事件等待；
         客户端断开 / 停止时退出。任何异常只落日志，不影响推送线程。
         """
         try:
-            self._read_loop_inner(handle)
+            self._read_loop_inner(handle, wlock)
         except Exception as exc:  # noqa: BLE001
             debuglog.log("[pipe] read loop error: %s: %s"
                          % (type(exc).__name__, exc))
 
-    def _read_loop_inner(self, handle):
+    def _read_loop_inner(self, handle, wlock):
         kernel32.ReadFile.argtypes = [ctypes.c_void_p, ctypes.c_void_p, wt.DWORD,
                                       ctypes.POINTER(wt.DWORD), ctypes.c_void_p]
         kernel32.ReadFile.restype = wt.BOOL
@@ -315,9 +320,9 @@ class PipeServer:
                 kernel32.CloseHandle(ov.hEvent)
             data = buf.raw[:read.value]
             if data.startswith(b"CMD|"):
-                self._handle_cmd(handle, data)
+                self._handle_cmd(handle, data, wlock)
 
-    def _handle_cmd(self, handle, raw):
+    def _handle_cmd(self, handle, raw, wlock):
         """处理一条 CMD 请求帧并写应答；presets 异常只回 RESP|ERR，进程不崩溃。"""
         kind, payload = _parse_cmd(raw)
         if kind is None:
@@ -326,34 +331,46 @@ class PipeServer:
             if kind == "GET_PRESETS":
                 obj = presets.load()
                 self._send_reply(handle, "RESP|DATA|" + json.dumps(
-                    obj, ensure_ascii=False))
+                    obj, ensure_ascii=False), wlock)
             elif kind == "PUT_PRESETS":
                 obj = json.loads(payload)
                 if not isinstance(obj, dict):
                     raise ValueError("presets 数据必须是 JSON 对象")
                 presets.save(obj)
-                self._send_reply(handle, "RESP|OK")
+                self._send_reply(handle, "RESP|OK", wlock)
             elif kind == "OPEN_URL":
                 # 0.8.2：widget 经管道请求打开浏览器（Game Bar 沙箱内 LaunchUriAsync 常被宿主拦截；
                 # companion 是桌面进程，os.startfile 走系统默认浏览器，无 UWP 沙箱限制）
-                if not payload or "://" not in payload:
-                    raise ValueError("无效链接")
+                # 0.8.3：白名单收紧——只允许 http/https（避免管道被任意本地进程驱动打开 file:// 或系统协议）
+                if not payload or not (payload.startswith("http://")
+                                       or payload.startswith("https://")):
+                    raise ValueError("仅支持 http/https 链接")
                 os.startfile(payload)
-                self._send_reply(handle, "RESP|OK")
+                self._send_reply(handle, "RESP|OK", wlock)
         except Exception as exc:  # noqa: BLE001
             debuglog.log("[pipe] cmd error: %s: %s" % (type(exc).__name__, exc))
-            self._send_reply(handle, "RESP|ERR|%s" % exc)
+            self._send_reply(handle, "RESP|ERR|%s" % exc, wlock)
 
-    def _send_reply(self, handle, text):
-        """用与 STATE 帧相同的 WriteFile 机制写应答帧（message 模式，UTF-8）。"""
+    def _send_reply(self, handle, text, wlock=None):
+        """用与 STATE 帧相同的 WriteFile 机制写应答帧（message 模式，UTF-8）。
+
+        0.8.3：与 STATE 推送共用同一句柄写方向，传入连接写锁串行（防消息交错）。
+        """
         try:
             blob = text.encode("utf-8")
             written = wt.DWORD()
             buf = ctypes.create_string_buffer(blob)
-            if not kernel32.WriteFile(handle, buf, len(blob),
-                                      ctypes.byref(written), None):
-                debuglog.log("[pipe] reply write failed err=%d"
-                             % ctypes.get_last_error())
+            if wlock is not None:
+                with wlock:
+                    if not kernel32.WriteFile(handle, buf, len(blob),
+                                              ctypes.byref(written), None):
+                        debuglog.log("[pipe] reply write failed err=%d"
+                                     % ctypes.get_last_error())
+            else:
+                if not kernel32.WriteFile(handle, buf, len(blob),
+                                          ctypes.byref(written), None):
+                    debuglog.log("[pipe] reply write failed err=%d"
+                                 % ctypes.get_last_error())
         except Exception as exc:  # noqa: BLE001
             debuglog.log("[pipe] reply write error: %s" % exc)
 
@@ -378,4 +395,6 @@ class StopFlag:
     def wait(self, timeout=None):
         if self._flag:
             return True
-        return not bool(kernel32.WaitForSingleObject(self.h_event, timeout or -1))
+        # 0.8.3：timeout=0 应表示非阻塞轮询（原 `timeout or -1` 把 0 变成无限阻塞）
+        ms = -1 if timeout is None else timeout
+        return not bool(kernel32.WaitForSingleObject(self.h_event, ms))

@@ -42,7 +42,8 @@ namespace KeyDisplay
         /// <summary>0.8.3：当前是否已连上管道（断线监视用；未连接时写请求返回 null）。</summary>
         public bool Connected { get { return _connected; } }
 
-        private readonly CancellationTokenSource _cts = new CancellationTokenSource();
+        private CancellationTokenSource _cts = new CancellationTokenSource();   // 0.8.3：Start 可重建（非 readonly）
+        private readonly object _startLock = new object();   // 0.8.3: Start/重启互斥
         private Task _task;
         private int _failCount;
 
@@ -55,9 +56,16 @@ namespace KeyDisplay
 
         public void Start()
         {
-            if (_task != null) return;
-            Log("reader start");
-            _task = Task.Run(() => RunLoopAsync(_cts.Token));
+            // 0.8.3：支持 Unloaded→Loaded 循环后重启（Dispose 取消过 _cts 后重建，
+            // 原守卫 `if (_task != null) return` 使读线程死后永久无法再启动）。
+            lock (_startLock)
+            {
+                if (_task != null && !_cts.IsCancellationRequested) return;
+                _cts?.Dispose();
+                _cts = new CancellationTokenSource();
+                _task = Task.Run(() => RunLoopAsync(_cts.Token));
+                Log("reader start");
+            }
         }
 
         public void Dispose()
@@ -84,34 +92,52 @@ namespace KeyDisplay
             if (!_connected) return null;
             string frame = "CMD|" + cmd + (string.IsNullOrEmpty(payload) ? "" : "|" + payload);
             var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-            EventHandler<string> handler = null;
-            handler = (s, resp) => tcs.TrySetResult(resp);
-            PresetResponse += handler;
+            // 0.8.3：先持锁再订阅应答——应答事件会广播给全部订阅者；若订阅先于持锁，
+            // 排队中的下一个请求也会收到本请求的应答（应答错配，预设列表偶发静默为空）。
+            await _requestLock.WaitAsync().ConfigureAwait(false);
             try
             {
-                await _requestLock.WaitAsync().ConfigureAwait(false);
                 if (!_connected) return null;   // 等锁期间管道可能已断开
-                var bytes = Encoding.UTF8.GetBytes(frame);
+                EventHandler<string> handler = null;
+                handler = (s, resp) => tcs.TrySetResult(resp);
+                PresetResponse += handler;   // 持锁期间唯一订阅者：应答只派发给本请求
                 try
                 {
-                    // 消息模式管道下一次 WriteAsync = 一条完整 CMD 消息（阻塞写，全量写入）。
-                    // 远端不读（旧版伴生进程）时大消息会阻塞：写也套超时，超时直接放弃（返回 null）。
-                    var writeTask = _stream.WriteAsync(bytes, 0, bytes.Length);
-                    var writeWinner = await Task.WhenAny(writeTask, Task.Delay(timeoutMs)).ConfigureAwait(false);
-                    if (writeWinner != writeTask) return null;   // 写超时
-                    await writeTask.ConfigureAwait(false);        // 写失败（管道断开等）→ 抛异常 → 返回 null
+                    var bytes = Encoding.UTF8.GetBytes(frame);
+                    try
+                    {
+                        // 消息模式管道下一次 WriteAsync = 一条完整 CMD 消息（阻塞写，全量写入）。
+                        // 远端不读（旧版伴生进程）时大消息会阻塞：写也套超时，超时直接放弃（返回 null）。
+                        var writeTask = _stream.WriteAsync(bytes, 0, bytes.Length);
+                        var writeWinner = await Task.WhenAny(writeTask, Task.Delay(timeoutMs)).ConfigureAwait(false);
+                        if (writeWinner != writeTask)
+                        {
+                            // 0.8.3 写超时：远端未读，管道写阻塞。弃置当前连接强制重连——
+                            // 不弃置则未决写任务仍在对同一句柄写，下一请求并发写会破坏帧边界
+                            // （消息模式半条 CMD 帧，伴生进程解析错位）。
+                            try { _stream?.Dispose(); } catch { }
+                            _stream = null;
+                            _connected = false;
+                            try { await writeTask; } catch { }   // 句柄关闭后写任务立即结束
+                            return null;
+                        }
+                        await writeTask.ConfigureAwait(false);   // 写失败（管道断开等）→ 抛异常 → 返回 null
+                    }
+                    catch
+                    {
+                        return null;   // 写失败（管道断开等）
+                    }
+                    var winner = await Task.WhenAny(tcs.Task, Task.Delay(timeoutMs)).ConfigureAwait(false);
+                    if (winner != tcs.Task) return null;   // 超时：伴生进程旧版本不支持预设协议/未响应
+                    return await tcs.Task.ConfigureAwait(false);
                 }
-                catch
+                finally
                 {
-                    return null;   // 写失败（管道断开等）
+                    PresetResponse -= handler;
                 }
-                var winner = await Task.WhenAny(tcs.Task, Task.Delay(timeoutMs)).ConfigureAwait(false);
-                if (winner != tcs.Task) return null;   // 超时：伴生进程旧版本不支持预设协议/未响应
-                return await tcs.Task.ConfigureAwait(false);
             }
             finally
             {
-                PresetResponse -= handler;
                 _requestLock.Release();
             }
         }
@@ -190,11 +216,13 @@ namespace KeyDisplay
                                 int n = await stream.ReadAsync(buf, 0, (int)left, ct).ConfigureAwait(false);
                                 if (n == 0) break; // 管道断开，重连
 
-                                if (n >= 4 && buf[0] == (byte)'R' && buf[1] == (byte)'E' &&
-                                    buf[2] == (byte)'S' && buf[3] == (byte)'P')
+                                if (n >= 5 && buf[0] == (byte)'R' && buf[1] == (byte)'E' &&
+                                    buf[2] == (byte)'S' && buf[3] == (byte)'P' && buf[4] == (byte)'|')
                                 {
                                     // 应答帧（0.7.0 预设协议）：RESP|OK / RESP|ERR|<msg> / RESP|DATA|<json>
                                     // 剥掉 "RESP|" 5 字符，body = OK / ERR|<msg> / DATA|<json>（0.7.1 修复：原剥 4 字符残留前导 '|' 导致 LoadPresetsAsync 解析不匹配）
+                                    // 0.8.3：守卫改 n>=5（原 n>=4 时 n==4 会让 GetString(buf,5,n-5) 索引越界，
+                                    // 异常冒泡导致整条连接被重建抖动）
                                     string body = Encoding.UTF8.GetString(buf, 5, n - 5).TrimEnd('\0', '\r', '\n');
                                     PresetResponse?.Invoke(this, body);
                                 }

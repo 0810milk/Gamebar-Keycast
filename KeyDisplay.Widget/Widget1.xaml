@@ -422,7 +422,7 @@
                             <StackPanel Margin="0,8,0,0" HorizontalAlignment="Left">
                                 <TextBlock Text="色相" FontSize="10"/>
                                 <Grid x:Name="HueBar" Width="160" Height="16" Margin="0,2,0,0"
-                                      PointerPressed="HueBar_PointerPressed" PointerMoved="HueBar_PointerMoved" PointerReleased="HueBar_PointerReleased">
+                                      PointerPressed="HueBar_PointerPressed" PointerMoved="HueBar_PointerMoved" PointerReleased="HueBar_PointerReleased" PointerCaptureLost="Picker_PointerCaptureLost">
                                     <Rectangle Fill="White" Stroke="Gray" StrokeThickness="1"/>
                                     <Ellipse x:Name="HueMarker" Width="4" Height="16" Fill="White" Stroke="Black" StrokeThickness="1"
                                              HorizontalAlignment="Left" VerticalAlignment="Top" IsHitTestVisible="False"/>
@@ -431,7 +431,7 @@
                             <StackPanel Margin="0,6,0,0" HorizontalAlignment="Left">
                                 <TextBlock Text="透明度" FontSize="10"/>
                                 <Grid x:Name="AlphaBar" Width="160" Height="16" Margin="0,2,0,0"
-                                      PointerPressed="AlphaBar_PointerPressed" PointerMoved="AlphaBar_PointerMoved" PointerReleased="AlphaBar_PointerReleased">
+                                      PointerPressed="AlphaBar_PointerPressed" PointerMoved="AlphaBar_PointerMoved" PointerReleased="AlphaBar_PointerReleased" PointerCaptureLost="Picker_PointerCaptureLost">
                                     <Rectangle x:Name="AlphaBg" Fill="#FFCCCCCC"/>
                                     <Rectangle x:Name="AlphaFill" Fill="Transparent"/>
                                     <Ellipse x:Name="AlphaMarker" Width="12" Height="12" Stroke="White" StrokeThickness="2"
@@ -439,7 +439,7 @@
                                 </Grid>
                             </StackPanel>
                             <Grid x:Name="SvBox" Width="160" Height="160" Margin="0,6,0,0" HorizontalAlignment="Left"
-                                  PointerPressed="SvBox_PointerPressed" PointerMoved="SvBox_PointerMoved" PointerReleased="SvBox_PointerReleased">
+                                  PointerPressed="SvBox_PointerPressed" PointerMoved="SvBox_PointerMoved" PointerReleased="SvBox_PointerReleased" PointerCaptureLost="Picker_PointerCaptureLost">
                                 <Rectangle x:Name="SvBase" Fill="White"/>
                                 <Rectangle x:Name="SvOver" Fill="Transparent"/>
                                 <Ellipse x:Name="SvMarker" Width="12" Height="12" Stroke="White" StrokeThickness="2"

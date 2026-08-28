@@ -36,7 +36,7 @@ namespace KeyDisplay
         private readonly Dictionary<string, Border> _customKeys = new Dictionary<string, Border>();
         private readonly DispatcherTimer _modeTimer;
         private readonly InputStateReader _reader;
-        private InputSnapshot _latest;
+        private volatile InputSnapshot _latest;   // 后台读线程写 / UI 渲染线程读；volatile 保证可见性（0.8.3）
         private uint _lastSeq = uint.MaxValue;   // 已渲染的帧序号；uint.MaxValue 强制首帧渲染
         private double _padW = 80;               // 鼠标垫当前宽高（按屏幕纵横比动态计算）
         private double _padH = 80;
@@ -456,7 +456,11 @@ namespace KeyDisplay
             if (widget != null)
             {
                 _docked = IsDocked(widget);
+                // 0.8.3：幂等订阅——Game Bar 展开/收起可能造成 Unloaded/Loaded 不成对，
+                // 重复 += 会让 OnRendering 每帧跑两遍（自定义键逐帧重绘翻倍）
+                widget.GameBarDisplayModeChanged -= OnGameBarDisplayModeChanged;
                 widget.GameBarDisplayModeChanged += OnGameBarDisplayModeChanged;
+                widget.PinnedChanged -= OnPinnedChanged;
                 widget.PinnedChanged += OnPinnedChanged;
                 try { DiagLog("widget present, initial docked=" + _docked + " mode=" + widget.GameBarDisplayMode + " pinned=" + widget.Pinned); } catch { }
             }
@@ -466,7 +470,7 @@ namespace KeyDisplay
             }
             ApplyTheme();
             MigrateTabSize();          // 0.8.2：修复 1.6.0.0 版改名宽度自适应对 Tab 尺寸的污染（须在 RestoreCustomKeys 之前）
-            RestoreCustomKeys();
+            RestoreCustomKeys();       // 内部调用 OffsetKeyLayerForNegativeKeys（0.8.3 负坐标键左缘补偿）
             HookKeyLayerPaste();          // 0.8.1：键区空白右键 = 粘贴已复制的按键
             ApplyDisplayNamesToDefaults();   // 0.8.1：恢复默认键的自定义显示名
             // 保存初始默认光标：恢复时赋回它，而不是赋 null（沙箱内 null 会导致光标不显示）
@@ -484,6 +488,7 @@ namespace KeyDisplay
             // 渲染跟随显示器刷新率（CompositionTarget.Rendering 每 UI 帧触发一次，
             // 60/120/144/240Hz 显示器就是多少帧），不再被固定 30fps 限制；
             // 数据序号未变化时跳过重绘，空闲时几乎零开销。
+            CompositionTarget.Rendering -= OnRendering;   // 0.8.3：幂等订阅（防 Unloaded/Loaded 不成对时重复注册）
             CompositionTarget.Rendering += OnRendering;
             _modeTimer.Start();
             _reader.Start();
@@ -1567,14 +1572,53 @@ namespace KeyDisplay
             try
             {
                 var values = ApplicationData.Current.LocalSettings.Values;
+                // 0.8.3：先收集再创建——枚举期间 AddCustomKey（可能向同一集合新增 CustomPos_ 等键）
+                // 会触发 IPropertySet "集合已修改" 异常导致剩余自定义键静默丢失
+                var names = new List<string>();
                 foreach (var kv in values)
                 {
                     if (kv.Key.StartsWith("Custom_", StringComparison.Ordinal))
                     {
                         string name = kv.Key.Substring("Custom_".Length);
-                        if (!string.IsNullOrEmpty(name)) AddCustomKey(name);
+                        if (!string.IsNullOrEmpty(name)) names.Add(name);
                     }
                 }
+                foreach (var name in names) AddCustomKey(name);
+            }
+            catch
+            {
+            }
+            OffsetKeyLayerForNegativeKeys();   // 0.8.3：键全部重建后重算左缘补偿（布局/预设/重置共用此路径）
+        }
+
+        // 0.8.3：负坐标键修复——用户把键放到左外边（Tab/Shift/Ctrl 的 transform 为负）时，
+        // 键的左半部分超出键区可视左缘被窗口/画布裁掉（"左半边显示不全"）。
+        // 遍历全部键取最小视觉左边界，若越过 RootPanel 左 padding，把整个键区右移补偿，
+        // 保证所有键完整可见（键间相对位置不变、不持久化、窗口宽度足够时恢复原视觉）。
+        private void OffsetKeyLayerForNegativeKeys()
+        {
+            try
+            {
+                double minLeft = double.MaxValue;
+                Action<Border> scan = (b) =>
+                {
+                    if (b == null) return;
+                    double cl = Canvas.GetLeft(b);
+                    var tt = b.RenderTransform as TranslateTransform;
+                    double tx = tt != null ? tt.X : 0;
+                    double left = cl + tx;
+                    if (left < minLeft) minLeft = left;
+                };
+                foreach (var kv in _keys) scan(kv.Value);
+                foreach (var kv in _mouse) scan(kv.Value);
+                foreach (var kv in _customKeys) scan(kv.Value);
+                if (minLeft == double.MaxValue) return;
+                double pad = 16.0;   // RootPanel Padding 左缘
+                double offset = pad - minLeft;   // 右移量：最左键贴回 padding 边缘
+                if (offset < 0.5) offset = 0;
+                else if (offset > 300) offset = 300;   // 异常布局保护（不无限偏）
+                KeyLayer.Margin = new Thickness(offset, 0, 0, 0);
+                if (offset > 0.5) DiagLog("keylayer offset right " + (int)offset + " px (most-left key at " + minLeft + ")");
             }
             catch
             {
@@ -1757,17 +1801,18 @@ namespace KeyDisplay
             _layoutLocked = !_layoutLocked;
             ApplicationData.Current.LocalSettings.Values["LayoutLocked"] = _layoutLocked;
             ClearHover();   // 锁定/解锁都重置高亮与光标，避免残留 Size 光标
-            ApplyKeyOpacity();   // 锁定切换：解锁→按键临时 100%；重新锁定→恢复滑条设定值（不残留 100%）
+            ApplyKeyOpacity();   // 0.8.3：锁定开关不影响透明度（恒按滑条设定值）
             ApplySettingsColors();
             DiagLog("layout lock=" + (_layoutLocked ? "on" : "off"));
         }
 
-        // 应用按键透明度：锁定开启（游玩中）= 滑条设定值；锁定关闭（编辑布局）= 临时强制 100%
-        // 关键：始终从 _keyOpacity 设定值计算，绝不从当前 Opacity 推导——退出编辑（重新开启锁定）自动回到设定值，
-        // 不会残留编辑期的 100%。被删内置键不在字典，foreach 天然跳过；菜单/关于面板/参考线不设 Opacity
+        // 应用按键透明度：恒按滑条设定值（0.8.3 改回：锁定开关不再影响透明度——
+// 原来解锁（编辑布局）时强制 100% 便于看清，用户要求保持滑条设定值不变）。
+// 关键：始终从 _keyOpacity 设定值计算，绝不从当前 Opacity 推导。
+// 被删内置键不在字典，foreach 天然跳过；菜单/关于面板/参考线不设 Opacity
         private void ApplyKeyOpacity()
         {
-            double target = _layoutLocked ? _keyOpacity / 100.0 : 1.0;
+            double target = _keyOpacity / 100.0;
             foreach (var kv in _keys) kv.Value.Opacity = target;
             foreach (var kv in _mouse) kv.Value.Opacity = target;
             foreach (var kv in _customKeys) kv.Value.Opacity = target;
@@ -2113,6 +2158,22 @@ namespace KeyDisplay
                 _picking = false;   // 先清标志再固化：FinalizePick 内部 ApplySettingsColors 的盘同步用新色，属期望行为
                 FinalizePick();
             }
+        }
+
+        // 0.8.3：取色拖动中指针捕获被宿主打断（失焦/切换/系统手势）时，_picking 会永久卡在 true——
+        // 后续盘同步/固化全部被屏蔽。此处兜底：清标志并按需固化最后一次取色。
+        private void Picker_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
+        {
+            if (!_picking) return;
+            _picking = false;
+            try
+            {
+                if (_activeSlot >= 0 && PickerMenu.Visibility == Visibility.Visible && _lastPickColor.HasValue)
+                {
+                    FinalizePick();
+                }
+            }
+            catch (Exception ex) { DiagLog("picker captureLost finalize: " + ex.Message); }
         }
 
         private void UpdateSvPick(PointerRoutedEventArgs e)
@@ -2746,6 +2807,7 @@ namespace KeyDisplay
                 EndMoveStyle(key);   // 恢复样式（鼠标垫走专属恢复，其余 SetKey(false) 清移动高亮）
                 HideSnapLines();      // 落位隐藏吸附参考线
                 string nm = key.Tag as string;
+                if (nm == null) nm = NameOf(key);   // 0.8.3 修复：默认键（KeyQ..Space/鼠标键）无 Tag，移动落位必须持久化
                 if (!string.IsNullOrEmpty(nm))
                 {
                     if (nm == "Pad")
@@ -2767,6 +2829,7 @@ namespace KeyDisplay
                     var tt2 = key.RenderTransform as TranslateTransform;
                     DiagLog("key moved " + nm + " tx=" + (int)(tt2 != null ? tt2.X : 0) + " ty=" + (int)(tt2 != null ? tt2.Y : 0));
                 }
+                OffsetKeyLayerForNegativeKeys();   // 0.8.3：移动落位后重算左缘补偿（键可能被拖出左界）
                 return;
             }
             if (_dragKey == null) return;
@@ -2791,7 +2854,24 @@ namespace KeyDisplay
             {
                 // 普通键缩放落位：归一 margin→transform（位置唯一来源 = transform），再持久化
                 NormalizeTransformMargin(dragKey);
-                SaveLayout();
+                string dnm = NameOf(dragKey);
+                // 0.8.3 修复：自定义键缩放后持久化尺寸与位置（此前 SaveLayout 只覆盖默认键，
+                // 自定义键缩放结果重启即丢）
+                if (!string.IsNullOrEmpty(dnm) && _customKeys.ContainsKey(dnm))
+                {
+                    double dtx = 0, dty = 0;
+                    var dtt = dragKey.RenderTransform as TranslateTransform;
+                    if (dtt != null) { dtx = dtt.X; dty = dtt.Y; }
+                    ApplicationData.Current.LocalSettings.Values["CustomSize_" + dnm] =
+                        ((int)dragKey.Width) + ";" + ((int)dragKey.Height);
+                    ApplicationData.Current.LocalSettings.Values["CustomPos_" + dnm] =
+                        dtx.ToString(CultureInfo.InvariantCulture) + ";" + dty.ToString(CultureInfo.InvariantCulture);
+                }
+                else
+                {
+                    SaveLayout();
+                }
+                OffsetKeyLayerForNegativeKeys();   // 0.8.3：缩放落位后重算左缘补偿
             }
         }
 
@@ -3273,11 +3353,17 @@ namespace KeyDisplay
                 if (s == null) return;
                 var parts = s.Split(';');
                 if (parts.Length != 4) return;
-                double w = double.Parse(parts[0], CultureInfo.InvariantCulture);
-                double h = double.Parse(parts[1], CultureInfo.InvariantCulture);
-                double tx = double.Parse(parts[2], CultureInfo.InvariantCulture);
-                double ty = double.Parse(parts[3], CultureInfo.InvariantCulture);
+                // 0.8.3：TryParse + NaN/Infinity 拒绝 + 上限钳制（原 double.Parse 能吃进 "NaN"，
+                // 而 NaN < MinKeyW 为 false 会绕过下限校验，把 NaN 宽写进 Border）
+                double w, h, tx, ty;
+                if (!double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out w) ||
+                    !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out h) ||
+                    !double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out tx) ||
+                    !double.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out ty)) return;
+                if (double.IsNaN(w) || double.IsInfinity(w) || double.IsNaN(h) || double.IsInfinity(h) ||
+                    double.IsNaN(tx) || double.IsInfinity(tx) || double.IsNaN(ty) || double.IsInfinity(ty)) return;
                 if (w < MinKeyW || h < MinKeyH) return;
+                if (w > 2000 || h > 2000) return;
                 b.Width = w;
                 b.Height = h;
                 SetTransformXY(b, tx, ty);
@@ -3907,11 +3993,16 @@ namespace KeyDisplay
                     {
                         _customKeys.Remove(nm);
                         CustomKeysPanel.Children.Remove(cb);
+                        // 0.8.3：被预设"消灭"的自定义键残留显示名一并清除，
+                        // 否则之后从配列重新添加同名键时旧显示名会悄悄复活
+                        ApplicationData.Current.LocalSettings.Values.Remove("DisplayName_" + nm);
                     }
                 }
                 if (_customKeys.Count == 0) CustomKeysPanel.Visibility = Visibility.Collapsed;
 
-                // 2) 清空布局/自定义/删除/显示名持久化（全量重建，防止预设之外残留）
+                // 2) 清空布局/自定义/删除持久化（全量重建，防止预设之外残留）。
+                // 0.8.3 修复：不再清除 DisplayName_* —— 内置键（如 Ctrl）的显示名是独立用户偏好，
+                // 应用布局预设时被清空导致按键文字回默认样式（自定义键显示名在步骤 3 由预设写回覆盖）。
                 var rmKeys = new List<string>();
                 foreach (var kv in v)
                 {
@@ -3919,7 +4010,6 @@ namespace KeyDisplay
                         kv.Key.StartsWith("Custom_", StringComparison.Ordinal) ||
                         kv.Key.StartsWith("CustomPos_", StringComparison.Ordinal) ||
                         kv.Key.StartsWith("CustomSize_", StringComparison.Ordinal) ||
-                        kv.Key.StartsWith("DisplayName_", StringComparison.Ordinal) ||
                         kv.Key.StartsWith("Deleted_", StringComparison.Ordinal))
                         rmKeys.Add(kv.Key);
                 }

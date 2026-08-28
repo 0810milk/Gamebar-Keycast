@@ -293,52 +293,64 @@ user32.CallNextHookEx.restype = ctypes.c_long
 
 
 def _keyboard_proc(n_code, w_param, l_param):
-    if n_code >= 0:
-        kb = ctypes.cast(l_param, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
-        down = w_param in (WM_KEYDOWN, WM_SYSKEYDOWN)
-        # v3：任意 VK 直接写入 256 位位图（widget 无法自行查键，需伴生进程全量采集）
-        _state.set_vk(kb.vkCode, down)
-        for name, vk in VK.items():
-            if kb.vkCode == vk or kb.vkCode == VK_RIGHT.get(name, -1):
-                _state.set_key(name, down)
-                break
-    return user32.CallNextHookEx(None, n_code, w_param, l_param)
+    try:
+        if n_code >= 0:
+            kb = ctypes.cast(l_param, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
+            down = w_param in (WM_KEYDOWN, WM_SYSKEYDOWN)
+            # v3：任意 VK 直接写入 256 位位图（widget 无法自行查键，需伴生进程全量采集）
+            _state.set_vk(kb.vkCode, down)
+            for name, vk in VK.items():
+                if kb.vkCode == vk or kb.vkCode == VK_RIGHT.get(name, -1):
+                    _state.set_key(name, down)
+                    break
+    except Exception:
+        # 0.8.3：回调异常绝不能穿过 ctypes→native 边界（会断掉整条 LL 钩子链，
+        # 影响全系统键盘事件）；单独进程对该键自身失去显示，记录一次即可
+        debuglog.log("[kb] callback error")
+    finally:
+        # 无论处理成败都必须把事件交给下一个钩子
+        return user32.CallNextHookEx(None, n_code, w_param, l_param)
 
 
 def _mouse_proc(n_code, w_param, l_param):
     # 坐标不再由钩子维护：桌面（光标可见）由 60Hz GetCursorPos 轮询校准，
     # 游戏（光标隐藏）由 RAWINPUT 增量累计。钩子只负责鼠标按键/滚轮采集。
-    if n_code >= 0:
-        ms = ctypes.cast(l_param, ctypes.POINTER(MSLLHOOKSTRUCT)).contents
-        for name, (down_msg, up_msg) in MOUSE_MSGS.items():
-            if w_param == down_msg:
-                _state.set_mouse(name, True)
-                _state.set_vk(MOUSE_VK[name], True)
-                break
-            if w_param == up_msg:
-                _state.set_mouse(name, False)
-                _state.set_vk(MOUSE_VK[name], False)
-                break
-        if w_param == WM_XBUTTONDOWN or w_param == WM_XBUTTONUP:
-            xbtn = (ms.mouseData >> 16) & 0xFFFF
-            name = "X1" if xbtn == 1 else ("X2" if xbtn == 2 else None)
-            if name:
-                down = w_param == WM_XBUTTONDOWN
-                _state.set_mouse(name, down)
-                _state.set_vk(MOUSE_VK[name], down)
-        if w_param == WM_MOUSEWHEEL:
-            # mouseData 高 16 位为有符号滚轮增量：正=上滚 负=下滚；单事件两方向互斥
-            global _wheel_up_ts, _wheel_down_ts
-            delta = (ms.mouseData >> 16) & 0xFFFF
-            if delta >= 0x8000:
-                delta -= 0x10000
-            if delta > 0:
-                _state.set_vk(WHEEL_UP_VK, True)
-                _wheel_up_ts = time.monotonic()
-            elif delta < 0:
-                _state.set_vk(WHEEL_DOWN_VK, True)
-                _wheel_down_ts = time.monotonic()
-    return user32.CallNextHookEx(None, n_code, w_param, l_param)
+    try:
+        if n_code >= 0:
+            ms = ctypes.cast(l_param, ctypes.POINTER(MSLLHOOKSTRUCT)).contents
+            for name, (down_msg, up_msg) in MOUSE_MSGS.items():
+                if w_param == down_msg:
+                    _state.set_mouse(name, True)
+                    _state.set_vk(MOUSE_VK[name], True)
+                    break
+                if w_param == up_msg:
+                    _state.set_mouse(name, False)
+                    _state.set_vk(MOUSE_VK[name], False)
+                    break
+            if w_param == WM_XBUTTONDOWN or w_param == WM_XBUTTONUP:
+                xbtn = (ms.mouseData >> 16) & 0xFFFF
+                name = "X1" if xbtn == 1 else ("X2" if xbtn == 2 else None)
+                if name:
+                    down = w_param == WM_XBUTTONDOWN
+                    _state.set_mouse(name, down)
+                    _state.set_vk(MOUSE_VK[name], down)
+            if w_param == WM_MOUSEWHEEL:
+                # mouseData 高 16 位为有符号滚轮增量：正=上滚 负=下滚；单事件两方向互斥
+                global _wheel_up_ts, _wheel_down_ts
+                delta = (ms.mouseData >> 16) & 0xFFFF
+                if delta >= 0x8000:
+                    delta -= 0x10000
+                if delta > 0:
+                    _state.set_vk(WHEEL_UP_VK, True)
+                    _wheel_up_ts = time.monotonic()
+                elif delta < 0:
+                    _state.set_vk(WHEEL_DOWN_VK, True)
+                    _wheel_down_ts = time.monotonic()
+    except Exception:
+        # 同上：callback 异常不许穿过 ctypes 边界
+        debuglog.log("[mouse] callback error")
+    finally:
+        return user32.CallNextHookEx(None, n_code, w_param, l_param)
 
 
 def expire_wheel():
@@ -435,21 +447,38 @@ def reconcile(state):
     保留原有 12 键 + 5 鼠标键逻辑，并追加 v3 的 256 VK 位图校准：
     遍历 0..255 把当前真实按下状态同步进 state.extra，避免钩子事件
     丢失导致的位图漂移（桌面进程，无沙箱限制，可直接调用）。
+    0.8.3 修复：
+    - 右修饰键（右 Shift/Ctrl/Alt）纳入校准——此前只查左键 VK，按下右修饰键
+      会被 240Hz 校准每帧清零，widget 上不亮
+    - 校准只补亮不灭（保留钩子事件位）：短于一帧周期（<4ms@240Hz）的快速点按
+      不再被校准瞬时状态覆盖丢失；松开一律由低层钩子 up 事件复位（钩子事件可靠）
     """
     for name in KEY_ORDER:
-        state.set_key(name, _get_async_key_state(VK[name]))
+        pressed = _get_async_key_state(VK[name])
+        right = VK_RIGHT.get(name)
+        if right is not None:
+            pressed = pressed or _get_async_key_state(right)
+        if pressed:
+            state.set_key(name, True)
+        # 不置零：松开由钩子 up 事件负责（_keyboard_proc → set_key(False)）
     for name, vk in MOUSE_VK.items():
-        state.set_mouse(name, _get_async_key_state(vk))
+        if _get_async_key_state(vk):
+            state.set_mouse(name, True)
     for vk in range(256):
         if vk == WHEEL_UP_VK or vk == WHEEL_DOWN_VK:
             # 滚轮位是瞬时事件（0x07/0x08 非真实键码，0x08 还撞 VK_BACK），
             # 由 expire_wheel() 按时间戳维护，不能用真实键码状态覆盖
             continue
-        state.set_vk(vk, _get_async_key_state(vk))
+        if _get_async_key_state(vk):
+            state.set_vk(vk, True)
 
 
-def start_hooks(state, stop_event):
-    """在专用线程中安装钩子并运行消息泵。阻塞直到 stop_event 置位。"""
+def start_hooks(state, stop_event, ready_event=None):
+    """在专用线程中安装钩子并运行消息泵。阻塞直到 stop_event 置位。
+
+    ready_event（可选）：安装成功（或失败抛异常）后置位，供调用方等待
+    而非固定 sleep——0.8.3 修复慢速机器上钩子安装耗时导致的竞态误判。
+    """
     global _state
     _state = state
 
@@ -464,8 +493,12 @@ def start_hooks(state, stop_event):
     kb_hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, _keyboard_cb, None, 0)
     ms_hook = user32.SetWindowsHookExW(WH_MOUSE_LL, _mouse_cb, None, 0)
     if not kb_hook or not ms_hook:
+        if ready_event is not None:
+            ready_event.set()
         raise OSError("无法安装全局输入钩子，错误码 %d"
                       % ctypes.get_last_error())
+    if ready_event is not None:
+        ready_event.set()   # 安装成功：通知调用方继续启动管道服务
 
     raw_hwnd = _setup_raw_input()
 

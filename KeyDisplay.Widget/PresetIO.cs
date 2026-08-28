@@ -272,19 +272,26 @@ namespace KeyDisplay
 
         // ===================== 3) 文件名清洗 =====================
 
-        /// <summary>清洗预设名用于文件名：\ / : * ? " &lt; &gt; | → '_'，去首尾空白；结果为空返回 "preset"</summary>
+        /// <summary>清洗预设名用于文件名：\ / : * ? " &lt; &gt; | → '_'，去首尾空白；结果为 Windows 保留设备名（CON/PRN/NUL/AUX 等）或空时返回 "preset"</summary>
         public static string SanitizeFileName(string name)
         {
             if (name == null) return "preset";
-            char[] chars = name.Trim().ToCharArray();
+            char[] chars = name.Trim().TrimEnd('.', ' ').ToCharArray();   // 0.8.3：结尾点/空格会被 Windows 拒绝，一并去掉
             for (int i = 0; i < chars.Length; i++)
             {
                 char c = chars[i];
                 if (c == '\\' || c == '/' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|')
                     chars[i] = '_';
             }
-            string result = new string(chars).Trim();
-            return result.Length == 0 ? "preset" : result;
+            string result = new string(chars).Trim().TrimEnd('.', ' ');
+            if (result.Length == 0) return "preset";
+            // 0.8.3：Windows 保留设备名（任意大小写）与 "CON.txt" 形式同样被拒绝
+            string upper = result.ToUpperInvariant();
+            string stem = upper.Split('.')[0];
+            string[] reserved = { "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9" };
+            foreach (var r in reserved)
+                if (stem == r) return "preset";
+            return result;
         }
 
         // ===================== 4) 重名建议 =====================

@@ -43,7 +43,13 @@ namespace KeyDisplay
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center
             };
-            b.Tapped += (s, e) => { action(); e.Handled = true; };
+            b.Tapped += (s, e) =>
+            {
+                // 0.8.3：Handled 置位优先于 action——action 抛异常（如 LocalSettings 写满）时
+                // 也必须阻止冒泡关菜单，避免遮挡残留；异常只记日志不崩进程
+                try { e.Handled = true; action(); }
+                catch (Exception ex) { DiagLog("menu action error: " + ex.Message); }
+            };
             ApplyMenuBorder(b);
             KeyMenuItems.Children.Add(b);
         }
@@ -54,7 +60,9 @@ namespace KeyDisplay
         private void ShowMenu(Point layerPos)
         {
             // 定位：下界保 4px，上界按窗口可视区钳制（菜单 130 宽 × 约 120 高，防右下角右键时溢出被裁剪）
-            double mx = Math.Max(4, layerPos.X + 8);
+            // 0.8.3：layerPos 是 KeyLayer 坐标；负坐标键左缘补偿给 KeyLayer 加了 Margin.Left，
+            // 菜单必须同量右移，否则相对右键目标整体偏移（最多 300px）
+            double mx = Math.Max(4, layerPos.X + 8 + KeyLayer.Margin.Left);
             double my = Math.Max(4, layerPos.Y + 8);
             double winW = KeyMenuPanel.ActualWidth > 0 ? KeyMenuPanel.ActualWidth : 340;
             double winH = KeyMenuPanel.ActualHeight > 0 ? KeyMenuPanel.ActualHeight : 240;

@@ -57,7 +57,9 @@ def load():
     """
     path = get_presets_path()
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        # 0.8.3：utf-8-sig——Windows 记事本等工具保存的 UTF-8 带 BOM，
+        # 原 utf-8 读取会把合法文件误判损坏改名 .bak 后以空结构覆盖，用户数据"消失"
+        with open(path, "r", encoding="utf-8-sig") as f:
             obj = json.load(f)
         if not isinstance(obj, dict):
             raise ValueError("presets.json 顶层必须是 JSON 对象")

@@ -29,11 +29,16 @@ ERROR_ALREADY_EXISTS = 183
 
 
 def _acquire_mutex():
+    """尝试获取单实例互斥体；返回 None 表示已有实例在运行（正常退出）。"""
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel32.CreateMutexW.restype = ctypes.c_void_p
     kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, wt.BOOL, wt.LPCWSTR]
     handle = kernel32.CreateMutexW(None, False, MUTEX_NAME)
+    if not handle:
+        # 0.8.3：句柄创建失败（权限/资源）≠ 已有实例——报真实错误而不是静默当作单实例退出
+        raise OSError("创建互斥体失败，错误码 %d" % ctypes.get_last_error())
     if ctypes.get_last_error() == ERROR_ALREADY_EXISTS:
+        kernel32.CloseHandle(handle)
         return None
     return handle
 
@@ -84,17 +89,23 @@ def main():
 
     state = InputState()
     stop = StopFlag()
+    # 0.8.3：钩子启动成功/失败用事件一次性通知（替代固定 sleep(0.15) 探测——慢速机器上
+    # start_hooks 可能在 0.15s 后才失败，进程会带着"无钩子"状态继续运行）
+    hooks_ready = threading.Event()
     hook_error = []
 
     def _hooks_entry():
         try:
-            start_hooks(state, stop)
+            start_hooks(state, stop, hooks_ready)
         except Exception as exc:  # noqa: BLE001
             hook_error.append(exc)
+        finally:
+            hooks_ready.set()
 
     hooks_thread = threading.Thread(target=_hooks_entry, daemon=True)
     hooks_thread.start()
-    time.sleep(0.15)
+    if not hooks_ready.wait(timeout=5.0):
+        raise TimeoutError("钩子安装超时")
     if hook_error:
         raise hook_error[0]
 

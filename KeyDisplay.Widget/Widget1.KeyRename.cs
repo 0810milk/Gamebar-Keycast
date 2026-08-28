@@ -69,7 +69,13 @@ namespace KeyDisplay
                 if (newText == null) newText = string.Empty;
                 newText = newText.Trim();
                 if (newText.Length == 0) { RenameCancel_Click(sender, e); return; }   // 空输入 → 直接关闭（视为取消）
-                if (newText.Length > 12) newText = newText.Substring(0, 12);          // 防御：截断为前 12 字符
+                if (newText.Length > 12)
+                {
+                    // 0.8.3：截断不能拆散 surrogate 代理对（emoji/生僻字），否则控件显示乱码
+                    newText = newText.Substring(0, 12);
+                    if (newText.Length > 0 && char.IsHighSurrogate(newText[newText.Length - 1]))
+                        newText = newText.Substring(0, newText.Length - 1);   // 防御：截断 12 字符
+                }
 
                 Border b = _renameKey;
                 string nm = (b != null) ? NameOf(b) : null;
