@@ -10,9 +10,13 @@ import time
 
 _lock = threading.Lock()
 _handle = None
+_last_flush = 0.0
 
 # 0.8.3：日志轮转上限——常驻开机自启长期运行，防止 pipe-debug.log 无界增长
 _MAX_BYTES = 1 * 1024 * 1024
+# 0.8.4：flush 节流间隔（秒）——原实现每行同步 flush，采集线程被磁盘 I/O 拖慢，
+# 表现为光标/按键反馈的偶发延迟尖峰；批量 flush 最多丢 0.5s 日志，可接受
+_FLUSH_INTERVAL = 0.5
 
 
 def _path():
@@ -21,7 +25,7 @@ def _path():
 
 
 def log(msg):
-    global _handle
+    global _handle, _last_flush
     try:
         with _lock:
             if _handle is None:
@@ -38,6 +42,9 @@ def log(msg):
                     pass
                 _handle = open(_path(), "a", encoding="utf-8")
             _handle.write("%s %s\n" % (time.strftime("%H:%M:%S"), msg))
-            _handle.flush()
+            now = time.monotonic()
+            if now - _last_flush >= _FLUSH_INTERVAL:
+                _handle.flush()
+                _last_flush = now
     except Exception:
         pass

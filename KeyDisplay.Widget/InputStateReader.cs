@@ -207,8 +207,11 @@ namespace KeyDisplay
                                 }
                                 if (left == 0)
                                 {
-                                    // 当前无完整消息（伴生进程推送间隙）：稍候轮询，避免按错误长度读取
-                                    await Task.Delay(4, ct).ConfigureAwait(false);
+                                    // 当前无完整消息（伴生进程推送间隙）：稍候轮询，避免按错误长度读取。
+                                    // 0.8.4：轮询间隔 4ms → 1ms —— 240Hz 推送间隔约 4.2ms，4ms 轮询会让
+                                    // 快照平均多等 ~2ms 才被取走（叠加平滑动画表现为"光标延迟"），
+                                    // 1ms 把这项延迟压到 ~0.5ms（空闲时 1000 次/秒 Peek，开销可忽略）。
+                                    await Task.Delay(1, ct).ConfigureAwait(false);
                                     continue;
                                 }
                                 if (left > (uint)MaxResponseBytes) left = (uint)MaxResponseBytes;   // 应答长度上限保护

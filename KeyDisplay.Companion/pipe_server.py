@@ -224,26 +224,34 @@ class PipeServer:
     def _pump_loop(self, handle, wlock):
         user32 = ctypes.WinDLL("user32", use_last_error=True)
         frames = 0
+        frame_idx = 0
+        _ser_buf = ctypes.create_string_buffer(SNAPSHOT_SIZE)   # 0.8.4：复用序列化缓冲
         summary_at = time.monotonic()
         last_raw = 0
         last_skip = 0
         while not self._stop.is_set():
-            reconcile(self._state)
-            self._state.vx = user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
-            self._state.vy = user32.GetSystemMetrics(SM_YVIRTUALSCREEN)
-            self._state.vw = user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)
-            self._state.vh = user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
+            # 0.8.4 性能：256-VK 全量校准降频到每 4 帧一次（12 键/鼠标键仍每帧）——
+            # 该项是最大 CPU 热点（256 次 GetAsyncKeyState × 240Hz ≈ 6 万次/秒 Win32 往返）
+            frame_idx += 1
+            reconcile(self._state, full=(frame_idx % 4 == 0))
+            # 0.8.4 性能：GetSystemMetrics 4 项合并为每 4 帧一次（虚拟屏幕尺寸极少变化），
+            # 其余帧沿用缓存值，减少 Win32 往返
+            if frame_idx % 4 == 1:
+                self._state.vx = user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
+                self._state.vy = user32.GetSystemMetrics(SM_YVIRTUALSCREEN)
+                self._state.vw = user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)
+                self._state.vh = user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
             # 桌面（光标可见）坐标的 60Hz 校准；隐藏时坐标由 RAWINPUT 增量维护
             sync_mouse_position(self._state)
             # 滚轮瞬时点亮自动熄灭（0x07/0x08 位）
             expire_wheel()
-            blob = self._state.serialize()
+            # 0.8.4 性能：复用序列化缓冲（原每帧 create_string_buffer 分配）
+            _ser_buf = self._state.serialize_into(_ser_buf)
             # 0.8.3：seq 32 位回绕（240Hz 连续约 207 天后 struct.pack('I') 溢出抛错 → 永久瘫痪）
             self._state.seq = (self._state.seq + 1) & 0xFFFFFFFF
             written = wt.DWORD()
-            buf = ctypes.create_string_buffer(blob)
             with wlock:
-                if not kernel32.WriteFile(handle, buf, SNAPSHOT_SIZE,
+                if not kernel32.WriteFile(handle, _ser_buf, SNAPSHOT_SIZE,
                                           ctypes.byref(written), None):
                     debuglog.log("[pipe] write failed err=%d"
                                  % ctypes.get_last_error())

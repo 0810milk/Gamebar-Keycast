@@ -51,6 +51,9 @@ CURSOR_SHOWING = 0x00000001
 # 限频不影响触边/比例。先按需求取 500，可调。
 RAW_REPORT_LIMIT = 500.0
 _last_raw_ts = 0.0
+# 0.8.4：RAWINPUT 读取复用缓冲（鼠标 RAWINPUT < 64 字节，128 足够）——避免每次事件分配
+_raw_buf = ctypes.create_string_buffer(128)
+_raw_buf_size = wt.UINT(128)
 
 # --- 原生输入/坐标链路监控计数（供 pipe-debug.log 周期摘要读取）---
 _raw_count = 0        # 已处理的 WM_INPUT 事件数
@@ -71,6 +74,7 @@ _cal_cur_dx = 0.0     # 校准窗口内累计光标位移（GetCursorPos，绝�
 _cal_cur_dy = 0.0
 _cal_last_pos = None
 _cal_at = 0.0
+_cal_pos_at = 0.0     # 0.8.4 性能：上次采样光标位置的时间（校准用，降频避免每次 RAWINPUT 事件都调 GetCursorPos）
 
 
 def raw_stats():
@@ -91,17 +95,22 @@ def _calibrate_scale(dx, dy):
     （表现为"游戏内光标不动"）。系数限制在 [0.1, 5.0] 防异常。
     """
     global _scale_x, _scale_y, _cal_raw_dx, _cal_raw_dy, \
-        _cal_cur_dx, _cal_cur_dy, _cal_last_pos, _cal_at
+        _cal_cur_dx, _cal_cur_dy, _cal_last_pos, _cal_at, _cal_pos_at
     _cal_raw_dx += abs(dx)
     _cal_raw_dy += abs(dy)
-    pos = _read_cursor_position()
-    if pos is not None:
-        x, y = pos
-        if _cal_last_pos is not None:
-            _cal_cur_dx += abs(x - _cal_last_pos[0])
-            _cal_cur_dy += abs(y - _cal_last_pos[1])
-        _cal_last_pos = (x, y)
     now = time.monotonic()
+    # 0.8.4 性能优化：光标位置采样降频到 ~10Hz —— 原实现每次 RAWINPUT 事件都调
+    # GetCursorPos，高刷鼠标（1000Hz 报点）时是每秒上千次多余的 Win32 往返，
+    # 正是"包内运行时卡顿/延迟"的 CPU 热点之一。校准是 1s 窗口统计，10Hz 采样精度足够。
+    if now - _cal_pos_at >= 0.1:
+        _cal_pos_at = now
+        pos = _read_cursor_position()
+        if pos is not None:
+            x, y = pos
+            if _cal_last_pos is not None:
+                _cal_cur_dx += abs(x - _cal_last_pos[0])
+                _cal_cur_dy += abs(y - _cal_last_pos[1])
+            _cal_last_pos = (x, y)
     if now - _cal_at >= 1.0:
         if _cal_raw_dx > 0 and _cal_cur_dx > 1:
             ratio = min(_cal_cur_dx / _cal_raw_dx, 5.0)
@@ -384,17 +393,15 @@ def _handle_raw_input(l_param):
     _last_raw_ts = now
     _raw_count += 1
 
-    size = wt.UINT()
-    user32.GetRawInputData(l_param, RID_INPUT, None, ctypes.byref(size),
-                           ctypes.sizeof(RAWINPUTHEADER))
-    if not size.value:
-        return
-    buf = ctypes.create_string_buffer(size.value)
-    got = user32.GetRawInputData(l_param, RID_INPUT, buf, ctypes.byref(size),
+    # 0.8.4 性能优化：固定缓冲 + 单次 GetRawInputData —— 原实现每次事件先查大小再分配缓冲
+    # 再读一遍（两次 Win32 往返 + 每次分配），限频 500Hz 下也是可观的分配/调用开销。
+    _raw_buf_size.value = len(_raw_buf)
+    got = user32.GetRawInputData(l_param, RID_INPUT, _raw_buf,
+                                 ctypes.byref(_raw_buf_size),
                                  ctypes.sizeof(RAWINPUTHEADER))
-    if got != size.value:
+    if got == 0 or got > len(_raw_buf):
         return
-    raw = ctypes.cast(buf, ctypes.POINTER(RAWINPUT)).contents
+    raw = ctypes.cast(_raw_buf, ctypes.POINTER(RAWINPUT)).contents
     if raw.header.dwType != RIM_TYPEMOUSE:
         return
 
@@ -441,7 +448,17 @@ def _get_async_key_state(vk):
     return bool(user32.GetAsyncKeyState(vk) & 0x8000)
 
 
-def reconcile(state):
+# --- 0.9.4 复位延迟确认（方案 C）---
+# 校准全覆盖（真实状态说了算）时，若直接按瞬时状态复位，会把短于一帧的点击抹掉；
+# 若永不复位（0.8.3 的做法），钩子 up 事件一丢就永久卡键。折中：连续两帧都读到
+# "真实松开"才复位——卡键最多残留 ~8ms，正常点击不受影响。
+RESET_CONFIRM_FRAMES = 2
+_key_reset = [0] * len(KEY_ORDER)     # 对应 KEY_ORDER 索引
+_mouse_reset = [0] * len(MOUSE_VK)    # 对应 MOUSE_VK 迭代顺序
+_vk_reset = [0] * 256                 # 对应 VK 位图（仅 full 帧递增）
+
+
+def reconcile(state, full=True):
     """兜底校准：以 GetAsyncKeyState 为准刷新所有按键状态。
 
     保留原有 12 键 + 5 鼠标键逻辑，并追加 v3 的 256 VK 位图校准：
@@ -450,27 +467,55 @@ def reconcile(state):
     0.8.3 修复：
     - 右修饰键（右 Shift/Ctrl/Alt）纳入校准——此前只查左键 VK，按下右修饰键
       会被 240Hz 校准每帧清零，widget 上不亮
-    - 校准只补亮不灭（保留钩子事件位）：短于一帧周期（<4ms@240Hz）的快速点按
-      不再被校准瞬时状态覆盖丢失；松开一律由低层钩子 up 事件复位（钩子事件可靠）
+    0.8.4 性能：`full=False` 时跳过 256 VK 全量遍历——该项是最大的 CPU 热点
+    （256 次 GetAsyncKeyState × 240Hz ≈ 6 万次/秒 Win32 往返）。调用方每 4 帧
+    传一次 full=True：自定义键位图 60Hz 补齐足够。
+    0.9.4 方案 C（全覆盖校准 + 复位延迟确认）：
+    0.8.3 曾把校准改成"只补亮不灭"，把复位完全交给钩子 up 事件——一旦 up 事件
+    丢失（UIPI 管理员窗口、Ctrl+Alt+Del、Win 键、钩子回调超时被系统丢弃、焦点切换），
+    该键就永远保持按下、不再弹起（用户侧"卡键"）。现在恢复全覆盖校准（真实状态
+    说了算），但复位需连续 RESET_CONFIRM_FRAMES 帧都读到"松开"才生效：
+    - 卡键最长残留 2 帧（≈8ms）后自愈
+    - 短促点击（≥2 帧的按下）仍会被点亮，不会被瞬时状态抹掉
     """
-    for name in KEY_ORDER:
+    for i, name in enumerate(KEY_ORDER):
         pressed = _get_async_key_state(VK[name])
         right = VK_RIGHT.get(name)
         if right is not None:
             pressed = pressed or _get_async_key_state(right)
         if pressed:
+            _key_reset[i] = 0
             state.set_key(name, True)
-        # 不置零：松开由钩子 up 事件负责（_keyboard_proc → set_key(False)）
-    for name, vk in MOUSE_VK.items():
+        else:
+            # 真实松开：连续 N 帧确认后复位（防瞬时抖动/快按被抹）
+            _key_reset[i] += 1
+            if _key_reset[i] >= RESET_CONFIRM_FRAMES:
+                _key_reset[i] = RESET_CONFIRM_FRAMES   # 防无界增长
+                state.set_key(name, False)
+    for i, (name, vk) in enumerate(MOUSE_VK.items()):
         if _get_async_key_state(vk):
+            _mouse_reset[i] = 0
             state.set_mouse(name, True)
+        else:
+            _mouse_reset[i] += 1
+            if _mouse_reset[i] >= RESET_CONFIRM_FRAMES:
+                _mouse_reset[i] = RESET_CONFIRM_FRAMES
+                state.set_mouse(name, False)
+    if not full:
+        return
     for vk in range(256):
         if vk == WHEEL_UP_VK or vk == WHEEL_DOWN_VK:
             # 滚轮位是瞬时事件（0x07/0x08 非真实键码，0x08 还撞 VK_BACK），
             # 由 expire_wheel() 按时间戳维护，不能用真实键码状态覆盖
             continue
         if _get_async_key_state(vk):
+            _vk_reset[vk] = 0
             state.set_vk(vk, True)
+        else:
+            _vk_reset[vk] += 1
+            if _vk_reset[vk] >= RESET_CONFIRM_FRAMES:
+                _vk_reset[vk] = RESET_CONFIRM_FRAMES
+                state.set_vk(vk, False)
 
 
 def start_hooks(state, stop_event, ready_event=None):

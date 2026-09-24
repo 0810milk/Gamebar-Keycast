@@ -11,8 +11,8 @@
 ; 卸载流程：先结束伴生进程与小组件进程 → 移除 UWP 包与证书 → Inno 删除文件与注册表。
 
 #define MyAppName "按键显示"
-; 版本号与 VERSION.md 保持一致（当前 0.9.2 beta），发布时同步修改
-#define MyAppVersion "0.9.2"
+; 版本号与 VERSION.md 保持一致（当前 0.9.3 beta），发布时同步修改
+#define MyAppVersion "0.9.3"
 #define MyAppPublisher "KeyDisplay"
 #define MyAppExeName "KeyDisplayCompanion.exe"
 
@@ -76,6 +76,8 @@ Source: "..\KeyDisplay.Companion\dist\KeyDisplayCompanion.exe"; DestDir: "{app}"
 Source: "..\cert\KeyDisplay.cer"; DestDir: "{app}\cert"; Flags: ignoreversion
 Source: "..\dist\KeyDisplay.Install\*.msix"; DestDir: "{app}\appx"; Flags: ignoreversion
 Source: "install-msix.ps1"; DestDir: "{app}"; Flags: ignoreversion
+; 0.9.3：看门狗脚本（计划任务每 5 分钟调用：伴生进程不在就拉起）
+Source: "watchdog.vbs"; DestDir: "{app}"; Flags: ignoreversion
 
 ; 0.7.0 打包事故修复：每次安装前清空 {app}\appx 下旧 msix，保证安装目录始终只有本次分发的
 ; 一个 msix（历史事故：appx 目录累积多个版本 → install-msix.ps1 多文件守卫抛错 → Setup 静默失败）
@@ -89,6 +91,14 @@ Root: HKCU; Subkey: "Software\Classes\keydisplay\shell\open\command"; ValueType:
 Root: HKCU; Subkey: "Software\Classes\keydisplay\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"",0"; Flags: uninsdeletekey
 ; 0.8.3：开机自启伴生进程（Game Bar 沙箱内协议拉起不可靠；低层钩子无需管理员，普通权限常驻即可）
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "KeyDisplayCompanion"; ValueData: """{app}\{#MyAppExeName}"""; Flags: uninsdeletevalue
+; 0.9.3：显式把该自启项标记为「已启用」——系统/用户在任务管理器里关掉后会写 03（禁用），
+; 导致开机不再自启且无任何提示。这里写 02（启用）+ 全零时间戳，安装即恢复自启能力。
+; 实现见下方 [Registry] 的 binary 行（Inno 的 [Code] 无对应的二进制写 API）。
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"; ValueType: binary; ValueName: "KeyDisplayCompanion"; ValueData: "02 00 00 00 00 00 00 00 00 00 00 00"
+; 0.9.3：系统级进程优先级（IFEO PerfOptions，微软文档化用法）——早于进程内设置生效，
+; 保证推送线程获得及时调度（CpuPriorityClass 6=Above Normal，IoPriority 3=High）
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\{#MyAppExeName}\PerfOptions"; ValueType: dword; ValueName: "CpuPriorityClass"; ValueData: "6"; Flags: uninsdeletekey
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\{#MyAppExeName}\PerfOptions"; ValueType: dword; ValueName: "IoPriority"; ValueData: "3"
 
 ; ---- 安装前：结束残留进程（伴生进程 + Game Bar 宿主），避免文件占用导致"要求重启" ----
 [Code]
@@ -110,13 +120,31 @@ begin
   Result := '';
 end;
 
+{ 0.9.3 稳定性：把 Run 自启项显式标记为「已启用」。
+  系统或用户在任务管理器「启动应用」里关闭该条目时会写入 03(禁用)，此后开机不再自启
+  且没有任何提示。启用状态由 [Registry] 段的 binary 值写入（02 + 全零时间戳）。
+  注意：该值仅作双保险，主力常驻机制是计划任务（登录自启 + 每 5 分钟看门狗）。 }
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+end;
+
 [Run]
 ; 安装/更新组件（内部会强制移除旧包 + 验证新增）
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\install-msix.ps1"" -AppxPath ""{app}\appx\KeyDisplay.Widget_*.msix"" -CertPath ""{app}\cert\KeyDisplay.cer"" -CompanionExe ""{app}\{#MyAppExeName}"""; Flags: runhidden waituntilterminated; StatusMsg: "正在安装 Game Bar 小组件..."
+; 0.8.4：注册登录自启计划任务 —— 比 Run 键可靠：不受任务管理器「启动应用」开关影响，
+; 且由计划任务服务托管（用户只需安装，无需任何设置）
+Filename: "schtasks.exe"; Parameters: "/Create /F /TN ""KeyDisplayCompanion"" /SC ONLOGON /RL LIMITED /TR ""wscript.exe \""{app}\watchdog.vbs\"""""; Flags: runhidden waituntilterminated; StatusMsg: "正在注册自启任务..."
+; 0.9.3：再加一个每 5 分钟的看门狗任务 —— 伴生进程被结束/崩溃后自动拉回（"永久运行"效果），
+; 不依赖 widget 沙箱内的拉起能力（宿主会拦截），也不依赖用户任何操作
+Filename: "schtasks.exe"; Parameters: "/Create /F /TN ""KeyDisplayCompanionWatchdog"" /SC MINUTE /MO 5 /RL LIMITED /TR ""wscript.exe \""{app}\watchdog.vbs\"""""; Flags: runhidden waituntilterminated; StatusMsg: "正在注册看门狗任务..."
 ; 安装/更新完成后启动伴生进程（mutex 保证单实例），widget 无需重开即可连接
 Filename: "{app}\{#MyAppExeName}"; Flags: runhidden nowait; StatusMsg: "正在启动数据采集服务..."
 
 [UninstallRun]
+; 0.8.4/0.9.3：卸载先删除自启与看门狗计划任务（避免残留任务指向已删除的 exe）
+Filename: "schtasks.exe"; Parameters: "/Delete /F /TN ""KeyDisplayCompanion"""; Flags: runhidden
+Filename: "schtasks.exe"; Parameters: "/Delete /F /TN ""KeyDisplayCompanionWatchdog"""; Flags: runhidden
 ; 卸载：先彻底结束进程（含 widget 与 GameBar 缓存），再移除 UWP 包与证书。
 ; 用内联命令：Inno 在 [UninstallRun] 之后才删文件，此处先杀进程避免文件锁。
 ; 注意：内联 PowerShell 的花括号需用 {{ }} 转义（Inno 常量语法）。

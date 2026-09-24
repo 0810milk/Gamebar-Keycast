@@ -76,6 +76,18 @@ class InputState:
                            self.vx, self.vy, self.vw, self.vh, self.seq,
                            bytes(self.extra))
 
+    def serialize_into(self, buf):
+        """0.8.4 性能：原地写入复用缓冲（避免每帧 bytes 分配与拷贝），返回同一缓冲。
+
+        240Hz 下每帧一次分配看似便宜，但叠加 GIL 与 GC 压力会影响推送时间的均匀性
+        （表现为光标/按键反馈的偶发延迟尖峰）。
+        """
+        struct.pack_into("<4sBHBiiiiiiI32s", buf, 0, MAGIC, VERSION, self.keys,
+                         self.mouse, self.mx, self.my,
+                         self.vx, self.vy, self.vw, self.vh, self.seq,
+                         bytes(self.extra))
+        return buf
+
 
 def parse_snapshot(data):
     """解析快照，返回 dict 或 None（数据无效）。"""

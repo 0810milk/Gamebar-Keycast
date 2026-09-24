@@ -59,7 +59,10 @@ namespace KeyDisplay
         // 0.8.3：companion 可能被 Game Bar 宿主回收/系统清理。原"单次拉起"flag 导致会话中途
         // companion 退出后 widget 永久断连（按键映射无效+圆点消失+预设空）。改记最近拉起时间戳，
         // 允许断线时重新拉起（30s 窗口内最多一次，防风暴）。
-        private static long s_lastCompanionLaunchTicks = long.MinValue;
+        // 0.8.4 修复：初始化必须为 0 而非 long.MinValue——后者与 DateTime.UtcNow.Ticks 相减会
+        // 溢出环绕成负数，使「距上次拉起 <30s」条件恒成立，TryStartCompanion 永远直接 return
+        // （0.9.1 起断线自愈与 fulltrust 拉起全部失效的根因）
+        private static long s_lastCompanionLaunchTicks = 0;
         private DispatcherTimer _companionWatch;   // 断线监视：持续连不上管道时重拉 companion
 
         // 布局自定义：边缘/四角拖拽缩放（窗口式），鼠标垫不参与；默认锁定。
@@ -109,27 +112,28 @@ namespace KeyDisplay
         private readonly SolidColorBrush _snapSolid = new SolidColorBrush(SnapLineColor);   // 吸中实线画刷
         private readonly SolidColorBrush _snapDash = new SolidColorBrush(SnapHintColor);    // 接近提示虚线画刷
 
-        // 暗色主题画刷
-        private readonly SolidColorBrush _darkDefaultBg = new SolidColorBrush(Colors.Black);
+        // 暗色主题画刷（0.8.3 Game Bar 玻璃风：深蓝黑半透明面板 + 冷调柔边 + Xbox 绿按下/圆点强调）
+        private readonly SolidColorBrush _darkDefaultBg = new SolidColorBrush(Color.FromArgb(0xF2, 0x19, 0x1D, 0x25));   // 键帽玻璃深蓝黑
         private readonly SolidColorBrush _darkDefaultFg = new SolidColorBrush(Colors.White);
-        private readonly SolidColorBrush _darkBorder = new SolidColorBrush(Color.FromArgb(0x66, 0xFF, 0xFF, 0xFF));
-        private readonly SolidColorBrush _darkPressedBg = new SolidColorBrush(Colors.White);
-        private readonly SolidColorBrush _darkPressedFg = new SolidColorBrush(Colors.Black);
-        private readonly SolidColorBrush _darkPanel = new SolidColorBrush(Color.FromArgb(0xB3, 0x00, 0x00, 0x00));
-        private readonly SolidColorBrush _darkPad = new SolidColorBrush(Color.FromArgb(0x4D, 0x00, 0x00, 0x00));
+        private readonly SolidColorBrush _darkBorder = new SolidColorBrush(Color.FromArgb(0x52, 0xC0, 0xCD, 0xDB));     // 冷柔细边
+        private readonly SolidColorBrush _darkPressedBg = new SolidColorBrush(Color.FromArgb(0xFF, 0x9B, 0xF0, 0x0B));   // Xbox 绿按下
+        private readonly SolidColorBrush _darkPressedFg = new SolidColorBrush(Color.FromArgb(0xFF, 0x0C, 0x10, 0x14));
+        private readonly SolidColorBrush _darkPanel = new SolidColorBrush(Color.FromArgb(0xE8, 0x0D, 0x0F, 0x15));       // 深玻璃面板（92%）
+        private readonly SolidColorBrush _darkPad = new SolidColorBrush(Color.FromArgb(0x40, 0x23, 0x29, 0x33));        // 鼠标垫微亮深
+        private readonly SolidColorBrush _darkDot = new SolidColorBrush(Color.FromArgb(0xFF, 0x9B, 0xF0, 0x0B));         // Xbox 绿鼠标点
 
-        // 亮色主题画刷
-        private readonly SolidColorBrush _lightDefaultBg = new SolidColorBrush(Colors.White);
+        // 亮色主题画刷（0.8.3：白玻璃风——通透白面板 + 微冷白键帽）
+        private readonly SolidColorBrush _lightDefaultBg = new SolidColorBrush(Color.FromArgb(0xF2, 0xFF, 0xFF, 0xFF));
         private readonly SolidColorBrush _lightDefaultFg = new SolidColorBrush(Colors.Black);
-        private readonly SolidColorBrush _lightBorder = new SolidColorBrush(Color.FromArgb(0x66, 0x00, 0x00, 0x00));
+        private readonly SolidColorBrush _lightBorder = new SolidColorBrush(Color.FromArgb(0x59, 0x33, 0x38, 0x3E));
         private readonly SolidColorBrush _lightPressedBg = new SolidColorBrush(Colors.Black);
         private readonly SolidColorBrush _lightPressedFg = new SolidColorBrush(Colors.White);
-        private readonly SolidColorBrush _lightPanel = new SolidColorBrush(Color.FromArgb(0xB3, 0xFF, 0xFF, 0xFF));
-        private readonly SolidColorBrush _lightPad = new SolidColorBrush(Color.FromArgb(0x59, 0xFF, 0xFF, 0xFF));
+        private readonly SolidColorBrush _lightPanel = new SolidColorBrush(Color.FromArgb(0xE0, 0xF2, 0xF5, 0xF8));
+        private readonly SolidColorBrush _lightPad = new SolidColorBrush(Color.FromArgb(0x42, 0x33, 0x38, 0x3E));
         private readonly SolidColorBrush _transparent = new SolidColorBrush(Colors.Transparent);
 
-        // 粉色主题画刷（用户拍板：字体白色，按键底加深一档保证白字可读）
-        private readonly SolidColorBrush _pinkPanel = new SolidColorBrush(Color.FromArgb(0xB3, 0xFF, 0xB3, 0xC6));   // 面板 #B3FFB3C6
+        // 粉色主题画刷（用户拍板：字体白色，按键底加深一档保证白字可读；0.8.3 面板通透化）
+        private readonly SolidColorBrush _pinkPanel = new SolidColorBrush(Color.FromArgb(0xE0, 0xFF, 0xB3, 0xC6));   // 面板 #E0FFB3C6
         private readonly SolidColorBrush _pinkBorder = new SolidColorBrush(Color.FromArgb(0xCC, 0xB0, 0x57, 0x7E));  // 边框 #CCB0577E
         private readonly SolidColorBrush _pinkKeyBg = new SolidColorBrush(Color.FromArgb(0xFF, 0xFF, 0xB3, 0xC6));   // 按键默认背景 #FFFFB3C6（原 #FFCDD8 太浅，白字看不清）
         private readonly SolidColorBrush _pinkKeyFg = new SolidColorBrush(Colors.White);       // 默认文字白色
@@ -138,18 +142,18 @@ namespace KeyDisplay
         private readonly SolidColorBrush _pinkPad = new SolidColorBrush(Color.FromArgb(0x4D, 0xFF, 0xB3, 0xC6));      // 鼠标垫 #4DFFB3C6
         private readonly SolidColorBrush _pinkDot = new SolidColorBrush(Color.FromArgb(0xFF, 0xB0, 0x57, 0x7E));     // 鼠标点深粉
 
-        // 灰色主题画刷（浅灰底 + 黑字）
-        private readonly SolidColorBrush _grayPanel = new SolidColorBrush(Color.FromArgb(0xB3, 0xD6, 0xD6, 0xD6));   // 面板 #B3D6D6D6
-        private readonly SolidColorBrush _grayBorder = new SolidColorBrush(Color.FromArgb(0x66, 0x66, 0x66, 0x66));  // 边框 #66666666
-        private readonly SolidColorBrush _grayKeyBg = new SolidColorBrush(Color.FromArgb(0xFF, 0xE4, 0xE4, 0xE4));   // 按键默认背景 #FFE4E4E4
-        private readonly SolidColorBrush _grayKeyFg = new SolidColorBrush(Colors.Black);       // 默认文字黑色
-        private readonly SolidColorBrush _grayPressedBg = new SolidColorBrush(Color.FromArgb(0xFF, 0x8C, 0x8C, 0x8C));  // 按下深灰底
+        // 灰色主题画刷（0.8.3：浅灰玻璃 + 黑字 + 深灰按下）
+        private readonly SolidColorBrush _grayPanel = new SolidColorBrush(Color.FromArgb(0xE0, 0xE6, 0xE9, 0xEF));   // 面板玻璃浅灰
+        private readonly SolidColorBrush _grayBorder = new SolidColorBrush(Color.FromArgb(0x5C, 0x5A, 0x62, 0x6B));  // 边框
+        private readonly SolidColorBrush _grayKeyBg = new SolidColorBrush(Color.FromArgb(0xF5, 0xF2, 0xF5, 0xF8));   // 按键玻璃白
+        private readonly SolidColorBrush _grayKeyFg = new SolidColorBrush(Color.FromArgb(0xFF, 0x26, 0x2B, 0x31));   // 默认文字深灰
+        private readonly SolidColorBrush _grayPressedBg = new SolidColorBrush(Color.FromArgb(0xFF, 0x2C, 0x32, 0x3A));  // 按下深灰底
         private readonly SolidColorBrush _grayPressedFg = new SolidColorBrush(Colors.White);  // 按下白字
-        private readonly SolidColorBrush _grayPad = new SolidColorBrush(Color.FromArgb(0x59, 0xD6, 0xD6, 0xD6));      // 鼠标垫 #59D6D6D6
-        private readonly SolidColorBrush _grayDot = new SolidColorBrush(Colors.Black);        // 鼠标点黑色
+        private readonly SolidColorBrush _grayPad = new SolidColorBrush(Color.FromArgb(0x42, 0xD6, 0xDB, 0xE2));      // 鼠标垫
+        private readonly SolidColorBrush _grayDot = new SolidColorBrush(Color.FromArgb(0xFF, 0x2C, 0x32, 0x3A));      // 鼠标点深灰
 
-        // 蓝色主题画刷（浅蓝底 + 深蓝字）
-        private readonly SolidColorBrush _bluePanel = new SolidColorBrush(Color.FromArgb(0xB3, 0xBF, 0xD9, 0xEE));   // 面板 #B3BFD9EE
+        // 蓝色主题画刷（浅蓝玻璃 + 深蓝字；0.8.3 面板通透化）
+        private readonly SolidColorBrush _bluePanel = new SolidColorBrush(Color.FromArgb(0xE0, 0xC3, 0xDC, 0xF0));   // 面板 #E0C3DCF0
         private readonly SolidColorBrush _blueBorder = new SolidColorBrush(Color.FromArgb(0x66, 0x3A, 0x6E, 0xA5));  // 边框 #663A6EA5
         private readonly SolidColorBrush _blueKeyBg = new SolidColorBrush(Color.FromArgb(0xFF, 0xD2, 0xE5, 0xF7));   // 按键默认背景 #FFD2E5F7
         private readonly SolidColorBrush _blueKeyFg = new SolidColorBrush(Color.FromArgb(0xFF, 0x1F, 0x4E, 0x79));   // 默认文字深蓝
@@ -584,8 +588,15 @@ namespace KeyDisplay
             // 0.8.3：可重复拉起。30s 窗口内最多触发一次协议拉起（companion 冷启动 2~4s，间隔足够），
             // 防在高频断连监视下反复弹起进程。
             long now = DateTime.UtcNow.Ticks;   // UWP 环境无 Environment.TickCount64，用 UtcNow.Ticks
-            if (now - s_lastCompanionLaunchTicks < TimeSpan.FromSeconds(30).Ticks) return;
+            // 0（从未拉起过）时必须放行；否则按 30s 窗口限频
+            if (s_lastCompanionLaunchTicks != 0 &&
+                now - s_lastCompanionLaunchTicks < TimeSpan.FromSeconds(30).Ticks) return;
             s_lastCompanionLaunchTicks = now;
+            // 0.8.4 回退说明：曾尝试"包内完整信任进程"（FullTrustProcessLauncher）实现零设置启动，
+            // 但带包身份的进程受系统作业对象/策略限速，实测性能严重下降（光标延迟、按键反馈滞后），
+            // 因此回到独立进程（Program Files\KeyDisplay）方案：由安装器负责常驻
+            // （计划任务登录自启 + 安装即启动 + 失败重启），性能与旧版一致。
+            // ② 协议拉起（独立进程路径；沙箱内可能被宿主拦截，作为辅助手段）
             try
             {
                 await Launcher.LaunchUriAsync(new Uri("keydisplay://start"));
@@ -614,9 +625,30 @@ namespace KeyDisplay
             _companionWatch.Start();
         }
 
+        // 0.8.3：构造官方 Game Bar 风 Acrylic 玻璃面板（磨砂纹理 + 主题色 tint，tint 不透明化保证颜色纯正）；
+        // 环境不支持（无 HostBackdrop / 异常）时回落半透明面板色，不影响主题系统
+        private Brush TryAcrylicPanel(SolidColorBrush panel)
+        {
+            try
+            {
+                var c = panel.Color;
+                var ab = new Windows.UI.Xaml.Media.AcrylicBrush
+                {
+                    TintColor = Windows.UI.Color.FromArgb(0xFF, c.R, c.G, c.B),
+                    TintOpacity = 0.85,
+                    FallbackColor = Windows.UI.Color.FromArgb(0xE8, c.R, c.G, c.B),
+                    BackgroundSource = Windows.UI.Xaml.Media.AcrylicBackgroundSource.HostBackdrop
+                };
+                return ab;
+            }
+            catch { return panel; }
+        }
+
         private void ApplyTheme()
         {
-            RootPanel.Background = PanelB();
+            // 0.8.3 Game Bar 官方风：主面板优先用 Acrylic 磨砂玻璃（tint = 面板色，仍随主题），
+            // 环境不支持（Game Bar 宿主无 backdrop / 异常）时自动回落半透明面板色
+            RootPanel.Background = TryAcrylicPanel((SolidColorBrush)PanelB());
             RootPanel.BorderBrush = BorderB();
             MousePad.Background = PadB();
             MousePad.BorderBrush = BorderB();
@@ -1885,7 +1917,7 @@ namespace KeyDisplay
         // 当前主题预设的第 k 槽颜色（dark/gray/light/pink/blue 从现有画刷字段取，与五态主题一致）
         private Color PresetColor(int k)
         {
-            Brush[] d = { _darkPanel, _darkBorder, _darkDefaultBg, _darkDefaultFg, _darkPressedBg, _darkPressedFg, _darkPad, _darkDefaultFg };
+            Brush[] d = { _darkPanel, _darkBorder, _darkDefaultBg, _darkDefaultFg, _darkPressedBg, _darkPressedFg, _darkPad, _darkDot };
             Brush[] g = { _grayPanel, _grayBorder, _grayKeyBg, _grayKeyFg, _grayPressedBg, _grayPressedFg, _grayPad, _grayDot };
             Brush[] l = { _lightPanel, _lightBorder, _lightDefaultBg, _lightDefaultFg, _lightPressedBg, _lightPressedFg, _lightPad, _darkDefaultBg };
             Brush[] p = { _pinkPanel, _pinkBorder, _pinkKeyBg, _pinkKeyFg, _pinkPressedBg, _pinkPressedFg, _pinkPad, _pinkDot };

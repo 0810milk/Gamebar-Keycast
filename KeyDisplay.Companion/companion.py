@@ -68,6 +68,53 @@ def _load_config(explicit_path=None):
     return {}
 
 
+def _optimize_process():
+    """0.8.4 底层优化：消除包身份进程被电源节流/低优先级调度导致的唤醒抖动。
+
+    背景：伴生进程改由包内完整信任进程启动后，Windows 可能对带包身份的进程启用
+    EcoQoS（效率模式，降低执行速度），使 4ms 级 sleep 的唤醒时间不均匀——平均帧率
+    看似正常，但单帧延迟出现尖峰，体感即"光标延迟增加、按键反馈不及时"。
+    三重加固：关闭电源节流 + 提高进程优先级 + 提升系统计时器精度。
+    返回是否成功提升了计时器精度（退出时需对应 timeEndPeriod）。
+    """
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    try:
+        class PROCESS_POWER_THROTTLING_STATE(ctypes.Structure):
+            _fields_ = [("Version", wt.ULONG), ("ControlMask", wt.ULONG),
+                        ("StateMask", wt.ULONG)]
+
+        kernel32.SetProcessInformation.argtypes = [
+            ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, wt.DWORD]
+        # ProcessPowerThrottling = 4；EXECUTION_SPEED = 0x1；StateMask=0 → 关闭该节流
+        st = PROCESS_POWER_THROTTLING_STATE(1, 0x1, 0)
+        kernel32.SetProcessInformation(kernel32.GetCurrentProcess(), 4,
+                                       ctypes.byref(st), ctypes.sizeof(st))
+    except Exception:
+        pass
+    try:
+        # ABOVE_NORMAL_PRIORITY_CLASS (0x8000)：保证推送线程及时被调度
+        kernel32.SetPriorityClass.argtypes = [ctypes.c_void_p, wt.DWORD]
+        kernel32.SetPriorityClass(kernel32.GetCurrentProcess(), 0x00008000)
+    except Exception:
+        pass
+    try:
+        # 计时器精度 1ms：默认 15.6ms 粒度下 240Hz 的 sleep(4.17ms) 会被取整到 ~15.6ms
+        # （实际只有 ~64Hz 且抖动明显）；不能依赖游戏等前台程序替我们提升
+        ctypes.WinDLL("winmm").timeBeginPeriod(1)
+        return True
+    except Exception:
+        return False
+
+
+def _restore_timer(raised):
+    """进程退出时恢复计时器精度（避免长期占用高精度计时器影响系统耗电）。"""
+    if raised:
+        try:
+            ctypes.WinDLL("winmm").timeEndPeriod(1)
+        except Exception:
+            pass
+
+
 def main():
     parser = argparse.ArgumentParser(description="KeyDisplay companion process")
     parser.add_argument("--package-family", default=None,
@@ -89,6 +136,8 @@ def main():
 
     state = InputState()
     stop = StopFlag()
+    # 0.8.4 底层优化：关闭电源节流（EcoQoS）+ 提升优先级 + 计时器精度 1ms
+    timer_raised = _optimize_process()
     # 0.8.3：钩子启动成功/失败用事件一次性通知（替代固定 sleep(0.15) 探测——慢速机器上
     # start_hooks 可能在 0.15s 后才失败，进程会带着"无钩子"状态继续运行）
     hooks_ready = threading.Event()
@@ -123,6 +172,7 @@ def main():
         pass
     finally:
         stop.set()
+        _restore_timer(timer_raised)
 
     server_thread.join(timeout=2)
     hooks_thread.join(timeout=2)

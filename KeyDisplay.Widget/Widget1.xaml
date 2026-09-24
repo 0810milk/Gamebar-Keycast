@@ -24,7 +24,7 @@
     </Page.Resources>
 
     <Grid Background="Transparent">
-        <Border x:Name="RootPanel" CornerRadius="10" BorderThickness="1" Padding="16">
+        <Border x:Name="RootPanel" CornerRadius="14" BorderThickness="1" Padding="16">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="272"/>
