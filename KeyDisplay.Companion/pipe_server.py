@@ -15,9 +15,11 @@ import time
 
 import debuglog
 import hooks
+import metrics
+import options
 import presets
 from hooks import reconcile, sync_mouse_position, raw_stats, expire_wheel
-from state import SNAPSHOT_SIZE
+from state import SNAPSHOT_SIZE, VERSION
 
 
 PIPE_NAME = r"\\.\pipe\KeyDisplayState"
@@ -118,8 +120,9 @@ def _make_pipe(sec_attr):
 
 
 def _parse_cmd(raw):
-    """解析客户端 CMD 帧 → ("GET_PRESETS", None) / ("PUT_PRESETS", payload) / (None, None)。
+    """解析客户端 CMD 帧 → (命令名, payload) 或 (None, None)。
 
+    支持 GET_PRESETS / PUT_PRESETS / GET_STATS / SET_OPT / OPEN_URL。
     非 "CMD|" 前缀内容（二进制 KDSP 等异常数据）一律返回 (None, None) 表示忽略。
     """
     try:
@@ -133,6 +136,10 @@ def _parse_cmd(raw):
         return ("GET_PRESETS", None)
     if rest.startswith("PUT_PRESETS|"):
         return ("PUT_PRESETS", rest[len("PUT_PRESETS|"):])
+    if rest == "GET_STATS":
+        return ("GET_STATS", None)
+    if rest.startswith("SET_OPT|"):
+        return ("SET_OPT", rest[len("SET_OPT|"):])
     if rest.startswith("OPEN_URL|"):
         return ("OPEN_URL", rest[len("OPEN_URL|"):])
     return (None, None)
@@ -144,9 +151,11 @@ class PipeServer:
         self._stop = stop_event
         self._package_family_name = package_family_name
         self._sec = _security_attributes(package_family_name)
-        # 推送帧率由 config.json 的 fps 决定，默认 240Hz（覆盖高刷显示器），可再调高
+        # 推送帧率由 options.pushHz / followRefresh 动态决定，默认 240Hz；fps 参数仅作初始值
         self._interval = 1.0 / max(1.0, float(fps))
         self._connected = False
+        # 实测推送帧率（由泵线程每 0.5s 更新，供 GET_STATS 读取）
+        self._push_fps = 0.0
 
     @property
     def connected(self):
@@ -266,6 +275,7 @@ class PipeServer:
                 last_raw, last_skip = proc, skip
                 sx, sy = hooks.scale_stats()
                 fps = frames / max(now - summary_at, 1e-6)
+                self._push_fps = fps
                 vis = "1" if hooks._cursor_visible() else "0"
                 debuglog.log(
                     "[pump] fps=%.0f raw=%d skip=%d src=%s vis=%s "
@@ -274,7 +284,9 @@ class PipeServer:
                         self._state.mx, self._state.my))
                 summary_at = now
                 frames = 0
-            time.sleep(self._interval)
+            # 动态推送频率：按 options.pushHz / followRefresh 限频（SET_OPT 立即生效）
+            interval = 1.0 / max(1.0, float(options.effective_push_hz()))
+            time.sleep(interval)
 
     def _read_loop(self, handle, wlock):
         """读线程：阻塞等待客户端 CMD 请求帧并应答；与 STATE 推送互不阻塞。
@@ -346,6 +358,13 @@ class PipeServer:
                     raise ValueError("presets 数据必须是 JSON 对象")
                 presets.save(obj)
                 self._send_reply(handle, "RESP|OK", wlock)
+            elif kind == "GET_STATS":
+                self._send_reply(handle, "RESP|DATA|" + json.dumps(
+                    self._build_stats(), ensure_ascii=False), wlock)
+            elif kind == "SET_OPT":
+                obj = json.loads(payload)
+                options.update(obj)
+                self._send_reply(handle, "RESP|OK", wlock)
             elif kind == "OPEN_URL":
                 # 0.8.2：widget 经管道请求打开浏览器（Game Bar 沙箱内 LaunchUriAsync 常被宿主拦截；
                 # companion 是桌面进程，os.startfile 走系统默认浏览器，无 UWP 沙箱限制）
@@ -358,6 +377,25 @@ class PipeServer:
         except Exception as exc:  # noqa: BLE001
             debuglog.log("[pipe] cmd error: %s: %s" % (type(exc).__name__, exc))
             self._send_reply(handle, "RESP|ERR|%s" % exc, wlock)
+
+    def _build_stats(self):
+        """构造 GET_STATS 应答 JSON（单行；数值用 Number，布尔用 true/false，无 null）。"""
+        mouse_hz, mouse_jitter = metrics.mouse_report_stats()
+        refresh, width, height = metrics.get_display_mode()
+        opts = options.current()
+        return {
+            "mouseHz": mouse_hz,
+            "mouseJitterMs": mouse_jitter,
+            "pushFps": round(float(getattr(self, "_push_fps", 0.0)), 1),
+            "refreshHz": int(refresh),
+            "width": int(width),
+            "height": int(height),
+            "mouseAccel": bool(metrics.get_mouse_accel()),
+            "lowLatency": bool(opts["lowLatency"]),
+            "pushHz": int(opts["pushHz"]),
+            "followRefresh": bool(opts["followRefresh"]),
+            "proto": int(VERSION),
+        }
 
     def _send_reply(self, handle, text, wlock=None):
         """用与 STATE 帧相同的 WriteFile 机制写应答帧（message 模式，UTF-8）。

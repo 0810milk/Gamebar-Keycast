@@ -26,6 +26,7 @@ namespace KeyDisplay
         public uint Seq;     // 帧序号，用于判断数据是否变化（未变化时跳过重绘）
         public byte[] ExtraKeys;   // 协议 v3：32 字节 = 256 位 VK 位图，按虚拟键码直接索引；
                                    // v2 旧快照为 null（自定义键降级为仅显示）
+        public ulong TimestampNs;  // 协议 v4：伴生进程采样时刻的 QPC 纳秒时间戳（0 = 旧伴生进程，无此信息）
     }
 
     /// <summary>
@@ -291,6 +292,12 @@ namespace KeyDisplay
             {
                 snap.ExtraKeys = new byte[32];
                 Buffer.BlockCopy(b, 36, snap.ExtraKeys, 0, 32);
+            }
+            // 协议 v4（0.9.5）：b[68..76] = 8 字节小端 uint64 = 伴生进程采样时的 QPC 纳秒时间戳，
+            // 用于算"输入→显示"延迟。旧伴生进程（v3，68 字节）没有这一段 → TimestampNs = 0（显示为 —）。
+            if (len >= 76)
+            {
+                snap.TimestampNs = BitConverter.ToUInt64(b, 68);
             }
             return snap;
         }

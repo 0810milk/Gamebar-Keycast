@@ -182,10 +182,10 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(st.extra[0] & 1, 1)
         self.assertEqual(st.extra[31] & 0x80, 0x80)  # 高位不受影响
 
-    def test_serialize_length_is_68(self):
+    def test_serialize_length_is_76(self):
         st = InputState()
         st.set_vk(0x51, True)
-        self.assertEqual(len(st.serialize()), 68)
+        self.assertEqual(len(st.serialize()), 76)
         self.assertEqual(len(st.serialize()), SNAPSHOT_SIZE)
 
     def test_parse_extra_preserved(self):
@@ -202,19 +202,39 @@ class SnapshotTests(unittest.TestCase):
             self.assertTrue(snap["extra"][vk >> 3] & (1 << (vk & 7)),
                             "VK 0x%02X 位未在解析结果中置位" % vk)
 
-    def test_v3_snapshot_parseable(self):
+    def test_v4_snapshot_parseable_and_v2_rejected(self):
         st = InputState()
         st.set_vk(0x41, True)   # 'A'
         blob = st.serialize()
         self.assertEqual(blob[:4], MAGIC)
-        self.assertEqual(blob[4], VERSION)      # version 字段 = 3
-        self.assertEqual(len(blob), 68)
+        self.assertEqual(blob[4], VERSION)      # version 字段 = 4
+        self.assertEqual(len(blob), 76)
         snap = parse_snapshot(blob)
         self.assertIsNotNone(snap)
         self.assertEqual(snap["seq"], st.seq)
         # 旧 v2 快照（36 字节，无 extra）必须被拒绝（ver 不匹配）
         v2 = struct.pack("<4sBHBiiiiiiI", MAGIC, 2, 0, 0, 0, 0, 0, 0, 1920, 1080, 0)
         self.assertIsNone(parse_snapshot(v2))
+
+    def test_v3_snapshot_backward_compat(self):
+        # v3（68 字节，无时间戳）仍可解析，ts_ns 回退 0
+        v3 = struct.pack("<4sBHBiiiiiiI32s", MAGIC, 3, 0, 0, 0, 0, 0, 0,
+                         1920, 1080, 5, bytes(32))
+        snap = parse_snapshot(v3)
+        self.assertIsNotNone(snap)
+        self.assertEqual(snap["ts_ns"], 0)
+        self.assertEqual(snap["seq"], 5)
+        self.assertEqual(len(snap["extra"]), 32)
+
+    def test_v4_timestamp_roundtrip(self):
+        # v4 快照含 uint64 时间戳（perf_counter_ns），解析后 > 0
+        st = InputState()
+        blob = st.serialize()
+        self.assertEqual(len(blob), 76)
+        snap = parse_snapshot(blob)
+        self.assertIsNotNone(snap)
+        self.assertIn("ts_ns", snap)
+        self.assertGreater(snap["ts_ns"], 0)
 
 
 class HookMappingTests(unittest.TestCase):
@@ -394,7 +414,7 @@ class PipeServerTests(unittest.TestCase):
     def test_derive_package_sid_no_crash(self):
         self.assertIsNone(pipe_server._derive_package_sid("__nonexistent__"))
 
-    def test_snapshot_is_68_bytes(self):
+    def test_snapshot_size_matches_constant(self):
         st = InputState()
         self.assertEqual(len(st.serialize()), SNAPSHOT_SIZE)
 

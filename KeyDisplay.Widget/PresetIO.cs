@@ -35,7 +35,7 @@ namespace KeyDisplay
             public string Type;         // "theme" | "layout"
             public string SavedAt;      // ISO 时间字符串
             public string Theme;        // theme 预设："dark" | "light" | "custom"
-            public string[] Colors;     // theme 预设：8 个 hex（panel,border,keyBg,keyFg,pressedBg,pressedFg,pad,dot）
+            public string[] Colors;     // theme 预设：9 个 hex（panel,border,keyBg,keyFg,pressedBg,pressedFg,pad,dot,accent）
             public bool LayoutLocked;   // layout 预设：旧版字段，导入时兼容读取；导出不再写入（与 0.7.1 一致）
             public int KeyOpacity;      // layout 预设：10..100
             public bool PadVisible;     // layout 预设：鼠标垫可见
@@ -73,14 +73,14 @@ namespace KeyDisplay
             return root;
         }
 
-        /// <summary>theme 预设 data：{theme, colors:{panel,border,keyBg,keyFg,pressedBg,pressedFg,pad,dot}}（与 ThemePresetToJson 输出一致）</summary>
+        /// <summary>theme 预设 data：{theme, colors:{panel,border,keyBg,keyFg,pressedBg,pressedFg,pad,dot,accent}}（与 ThemePresetToJson 输出一致；读取侧对缺 accent 的旧预设向后兼容）</summary>
         private static JsonObject ThemeData(PresetEntry p)
         {
             var data = new JsonObject();
             data.SetNamedValue("theme", JsonValue.CreateStringValue(p.Theme ?? "dark"));
             var colors = new JsonObject();
-            string[] keys = { "panel", "border", "keyBg", "keyFg", "pressedBg", "pressedFg", "pad", "dot" };
-            for (int k = 0; k < 8; k++)
+            string[] keys = { "panel", "border", "keyBg", "keyFg", "pressedBg", "pressedFg", "pad", "dot", "accent" };
+            for (int k = 0; k < keys.Length; k++)
             {
                 colors.SetNamedValue(keys[k],
                     JsonValue.CreateStringValue(p.Colors != null && k < p.Colors.Length && p.Colors[k] != null ? p.Colors[k] : ""));
@@ -193,13 +193,13 @@ namespace KeyDisplay
                 if (t == "light" || t == "custom") p.Theme = t;
             }
 
-            p.Colors = new string[8];
+            p.Colors = new string[9];   // 0.9.5：9 槽（第 9 项 accent）；旧预设缺该字段时留空串
             IJsonValue cv = data.GetNamedValue("colors", null);
             if (cv != null && cv.ValueType == JsonValueType.Object)
             {
                 JsonObject colors = cv.GetObject();
-                string[] keys = { "panel", "border", "keyBg", "keyFg", "pressedBg", "pressedFg", "pad", "dot" };
-                for (int k = 0; k < 8; k++)
+                string[] keys = { "panel", "border", "keyBg", "keyFg", "pressedBg", "pressedFg", "pad", "dot", "accent" };
+                for (int k = 0; k < keys.Length; k++)
                 {
                     string s = GetStringValue(colors, keys[k], "");
                     p.Colors[k] = HexColorRegex.IsMatch(s) ? s : "";

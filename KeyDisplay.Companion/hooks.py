@@ -12,6 +12,7 @@ import ctypes.wintypes as wt
 import time
 
 import debuglog
+import metrics
 from state import KEY_ORDER
 
 # --- Win32 常量 -----------------------------------------------------------
@@ -386,6 +387,8 @@ def _handle_raw_input(l_param):
     处理频率限制在 RAW_REPORT_LIMIT（500Hz），跳过超限事件以降低 CPU 开销。
     """
     global _last_raw_ts, _raw_count, _raw_skip, _coord_src, _hidden_delta_logged
+    # 鼠标回报率统计：每个 WM_INPUT 报文都记时间戳（限频前），用于实测报文频率/抖动
+    metrics.record_mouse_report()
     now = time.monotonic()
     if now - _last_raw_ts < 1.0 / RAW_REPORT_LIMIT:
         _raw_skip += 1

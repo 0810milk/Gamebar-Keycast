@@ -2,4 +2,19 @@
     x:Class="KeyDisplay.App"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:local="using:KeyDisplay" />
+    xmlns:local="using:KeyDisplay"
+    xmlns:controls="using:Microsoft.UI.Xaml.Controls">
+
+    <!-- 0.9.4 UI 移植到 Windows 官方 WinUI（Fluent）：
+         XamlControlsResources 合并后，所有标准控件（Button/Slider/ToggleButton/TextBox/
+         ScrollViewer/ProgressBar…）自动使用 WinUI 官方模板与 Fluent 主题资源，
+         外观与 Windows 11 内置应用一致。自绘元素（键帽/鼠标垫/弹层）继续由
+         代码按用户主题色板着色，两者并存不冲突。 -->
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <controls:XamlControlsResources />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

@@ -53,6 +53,7 @@ namespace KeyDisplay
             double h = key.Height;
             if (double.IsNaN(h)) h = key.ActualHeight;
             _keyClipboard = new KeyClipboardData { InternalName = nm, DisplayName = disp, Width = w, Height = h };
+            _keyGroupClipboard = null;   // 0.9.4：单键复制清除组剪贴板，避免空白粘贴时来源冲突
             DiagLog("key copied: " + nm + " disp=" + disp + " size=" + (int)w + "x" + (int)h);
         }
 
@@ -121,10 +122,29 @@ namespace KeyDisplay
             KeyLayer.PointerPressed += KeyLayer_PointerPressed;
         }
 
-        // 键区空白右键：弹空白菜单（粘贴/显示鼠标垫由菜单项提供，0.8.2；不再直接粘贴）
+        // 键区空白点击：右键 → 空白菜单（粘贴/显示鼠标垫）；左键 → 多选模式下退出多选（0.9.4）
         private void KeyLayer_PointerPressed(object sender, PointerRoutedEventArgs e)
         {
-            if (!e.GetCurrentPoint(KeyLayer).Properties.IsRightButtonPressed) return;   // 只响应右键
+            var pt = e.GetCurrentPoint(KeyLayer);
+            if (!pt.Properties.IsRightButtonPressed)
+            {
+                // 0.9.4：多选模式下左键点空白 = 取消全部选择并退出；
+                // 但若刚刚关闭过右键菜单（500ms 内）则忽略——"点空白关菜单"的那一下
+                // 不应顺手把多选模式也取消（用户反馈：右键之后左键会取消多选）
+                if (_multiSelectMode)
+                {
+                    long sinceMenuClose = DateTime.UtcNow.Ticks - _lastKeyMenuCloseTicks;
+                    if (sinceMenuClose < TimeSpan.FromMilliseconds(500).Ticks)
+                    {
+                        DiagLog("multiselect blank-left ignored (menu closed " + (sinceMenuClose / 10000) + "ms ago)");
+                        e.Handled = true;
+                        return;
+                    }
+                    ExitMultiSelectMode("blank left click");
+                    e.Handled = true;
+                }
+                return;   // 左键其余情况不处理
+            }
             if (_dragKey != null || _moveKey != null) return;                           // 拖拽/移动中不弹
             CancelLongPress();
             ShowBlankContextMenu(e.GetCurrentPoint(KeyLayer).Position);

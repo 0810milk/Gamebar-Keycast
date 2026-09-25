@@ -10,7 +10,7 @@
   <Identity
     Name="KeyDisplay.Widget"
     Publisher="CN=KeyDisplay, O=KeyDisplay, C=CN"
-    Version="1.30.0.0" />
+    Version="2.0.0.1" />
 
   <mp:PhoneIdentity PhoneProductId="3c1a7e2d-9b4f-4c6a-b5d2-8e0f1a3d6c21" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
 
@@ -54,6 +54,9 @@
                 <PinningSupported>true</PinningSupported>
                 <ActivateAfterInstall>true</ActivateAfterInstall>
                 <FavoriteAfterInstall>true</FavoriteAfterInstall>
+                <!-- 0.9.5：声明配套的「设置子窗口」（Game Bar 官方 settings widget 机制）：
+                     点设置按钮 → Game Bar 打开独立的设置窗口（与主 widget 生命周期联动） -->
+                <SettingsSupported AppExtensionId="KeyDisplaySettings" />
                 <Window>
                   <AllowForegroundTransparency>true</AllowForegroundTransparency>
                   <Size>
@@ -63,6 +66,34 @@
                     <MinWidth>320</MinWidth>
                     <MaxHeight>533</MaxHeight>
                     <MaxWidth>1067</MaxWidth>
+                  </Size>
+                  <ResizeSupported>
+                    <Horizontal>true</Horizontal>
+                    <Vertical>true</Vertical>
+                  </ResizeSupported>
+                </Window>
+              </GameBarWidget>
+            </uap3:Properties>
+          </uap3:AppExtension>
+        </uap3:Extension>
+        <!-- 0.9.5：设置子窗口（官方 Type="Settings"）——独立窗口、独立尺寸，不出现在主菜单、不可固定 -->
+        <uap3:Extension Category="windows.appExtension">
+          <uap3:AppExtension Name="microsoft.gameBarUIExtension"
+                             Id="KeyDisplaySettings"
+                             DisplayName="按键显示设置"
+                             Description="按键显示小组件的设置"
+                             PublicFolder="GameBar">
+            <uap3:Properties>
+              <GameBarWidget Type="Settings">
+                <Window>
+                  <AllowForegroundTransparency>true</AllowForegroundTransparency>
+                  <Size>
+                    <Height>520</Height>
+                    <Width>900</Width>
+                    <MinHeight>340</MinHeight>
+                    <MinWidth>560</MinWidth>
+                    <MaxHeight>760</MaxHeight>
+                    <MaxWidth>1300</MaxWidth>
                   </Size>
                   <ResizeSupported>
                     <Horizontal>true</Horizontal>

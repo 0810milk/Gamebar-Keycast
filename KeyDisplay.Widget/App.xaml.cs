@@ -16,7 +16,8 @@ namespace KeyDisplay
     {
         public static App Instance { get; private set; }
 
-        private XboxGameBarWidget widget1 = null;
+        private XboxGameBarWidget widget1 = null;          // 主小组件
+        private XboxGameBarWidget settingsWidget = null;   // 0.9.5：设置子窗口（官方 settings widget）
 
         public App()
         {
@@ -46,6 +47,17 @@ namespace KeyDisplay
             }
         }
 
+        /// <summary>0.9.5：关闭设置子窗口（设置页「完成」按钮调用）</summary>
+        public void CloseSettings()
+        {
+            var w = settingsWidget;
+            if (w != null)
+            {
+                try { w.Close(); } catch { }
+                settingsWidget = null;
+            }
+        }
+
         /// <summary>当前 Game Bar 小组件实例（可能为 null，如独立启动）。</summary>
         public XboxGameBarWidget Widget
         {
@@ -66,30 +78,47 @@ namespace KeyDisplay
             }
             if (widgetArgs != null)
             {
-                // 若 IsLaunchActivation 为 true，表示 Game Bar 正在启动小组件的新实例，
-                // 必须新建并持有 XboxGameBarWidget（每次小组件打开都是一个新实例）。
-                // 否则是后续激活，保持既有实例即可。
-                DiagLog("activate launch=" + widgetArgs.IsLaunchActivation);
+                string extId = null;
+                try { extId = widgetArgs.AppExtensionId; } catch { }
+                DiagLog("activate launch=" + widgetArgs.IsLaunchActivation + " ext=" + extId);
                 if (widgetArgs.IsLaunchActivation)
                 {
                     var rootFrame = new Frame();
                     rootFrame.NavigationFailed += OnNavigationFailed;
                     Window.Current.Content = rootFrame;
 
-                    widget1 = new XboxGameBarWidget(
-                        widgetArgs,
-                        Window.Current.CoreWindow,
-                        rootFrame);
-                    try { DiagLog("widget appid=" + widget1.AppExtensionId); } catch { }
-                    rootFrame.Navigate(typeof(Widget1), widget1);
-
-                    Window.Current.Closed += Widget1Window_Closed;
+                    // 0.9.5：按 AppExtensionId 区分主小组件与设置子窗口（官方 settings widget 机制）
+                    if (extId == "KeyDisplaySettings")
+                    {
+                        settingsWidget = new XboxGameBarWidget(
+                            widgetArgs,
+                            Window.Current.CoreWindow,
+                            rootFrame);
+                        rootFrame.Navigate(typeof(SettingsPage), settingsWidget);
+                        Window.Current.Closed += SettingsWindow_Closed;
+                    }
+                    else
+                    {
+                        widget1 = new XboxGameBarWidget(
+                            widgetArgs,
+                            Window.Current.CoreWindow,
+                            rootFrame);
+                        rootFrame.Navigate(typeof(Widget1), widget1);
+                        Window.Current.Closed += Widget1Window_Closed;
+                    }
 
                     Window.Current.Activate();
                 }
             }
         }
 
+        private void SettingsWindow_Closed(object sender, CoreWindowEventArgs e)
+        {
+            settingsWidget = null;
+            Window.Current.Closed -= SettingsWindow_Closed;
+        }
+
+        // 主小组件窗口关闭：释放引用（原实现，勿删——OnActivated 里挂接）
         private void Widget1Window_Closed(object sender, CoreWindowEventArgs e)
         {
             widget1 = null;

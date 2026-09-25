@@ -115,6 +115,10 @@
     <Compile Include="Widget1.KeyCopyPaste.cs" />
     <Compile Include="Widget1.KeyRename.cs" />
     <Compile Include="Widget1.Anim.cs" />
+    <Compile Include="Widget1.MultiSelect.cs" />
+    <Compile Include="SettingsPage.xaml.cs">
+      <DependentUpon>SettingsPage.xaml</DependentUpon>
+    </Compile>
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
@@ -185,8 +189,18 @@
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </Page>
+    <Page Include="SettingsPage.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
   </ItemGroup>
   <ItemGroup>
+    <!-- 0.9.4 UI 移植：WinUI 2（UWP 兼容的 Fluent 控件库，注意不是 WinUI 3）
+         提供官方控件样式（Button/Slider/ToggleButton/TextBox…）与 Fluent 设计资源；
+         在 App.xaml 合并 XamlControlsResources 后，全部标准控件自动获得官方外观。 -->
+    <PackageReference Include="Microsoft.UI.Xaml">
+      <Version>2.8.6</Version>
+    </PackageReference>
     <PackageReference Include="Microsoft.Gaming.XboxGameBar">
       <Version>7.2.240903001</Version>
     </PackageReference>

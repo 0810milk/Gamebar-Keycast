@@ -1,0 +1,384 @@
+﻿<Page
+    x:Class="KeyDisplay.SettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:local="using:KeyDisplay"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Background="Transparent"
+    FontFamily="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI"
+    mc:Ignorable="d">
+
+    <!-- 0.9.5：独立的设置子窗口（Game Bar 官方 settings widget）
+         全新 UI：左侧分类导航 + 右侧内容卡片 + 底部「完成」按钮
+         数据与主小组件共享 ApplicationData.LocalSettings，写入后 SignalDataChanged() 通知主窗口实时应用 -->
+    <Grid x:Name="RootGrid">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="196"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- ============ 左侧导航 ============ -->
+        <Border x:Name="NavPane" Grid.Column="0" BorderThickness="0,0,1,0">
+            <StackPanel Padding="10,18,10,10">
+                <TextBlock x:Name="NavTitle" Text="设置" FontSize="20" FontWeight="SemiBold" Margin="10,0,0,14"/>
+                <Border x:Name="NavTheme" Height="38" CornerRadius="6" Margin="0,2" Tag="theme" Tapped="Nav_Click">
+                    <TextBlock x:Name="NavThemeText" Text="主题" FontSize="14" Margin="12,0,0,0" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                </Border>
+                <Border x:Name="NavAdv" Height="38" CornerRadius="6" Margin="0,2" Tag="adv" Tapped="Nav_Click">
+                    <TextBlock x:Name="NavAdvText" Text="参数" FontSize="14" Margin="12,0,0,0" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                </Border>
+                <Border x:Name="NavColor" Height="38" CornerRadius="6" Margin="0,2" Tag="color" Tapped="Nav_Click">
+                    <TextBlock x:Name="NavColorText" Text="颜色" FontSize="14" Margin="12,0,0,0" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                </Border>
+                <Border x:Name="NavFont" Height="38" CornerRadius="6" Margin="0,2" Tag="font" Tapped="Nav_Click">
+                    <TextBlock x:Name="NavFontText" Text="字体" FontSize="14" Margin="12,0,0,0" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                </Border>
+                <Border x:Name="NavLayout" Height="38" CornerRadius="6" Margin="0,2" Tag="layout" Tapped="Nav_Click">
+                    <TextBlock x:Name="NavLayoutText" Text="布局" FontSize="14" Margin="12,0,0,0" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                </Border>
+                <Border x:Name="NavPreset" Height="38" CornerRadius="6" Margin="0,2" Tag="preset" Tapped="Nav_Click">
+                    <TextBlock x:Name="NavPresetText" Text="预设" FontSize="14" Margin="12,0,0,0" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                </Border>
+                <Border x:Name="NavAbout" Height="38" CornerRadius="6" Margin="0,2" Tag="about" Tapped="Nav_Click">
+                    <TextBlock x:Name="NavAboutText" Text="关于" FontSize="14" Margin="12,0,0,0" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                </Border>
+            </StackPanel>
+        </Border>
+
+        <!-- ============ 右侧内容 ============ -->
+        <Grid Grid.Column="1">
+            <ScrollViewer Padding="24,18,24,18" VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                    <TextBlock x:Name="PageTitle" Text="主题" FontSize="22" FontWeight="SemiBold"/>
+                    <TextBlock x:Name="PageDesc" Text="选择配色方案" FontSize="12" Opacity="0.7" Margin="0,4,0,0"/>
+
+                    <!-- 主题 -->
+                    <StackPanel x:Name="SecTheme" Margin="0,18,0,0">
+                        <Border x:Name="ThemeCard" CornerRadius="8" BorderThickness="1" Padding="16">
+                            <StackPanel>
+                                <TextBlock x:Name="ThemeCardTitle" Text="配色方案" FontSize="15" FontWeight="SemiBold"/>
+                                <TextBlock x:Name="ThemeCardDesc" Text="选择内置主题；也可以到「颜色」页自定义 8 个色槽（改色后自动切到自定义）" FontSize="12" Opacity="0.7" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                                <Grid Margin="0,14,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <Button x:Name="ThDark" Grid.Row="0" Grid.Column="0" Height="34" Margin="0,0,6,0" HorizontalAlignment="Stretch" Content="黑" Tag="dark" Click="Theme_Click"/>
+                                    <Button x:Name="ThGray" Grid.Row="0" Grid.Column="1" Height="34" Margin="3,0,3,0" HorizontalAlignment="Stretch" Content="灰" Tag="gray" Click="Theme_Click"/>
+                                    <Button x:Name="ThLight" Grid.Row="0" Grid.Column="2" Height="34" Margin="6,0,0,0" HorizontalAlignment="Stretch" Content="白" Tag="light" Click="Theme_Click"/>
+                                    <Button x:Name="ThPink" Grid.Row="1" Grid.Column="0" Height="34" Margin="0,8,6,0" HorizontalAlignment="Stretch" Content="粉" Tag="pink" Click="Theme_Click"/>
+                                    <Button x:Name="ThBlue" Grid.Row="1" Grid.Column="1" Height="34" Margin="3,8,3,0" HorizontalAlignment="Stretch" Content="蓝" Tag="blue" Click="Theme_Click"/>
+                                    <Button x:Name="ThCustom" Grid.Row="1" Grid.Column="2" Height="34" Margin="6,8,0,0" HorizontalAlignment="Stretch" Content="自定义" Tag="custom" Click="Theme_Click"/>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- 参数（0.9.5：底层实测数据 + 无害开关 + 改不了项的入口） -->
+                    <StackPanel x:Name="SecAdv" Visibility="Collapsed" Margin="0,18,0,0">
+                        <Border x:Name="AdvSwitchCard" CornerRadius="8" BorderThickness="1" Padding="16" Margin="0,14,0,0">
+                            <StackPanel>
+                                <TextBlock x:Name="AdvSwitchTitle" Text="无害开关" FontSize="15" FontWeight="SemiBold"/>
+                                <TextBlock x:Name="AdvSwitchDesc" Text="只影响本工具自身（以及系统的「提高指针精确度」），不会改动任何游戏设置。" FontSize="12" Opacity="0.7" Margin="0,4,0,0" TextWrapping="Wrap"/>
+
+                                <TextBlock x:Name="AdvPushLbl" Text="推送频率（状态刷新上限）" FontSize="13" Margin="0,14,0,0"/>
+                                <Grid Margin="0,6,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <Button x:Name="AdvHz60" Grid.Row="0" Grid.Column="0" Height="30" Margin="0,0,3,0" FontSize="12" MinWidth="0" HorizontalAlignment="Stretch" Content="60" Tag="60" Click="AdvHz_Click"/>
+                                    <Button x:Name="AdvHz120" Grid.Row="0" Grid.Column="1" Height="30" Margin="3,0,3,0" FontSize="12" MinWidth="0" HorizontalAlignment="Stretch" Content="120" Tag="120" Click="AdvHz_Click"/>
+                                    <Button x:Name="AdvHz144" Grid.Row="0" Grid.Column="2" Height="30" Margin="3,0,3,0" FontSize="12" MinWidth="0" HorizontalAlignment="Stretch" Content="144" Tag="144" Click="AdvHz_Click"/>
+                                    <Button x:Name="AdvHz165" Grid.Row="0" Grid.Column="3" Height="30" Margin="3,0,0,0" FontSize="12" MinWidth="0" HorizontalAlignment="Stretch" Content="165" Tag="165" Click="AdvHz_Click"/>
+                                    <Button x:Name="AdvHz240" Grid.Row="1" Grid.Column="0" Height="30" Margin="0,6,3,0" FontSize="12" MinWidth="0" HorizontalAlignment="Stretch" Content="240" Tag="240" Click="AdvHz_Click"/>
+                                    <Button x:Name="AdvHz360" Grid.Row="1" Grid.Column="1" Height="30" Margin="3,6,3,0" FontSize="12" MinWidth="0" HorizontalAlignment="Stretch" Content="360" Tag="360" Click="AdvHz_Click"/>
+                                    <Button x:Name="AdvHz480" Grid.Row="1" Grid.Column="2" Height="30" Margin="3,6,3,0" FontSize="12" MinWidth="0" HorizontalAlignment="Stretch" Content="480" Tag="480" Click="AdvHz_Click"/>
+                                </Grid>
+
+                                <Grid Margin="0,12,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock x:Name="AdvFollowLbl" Grid.Column="0" Text="推送频率跟随显示器刷新率" FontSize="13" VerticalAlignment="Center"/>
+                                    <Button x:Name="AdvFollowBtn" Grid.Column="1" MinWidth="88" Height="32" Content="关" Click="AdvFollow_Click"/>
+                                </Grid>
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock x:Name="AdvLowLatLbl" Grid.Column="0" Text="低延迟模式（进程优先级 + 1ms 定时器精度）" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                                    <Button x:Name="AdvLowLatBtn" Grid.Column="1" MinWidth="88" Height="32" Content="开" Click="AdvLowLat_Click"/>
+                                </Grid>
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock x:Name="AdvAccelLbl" Grid.Column="0" Text="鼠标加速（系统的「提高指针精确度」）" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                                    <Button x:Name="AdvAccelBtn" Grid.Column="1" MinWidth="88" Height="32" Content="关" Click="AdvAccel_Click"/>
+                                </Grid>
+
+                                <!-- 操作反馈行（原来在实测数据卡里，现在跟着开关走） -->
+                                <TextBlock x:Name="AdvIoStatus" Text="" FontSize="12" Margin="0,10,0,0" TextWrapping="Wrap"/>
+
+                                <!-- 0.9.5：鼠标速度 —— 鼠标点在鼠标垫上的移动倍率。1.0× = 屏幕与垫面 1:1；
+                                     调大后鼠标只需移动更少距离，点就会碰到垫面边缘（游戏内隐藏/锁定光标时更好用） -->
+                                <TextBlock x:Name="AdvSpeedTitle" Text="鼠标速度" FontSize="15" FontWeight="SemiBold" Margin="0,16,0,0"/>
+                                <TextBlock x:Name="AdvSpeedDesc" Text="鼠标点（鼠标垫上的光标）移动倍率：1.0× 等于屏幕范围与垫面一一对应；调大后移动更少距离就能碰到垫面边缘，游戏内隐藏/锁定光标时更好用。" FontSize="12" Opacity="0.7" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                                <Grid Margin="0,8,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Slider x:Name="MouseSpeedSlider" Grid.Column="0" Minimum="0.5" Maximum="4" StepFrequency="0.1" ValueChanged="MouseSpeed_Changed"/>
+                                    <TextBlock x:Name="MouseSpeedVal" Grid.Column="1" Text="1.0×" FontSize="13" Margin="12,0,0,0" VerticalAlignment="Center" MinWidth="46"/>
+                                </Grid>
+                                <Button x:Name="MouseSpeedResetBtn" Height="30" Margin="0,6,0,0" HorizontalAlignment="Left" MinWidth="112"
+                                        FontSize="12" Content="恢复 1.0×" Click="MouseSpeedReset_Click"/>
+                            </StackPanel>
+                        </Border>
+
+                    </StackPanel>
+                    <!-- 颜色 -->
+                    <StackPanel x:Name="SecColor" Visibility="Collapsed" Margin="0,18,0,0">
+                        <Border x:Name="ColorCard" CornerRadius="8" BorderThickness="1" Padding="16">
+                            <StackPanel>
+                                <TextBlock x:Name="ColorCardTitle" Text="自定义颜色" FontSize="15" FontWeight="SemiBold"/>
+                                <TextBlock x:Name="ColorCardDesc" Text="「面板」「强调色」只作用于本设置窗口（面板=窗口底色与卡片、强调色=选中高亮），默认跟随当前主题，切换主题会自动同步；其余色槽作用于小组件按键区，改色会切到「自定义」主题。点右侧色块展开调色盘，拖动实时生效。" FontSize="12" Opacity="0.7" Margin="0,4,0,0" TextWrapping="Wrap"/>
+
+                                <!-- 0.9.5：调色盘位置自适应 —— 卡片够宽时并排显示在颜色列表右侧；
+                                     窗口变窄时自动改排在列表下方（不再横向滚动，避免色块/面板被推出可视区），
+                                     并按可用宽等比缩小（下限 0.6 倍），保证任何窗口尺寸下都看全、可点 -->
+                                <Grid Margin="0,14,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <StackPanel x:Name="SlotRowHost" Grid.Row="0" Grid.Column="0" VerticalAlignment="Top"/>
+                                    <!-- 用 Viewbox 自动等比缩放（只在放不下时缩小，永不放大）：不需要手算比例，也不会产生布局自反馈 -->
+                                    <Viewbox x:Name="PickerViewbox" Grid.Row="0" Grid.Column="1" VerticalAlignment="Top" HorizontalAlignment="Left"
+                                             Stretch="Uniform" StretchDirection="DownOnly" Margin="16,0,0,0">
+                                        <Border x:Name="PickerPanel" Width="292" CornerRadius="10" BorderThickness="1" Padding="14"
+                                                Visibility="Collapsed">
+                                            <StackPanel x:Name="PickerBody"/>
+                                        </Border>
+                                    </Viewbox>
+                                </Grid>
+
+                                <Button x:Name="ResetColorBtn" Height="32" Margin="0,16,0,0" HorizontalAlignment="Stretch"
+                                        Content="重置自定义色彩" Click="ResetCustomColor_Click"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                    <!-- 字体 -->
+                    <StackPanel x:Name="SecFont" Visibility="Collapsed" Margin="0,18,0,0">
+                        <Border x:Name="FontCard" CornerRadius="8" BorderThickness="1" Padding="16">
+                            <StackPanel>
+                                <TextBlock x:Name="FontCardTitle" Text="按键显示名" FontSize="15" FontWeight="SemiBold"/>
+                                <TextBlock x:Name="FontCardDesc" Text="第一项「跟随系统」使用 Windows 11 官方 UI 字体；下面可选 17 种常用字体。字号按号数显示（实际字号 = 号数 + 1），粗细 1-10 越右越粗。" FontSize="12" Opacity="0.7" Margin="0,4,0,0" TextWrapping="Wrap"/>
+
+                                <Grid Margin="0,14,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/><ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <Border x:Name="F0" Grid.Row="0" Grid.Column="0" Height="30" CornerRadius="4" BorderThickness="1" Margin="0,0,4,2" Tag="system" Tapped="Font_Click"><TextBlock Text="跟随系统" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                    <Border x:Name="F1" Grid.Row="0" Grid.Column="1" Height="30" CornerRadius="4" BorderThickness="1" Margin="4,0,0,2" Tag="Microsoft YaHei" Tapped="Font_Click"><TextBlock Text="微软雅黑" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                    <Border x:Name="F2" Grid.Row="1" Grid.Column="0" Height="30" CornerRadius="4" BorderThickness="1" Margin="0,2,4,2" Tag="DengXian" Tapped="Font_Click"><TextBlock Text="等线" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                    <Border x:Name="F3" Grid.Row="1" Grid.Column="1" Height="30" CornerRadius="4" BorderThickness="1" Margin="4,2,0,2" Tag="SimHei" Tapped="Font_Click"><TextBlock Text="黑体" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                    <Border x:Name="F4" Grid.Row="2" Grid.Column="0" Height="30" CornerRadius="4" BorderThickness="1" Margin="0,2,4,2" Tag="SimSun" Tapped="Font_Click"><TextBlock Text="宋体" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                    <Border x:Name="F5" Grid.Row="2" Grid.Column="1" Height="30" CornerRadius="4" BorderThickness="1" Margin="4,2,0,2" Tag="KaiTi" Tapped="Font_Click"><TextBlock Text="楷体" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                    <Border x:Name="F6" Grid.Row="3" Grid.Column="0" Height="30" CornerRadius="4" BorderThickness="1" Margin="0,2,4,2" Tag="FangSong" Tapped="Font_Click"><TextBlock Text="仿宋" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                    <Border x:Name="F7" Grid.Row="3" Grid.Column="1" Height="30" CornerRadius="4" BorderThickness="1" Margin="4,2,0,2" Tag="YouYuan" Tapped="Font_Click"><TextBlock Text="幼圆" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                    <Border x:Name="F8" Grid.Row="4" Grid.Column="0" Height="30" CornerRadius="4" BorderThickness="1" Margin="0,2,4,2" Tag="Microsoft YaHei UI" Tapped="Font_Click"><TextBlock Text="雅黑 UI" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                    <Border x:Name="F9" Grid.Row="4" Grid.Column="1" Height="30" CornerRadius="4" BorderThickness="1" Margin="4,2,0,2" Tag="Segoe UI" Tapped="Font_Click"><TextBlock Text="Segoe UI" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                    <Border x:Name="F10" Grid.Row="5" Grid.Column="0" Height="30" CornerRadius="4" BorderThickness="1" Margin="0,2,4,2" Tag="Segoe UI Variable Display" Tapped="Font_Click"><TextBlock Text="Segoe Var Display" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                    <Border x:Name="F11" Grid.Row="5" Grid.Column="1" Height="30" CornerRadius="4" BorderThickness="1" Margin="4,2,0,2" Tag="Calibri" Tapped="Font_Click"><TextBlock Text="Calibri" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                    <Border x:Name="F12" Grid.Row="6" Grid.Column="0" Height="30" CornerRadius="4" BorderThickness="1" Margin="0,2,4,2" Tag="Arial" Tapped="Font_Click"><TextBlock Text="Arial" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                    <Border x:Name="F13" Grid.Row="6" Grid.Column="1" Height="30" CornerRadius="4" BorderThickness="1" Margin="4,2,0,2" Tag="Tahoma" Tapped="Font_Click"><TextBlock Text="Tahoma" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                    <Border x:Name="F14" Grid.Row="7" Grid.Column="0" Height="30" CornerRadius="4" BorderThickness="1" Margin="0,2,4,2" Tag="Verdana" Tapped="Font_Click"><TextBlock Text="Verdana" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                    <Border x:Name="F15" Grid.Row="7" Grid.Column="1" Height="30" CornerRadius="4" BorderThickness="1" Margin="4,2,0,2" Tag="Consolas" Tapped="Font_Click"><TextBlock Text="Consolas" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                    <Border x:Name="F16" Grid.Row="8" Grid.Column="0" Height="30" CornerRadius="4" BorderThickness="1" Margin="0,2,4,0" Tag="Cascadia Code" Tapped="Font_Click"><TextBlock Text="Cascadia Code" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                    <Border x:Name="F17" Grid.Row="8" Grid.Column="1" Height="30" CornerRadius="4" BorderThickness="1" Margin="4,2,0,0" Tag="Bahnschrift" Tapped="Font_Click"><TextBlock Text="Bahnschrift" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                </Grid>
+
+                                <TextBlock x:Name="FontSizeLbl" Text="字体大小（号数）" FontSize="13" Margin="0,18,0,0"/>
+                                <Grid Margin="0,6,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Slider x:Name="FontSizeSlider2" Grid.Column="0" Minimum="8" Maximum="30" StepFrequency="1" ValueChanged="FontSize_Changed"/>
+                                    <TextBlock x:Name="FontSizeVal" Grid.Column="1" Text="10" FontSize="13" Margin="12,0,0,0" VerticalAlignment="Center" MinWidth="28"/>
+                                </Grid>
+
+                                <TextBlock x:Name="FontWeightLbl" Text="字体粗细（1-10，数字越大越粗）" FontSize="13" Margin="0,14,0,0"/>
+                                <Grid Margin="0,6,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Slider x:Name="FontWeightSlider2" Grid.Column="0" Minimum="1" Maximum="10" StepFrequency="1" ValueChanged="FontWeight_Changed"/>
+                                    <TextBlock x:Name="FontWeightVal" Grid.Column="1" Text="5 / 10" FontSize="13" Margin="12,0,0,0" VerticalAlignment="Center" MinWidth="52"/>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- 布局 -->
+                    <StackPanel x:Name="SecLayout" Visibility="Collapsed" Margin="0,18,0,0">
+                        <Border x:Name="LayoutCard" CornerRadius="8" BorderThickness="1" Padding="16">
+                            <StackPanel>
+                                <TextBlock x:Name="LayoutCardTitle" Text="显示与布局" FontSize="15" FontWeight="SemiBold"/>
+
+                                <TextBlock x:Name="OpacityLbl" Text="按键透明度" FontSize="13" Margin="0,14,0,0"/>
+                                <Grid Margin="0,6,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Slider x:Name="OpacitySlider2" Grid.Column="0" Minimum="10" Maximum="100" StepFrequency="1" ValueChanged="Opacity_Changed"/>
+                                    <TextBlock x:Name="OpacityVal" Grid.Column="1" Text="100" FontSize="13" Margin="12,0,0,0" VerticalAlignment="Center" MinWidth="34"/>
+                                </Grid>
+
+                                <Grid Margin="0,16,0,0">
+                                    <TextBlock x:Name="PadLbl" Text="显示鼠标垫" FontSize="13" VerticalAlignment="Center"/>
+                                    <Button x:Name="PadBtn" MinWidth="88" Height="32" HorizontalAlignment="Right" Content="显示" Click="PadToggle_Click"/>
+                                </Grid>
+
+                                <Grid Margin="0,12,0,0">
+                                    <TextBlock x:Name="LockLbl" Text="锁定布局" FontSize="13" VerticalAlignment="Center"/>
+                                    <Button x:Name="LockBtn" MinWidth="88" Height="32" HorizontalAlignment="Right" Content="开" Click="LockToggle_Click"/>
+                                </Grid>
+
+                                <!-- 0.9.5：按键区背景是否全透明（键位直接浮在游戏画面上，没有面板底色与描边） -->
+                                <Grid Margin="0,12,0,0">
+                                    <TextBlock x:Name="PanelBgLbl" Text="按键区背景" FontSize="13" VerticalAlignment="Center"/>
+                                    <Button x:Name="PanelBgBtn" MinWidth="88" Height="32" HorizontalAlignment="Right" Content="全透明" Click="PanelBgToggle_Click"/>
+                                </Grid>
+
+                                <Button x:Name="ResetLayoutBtn" Height="32" Margin="0,18,0,0" HorizontalAlignment="Stretch"
+                                        Content="重置按键布局（恢复默认布局与按键名）" Click="ResetLayout_Click"/>
+
+                                <!-- 0.9.5：添加按键（87 配列键盘，由代码生成）——点任意键即添加为自定义按键 -->
+                                <Border x:Name="AddKeyToggle" Height="38" CornerRadius="6" BorderThickness="1" Margin="0,18,0,0"
+                                        Tapped="AddKeyToggle_Click">
+                                    <Grid>
+                                        <TextBlock x:Name="AddKeyToggleText" Text="添加按键" FontSize="14" Margin="12,0,0,0" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                                        <TextBlock x:Name="AddKeyToggleArrow" Text="&#x25BC;" FontSize="14" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,12,0" FontFamily="Segoe UI Symbol"/>
+                                    </Grid>
+                                </Border>
+                                <TextBlock x:Name="AddKeyHint" Text="点击下方键盘上的任意按键，把它添加为可显示/点亮的自定义按键。" FontSize="12" Opacity="0.7" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                                <ScrollViewer x:Name="KeyPickerScroll2" Visibility="Collapsed" VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Auto" MaxHeight="240" Margin="0,8,0,0">
+                                    <StackPanel x:Name="KeyPickerHost"/>
+                                </ScrollViewer>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- 预设 -->
+                    <StackPanel x:Name="SecPreset" Visibility="Collapsed" Margin="0,18,0,0">
+                        <Border x:Name="PresetCard" CornerRadius="8" BorderThickness="1" Padding="16">
+                            <StackPanel>
+                                <TextBlock x:Name="PresetCardTitle" Text="预设" FontSize="15" FontWeight="SemiBold"/>
+                                <TextBlock x:Name="PresetCardDesc" Text="把当前的主题配色 / 布局保存为预设，随时一键套用。预设文件保存在 %LOCALAPPDATA%\KeyDisplay\presets.json。" FontSize="12" Opacity="0.7" Margin="0,6,0,0" TextWrapping="Wrap"/>
+
+                                <!-- 0.9.5：导入按钮放在卡片最上方（原来在最底部，窗口一矮就滚出可视区，用户以为"没有这个按钮"）
+                                     左：从剪贴板导入（粘贴别人发来的 JSON）；右：文件导入（选 .json 文件） -->
+                                <Grid Margin="0,14,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/><ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Button x:Name="ImportClipboardBtn" Grid.Column="0" Height="32" Margin="0,0,4,0" HorizontalAlignment="Stretch"
+                                            FontSize="12" Content="从剪贴板导入" Click="ImportPreset_Click"/>
+                                    <Button x:Name="ImportFileBtn" Grid.Column="1" Height="32" Margin="4,0,0,0" HorizontalAlignment="Stretch"
+                                            FontSize="12" Content="文件导入" Click="ImportPresetFromFile_Click"/>
+                                </Grid>
+                                <TextBlock x:Name="PresetIoHint" Text="导入：左边粘贴别人发来的 JSON 文本，右边选择 .json 预设文件。每条预设右侧可「导出至粘贴板」或「导出」成 .json 文件。" FontSize="12" Opacity="0.7" Margin="0,6,0,0" TextWrapping="Wrap"/>
+
+                                <!-- 状态/反馈紧跟操作区，任何操作都在这里立刻回显 -->
+                                <TextBlock x:Name="PresetStatus" Text="" FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap"/>
+
+                                <TextBlock x:Name="PresetNameLbl" Text="预设名称" FontSize="13" Margin="0,16,0,0"/>
+                                <TextBox x:Name="PresetNameBox" FontSize="13" Margin="0,6,0,0" PlaceholderText="例如：我的配置"/>
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/><ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Button x:Name="SaveThemePresetBtn" Grid.Column="0" Height="32" Margin="0,0,4,0" HorizontalAlignment="Stretch"
+                                            Content="保存当前主题" Click="SaveThemePreset_Click"/>
+                                    <Button x:Name="SaveLayoutPresetBtn" Grid.Column="1" Height="32" Margin="4,0,0,0" HorizontalAlignment="Stretch"
+                                            Content="保存当前布局" Click="SaveLayoutPreset_Click"/>
+                                </Grid>
+
+
+
+                                <TextBlock x:Name="ThemePresetLbl" Text="主题预设" FontSize="13" Margin="0,18,0,0"/>
+                                <StackPanel x:Name="ThemePresetList" Margin="0,6,0,0"/>
+                                <TextBlock x:Name="LayoutPresetLbl" Text="布局预设" FontSize="13" Margin="0,16,0,0"/>
+                                <StackPanel x:Name="LayoutPresetList" Margin="0,6,0,0"/>
+
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- 关于 -->
+                    <StackPanel x:Name="SecAbout" Visibility="Collapsed" Margin="0,18,0,0">
+                        <Border x:Name="AboutCard" CornerRadius="8" BorderThickness="1" Padding="16">
+                            <StackPanel>
+                                <TextBlock x:Name="AboutTitle" Text="按键显示（KeyDisplay）" FontSize="15" FontWeight="SemiBold"/>
+
+                                <!-- 0.9.5：作者信息（头像 + 名字） -->
+                                <Grid Margin="0,14,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Border x:Name="AvatarFrame" Width="58" Height="58" CornerRadius="29" BorderThickness="1" VerticalAlignment="Top">
+                                        <Ellipse x:Name="AvatarEllipse" Width="56" Height="56"/>
+                                    </Border>
+                                    <StackPanel Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center">
+                                        <TextBlock x:Name="AuthorNameText" Text="作者：恐龙milk" FontSize="15" FontWeight="SemiBold"/>
+                                        <TextBlock x:Name="AuthorDescText" Text="项目作者 / 维护者 · 反馈与建议欢迎到仓库提 Issue" FontSize="12" Opacity="0.7" Margin="0,5,0,0" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </Grid>
+
+                                <TextBlock x:Name="AboutVerText" Text="版本 0.9.5" FontSize="12" Opacity="0.7" Margin="0,14,0,0"/>
+                                <TextBlock x:Name="AboutDesc" Text="在 Windows Game Bar 中实时显示键盘与鼠标按键状态（键位点亮 + 鼠标垫光标）。1.0.0 中秋版本：全新设置窗口、参数页与鼠标速度、按键区背景全透明。" FontSize="12" Opacity="0.7" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                                <TextBlock x:Name="AboutRepo" Text="开源仓库：github.com/0810milk/Gamebar-Keycast" FontSize="12" Opacity="0.7" Margin="0,10,0,0" TextWrapping="Wrap"/>
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/><ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Button x:Name="CopyRepoBtn" Grid.Column="0" Height="32" Margin="0,0,4,0" HorizontalAlignment="Stretch"
+                                            Content="复制仓库链接" Click="CopyRepo_Click"/>
+                                    <Button x:Name="OpenRepoBtn" Grid.Column="1" Height="32" Margin="4,0,0,0" HorizontalAlignment="Stretch"
+                                            Content="复制 QQ 群链接" Click="CopyQq_Click"/>
+                                </Grid>
+                                <TextBlock x:Name="AboutTip" Text="" FontSize="12" Opacity="0.8" Margin="0,10,0,0" TextWrapping="Wrap"/>
+                                <TextBlock x:Name="AboutTech" Text="技术栈：UWP（WinUI 2）+ 桌面伴生进程（命名管道 240Hz 状态推送）" FontSize="12" Opacity="0.7" Margin="0,12,0,0" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+
+
+        </Grid>
+
+    </Grid>
+</Page>

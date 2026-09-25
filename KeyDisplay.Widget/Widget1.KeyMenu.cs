@@ -80,9 +80,24 @@ namespace KeyDisplay
         // 动作闭包在菜单项点击时才执行，故先取 _ctxKey 快照再关菜单。
         private void ShowKeyContextMenu(Border key, Point layerPos)
         {
+            // 0.9.4 多选模式：右键**只负责弹出批量菜单**，不改变选择——
+            // 选择的唯一方式是左键单击（用户明确要求：进入多选后到其他按键应该是左键）
+            if (_multiSelectMode)
+            {
+                ShowMultiSelectMenu(layerPos);
+                return;
+            }
             _ctxKey = key;
             CancelLongPress();   // 打开菜单时指针仍按在键上，先取消长按计时避免残留
             KeyMenuItems.Children.Clear();
+
+            // 0.9.4 多选入口：进入多选模式，并把当前右键的这个键直接选中（第一个选中项）
+            AddMenuItem("多选", () =>
+            {
+                var k = _ctxKey;
+                CloseKeyContextMenu();
+                EnterMultiSelectMode(k);
+            });
 
             // 删除：复用 DeleteConfirmPanel 三段式确认框（与 0.8.1 前行为一致），仅自定义键可删
             AddMenuItem("删除", () =>
@@ -95,6 +110,7 @@ namespace KeyDisplay
                     if (!string.IsNullOrEmpty(nm) && nm != "?" && nm != "Pad")
                     {
                         _deleteConfirmKey = k;
+                        _multiDeletePending = false;
                         DeleteConfirmText.Text = "删除控件 " + nm + " ？";
                         DeleteConfirmPanel.Visibility = Visibility.Visible;
                         FadeIn(DeleteConfirmPanel);   // 0.8.2 弹层淡入
@@ -144,16 +160,30 @@ namespace KeyDisplay
             CancelLongPress();
             _blankPos = layerPos;
             KeyMenuItems.Children.Clear();
-            bool paste = _keyClipboard != null;
+            // 0.9.4 粘贴来源优先级（用户用法：多选后直接在空白处粘贴，无需先点"复制"）：
+            //   ① 当前多选集合（多选模式且已选 ≥1）→ 粘贴这些按键（保留相对布局）
+            //   ② 组剪贴板（此前"复制（N 个）"的结果）
+            //   ③ 单键剪贴板（单个"复制"的结果）
+            int selCount = _multiSelectMode ? _selectedKeys.Count : 0;
+            bool hasGroup = _keyGroupClipboard != null && _keyGroupClipboard.Count > 0;
+            bool hasSingle = _keyClipboard != null;
+            bool paste = selCount > 0 || hasGroup || hasSingle;
             bool showpad = !_padVisible;
             if (!paste && !showpad) return;
 
-            // 粘贴：位置用右键时的 _blankPos（而非菜单点击位置）
-            if (paste) AddMenuItem("粘贴", () =>
+            if (paste)
             {
-                CloseKeyContextMenu();
-                PasteKeyAt(_blankPos);
-            });
+                string label = selCount > 0 ? ("粘贴选中的 " + selCount + " 个按键")
+                    : hasGroup ? ("粘贴（" + _keyGroupClipboard.Count + " 个）")
+                    : "粘贴";
+                AddMenuItem(label, () =>
+                {
+                    CloseKeyContextMenu();
+                    if (selCount > 0) PasteSelectionAt(_blankPos);
+                    else if (hasGroup) PasteGroupAt(_blankPos);
+                    else PasteKeyAt(_blankPos);
+                });
+            }
 
             // 显示鼠标垫（实现位于 Widget1.xaml.cs，签名 private void ShowPad()）
             if (showpad) AddMenuItem("显示鼠标垫", () =>
@@ -166,11 +196,12 @@ namespace KeyDisplay
             DiagLog("blank menu open: paste=" + paste + " showpad=" + showpad);
         }
 
-        // 关闭右键菜单：隐藏覆盖层并清空当前按键
+        // 关闭右键菜单：隐藏覆盖层并清空当前按键（记录关闭时刻供多选防误触）
         private void CloseKeyContextMenu()
         {
             KeyMenuPanel.Visibility = Visibility.Collapsed;
             _ctxKey = null;
+            _lastKeyMenuCloseTicks = DateTime.UtcNow.Ticks;
         }
 
         // 点遮罩（菜单框外）：关闭菜单

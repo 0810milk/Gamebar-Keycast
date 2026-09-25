@@ -48,6 +48,8 @@ namespace KeyDisplay
             string nm = NameOf(key);
             if (string.IsNullOrEmpty(nm) || nm == "Pad" || nm == "?") return;
             _renameKey = key;
+            _multiRenameMode = false;                     // 0.9.4：单键改名，清除批量语义
+            RenameTitle.Text = "修改显示名";
             // 0.8.2：打开前刷新配色（改名面板背板/边框/文字随主题；此前遗漏导致透明无背板）
             try { ApplySettingsColors(); } catch { }
             FadeIn(RenamePanel);   // 0.8.2 弹层淡入
@@ -75,6 +77,15 @@ namespace KeyDisplay
                     newText = newText.Substring(0, 12);
                     if (newText.Length > 0 && char.IsHighSurrogate(newText[newText.Length - 1]))
                         newText = newText.Substring(0, newText.Length - 1);   // 防御：截断 12 字符
+                }
+
+                // 0.9.4 多选批量改名：所有选中键统一改成该显示名（用户要求：不加序号）
+                if (_multiRenameMode)
+                {
+                    RenamePanel.Visibility = Visibility.Collapsed;
+                    _multiRenameMode = false;
+                    MultiRenameApply(newText);
+                    return;
                 }
 
                 Border b = _renameKey;
