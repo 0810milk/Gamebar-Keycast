@@ -328,11 +328,14 @@ namespace KeyDisplay
 
         // 首次启动初始化默认布局：仅当用户从未自定义过布局（无 Layout_* 键）时，把内置默认预设写入持久化。
         // 只写持久化不重建 UI——构造函数场景由后续 Restore* 恢复链应用；重置场景由调用方补重建。
-        // 0.9.5：内置默认鼠标垫（宽度沿用发布值 223.59，高度按本机屏幕比例在首帧重算）。
-        // 注意：不再套用自带的"内置默认布局预设"——那份 JSON 的键位偏移是按 0.7.x 时代的另一套
-        // 基准算的（例如 Shift ty=-54、Space tx=+113/ty=-52），叠加到现在的 XAML 基准位置上会互相
-        // 重叠，用户点"重置按键布局"就会看到布局乱掉。现在重置 = 清掉用户自定义 + 回到 XAML 内置布局。
+        // 0.9.5：内置默认鼠标垫 = 发布默认（宽 223.59、位置 (94,0)，高度按本机屏幕比例在首帧重算）。
+        // 注意：键位不再套用上面那份内置预设（它的偏移基于 0.7.x 的另一套基准，叠到当前 XAML 基准会重叠），
+        // 但鼠标垫的尺寸与位置必须沿用发布值——否则会掉回 XAML 的 80×80(=1:1) 与 (242,0)，用户看到的就是
+        // "鼠标垫变成 1:1 了 / 位置不对"。
         private const double DefaultPadWidth = 223.59;
+        private const double DefaultPadHeight = 139.76;   // 首帧会用本机屏幕比例重算
+        private const double DefaultPadLeft = 94;
+        private const double DefaultPadTop = 0;
 
         private void ApplyDefaultPadOnly()
         {
@@ -341,11 +344,16 @@ namespace KeyDisplay
                 var v = ApplicationData.Current.LocalSettings.Values;
                 v["PadCustom_"] = 1;
                 v["PadW"] = DefaultPadWidth.ToString(CultureInfo.InvariantCulture);
-                v["PadH"] = "139.76";
-                v.Remove("PadPos_left");
-                v.Remove("PadPos_top");
-                _defaultPadPending = true;   // 首帧快照到达后按本机屏幕比例重算高度
-                DiagLog("default pad applied: " + (int)DefaultPadWidth);
+                v["PadH"] = DefaultPadHeight.ToString(CultureInfo.InvariantCulture);
+                v["PadPos_left"] = DefaultPadLeft.ToString(CultureInfo.InvariantCulture);
+                v["PadPos_top"] = DefaultPadTop.ToString(CultureInfo.InvariantCulture);
+                _defaultPadPending = true;   // 首帧快照到达后按本机屏幕比例重算高度（宽度沿用发布值）
+                // 立即同步到 UI，不依赖首帧（重置后马上归位）
+                MousePad.Width = DefaultPadWidth;
+                MousePad.Height = DefaultPadHeight;
+                SetTransformXY(MousePad, DefaultPadLeft, DefaultPadTop);
+                DiagLog("default pad applied: " + (int)DefaultPadWidth + "x" + (int)DefaultPadHeight
+                        + " @" + (int)DefaultPadLeft + "," + (int)DefaultPadTop);
             }
             catch (Exception ex) { DiagLog("default pad fail: " + ex.Message); }
         }
@@ -445,6 +453,13 @@ namespace KeyDisplay
 
             RegisterDefaultKeys();   // 登记全部默认键（键盘 12 键 + 鼠标 5 键）到字典
             CaptureDefaultBoxes();   // 0.9.5：记录 XAML 初始尺寸/位置（重置按键布局时精确还原用）
+            // 0.9.5：用户从未自定义过鼠标垫时，套用发布默认尺寸/位置（223.59 宽 @(94,0)，高度按屏幕比例）
+            try
+            {
+                var v0 = ApplicationData.Current.LocalSettings.Values;
+                if (v0["PadCustom_"] == null) ApplyDefaultPadOnly();
+            }
+            catch { }
 
             // 0.9.5：这里原先会套用自带的「内置默认布局预设」，但那份 JSON 的键位偏移基于 0.7.x 的另一套
             // 基准（且 Layout_ 的 tx/ty 是相对位移），叠到当前 XAML 基准会互相重叠——已停用。\n            // 现在首次启动就是 XAML 内置布局（与鼠标键位置、鼠标垫位置天然一致）。\n            CaptureDefaultBoxes();   // 记录 XAML 初始尺寸/位置，供「重置按键布局」精确还原
@@ -1230,7 +1245,7 @@ namespace KeyDisplay
                 // 关键：主动把内置键与鼠标垫还原成 XAML 初始尺寸/位置/显示名（旧位移不会自己消失）
                 foreach (var kv in _keys) ResetOneKeyToDefault(kv.Key, kv.Value);
                 foreach (var kv in _mouse) ResetOneKeyToDefault(kv.Key, kv.Value);
-                ResetPadToDefault();
+                ApplyDefaultPadOnly();   // 0.9.5：鼠标垫恢复发布默认（223.59 宽 / (94,0)，高度按屏幕比例重算）
 
                 // 内置默认的自定义键：Tab（历史默认就有；这里给出合理位置：键盘块下方，尺寸 56×48）
                 v["Custom_Tab"] = "1";
