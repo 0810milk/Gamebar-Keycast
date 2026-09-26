@@ -444,11 +444,10 @@ namespace KeyDisplay
             }
 
             RegisterDefaultKeys();   // 登记全部默认键（键盘 12 键 + 鼠标 5 键）到字典
+            CaptureDefaultBoxes();   // 0.9.5：记录 XAML 初始尺寸/位置（重置按键布局时精确还原用）
 
-            // 0.9.5：首次启动（无用户布局自定义）只恢复默认鼠标垫。
-            // 这里原先会套用自带的"内置默认布局预设"，但那份 JSON 的键位偏移基于 0.7.x 的另一套基准，
-            // 叠到现在的 XAML 基准位置会互相重叠（Shift/Space 等会被上移压住别的键）——已停用。
-            ApplyDefaultPadOnly();
+            // 0.9.5：这里原先会套用自带的「内置默认布局预设」，但那份 JSON 的键位偏移基于 0.7.x 的另一套
+            // 基准（且 Layout_ 的 tx/ty 是相对位移），叠到当前 XAML 基准会互相重叠——已停用。\n            // 现在首次启动就是 XAML 内置布局（与鼠标键位置、鼠标垫位置天然一致）。\n            CaptureDefaultBoxes();   // 记录 XAML 初始尺寸/位置，供「重置按键布局」精确还原
 
             // 布局自定义：所有按键/鼠标键附加指针处理（边缘/四角拖拽缩放）；鼠标垫也参与（长按移动 + 等比缩放）
             foreach (var kv in _keys) AttachResize(kv.Value);
@@ -1228,7 +1227,18 @@ namespace KeyDisplay
                 foreach (var k in rm) v.Remove(k);
                 n = rm.Count;
 
-                ApplyDefaultPadOnly();   // 0.9.5：键位回到 XAML 内置布局（不再套过时预设），鼠标垫恢复默认尺寸
+                // 关键：主动把内置键与鼠标垫还原成 XAML 初始尺寸/位置/显示名（旧位移不会自己消失）
+                foreach (var kv in _keys) ResetOneKeyToDefault(kv.Key, kv.Value);
+                foreach (var kv in _mouse) ResetOneKeyToDefault(kv.Key, kv.Value);
+                ResetPadToDefault();
+
+                // 内置默认的自定义键：Tab（历史默认就有；这里给出合理位置：键盘块下方，尺寸 56×48）
+                v["Custom_Tab"] = "1";
+                v["CustomPos_Tab"] = "0;0";
+                v["CustomSize_Tab"] = "56;48";
+                v.Remove("DisplayName_Tab");
+
+                DiagLog("layout reset: cleared " + n + " keys, defaults restored");
             }
             catch (Exception ex) { DiagLog("reset layout impl fail: " + ex.Message); }
             return n;
@@ -1239,6 +1249,71 @@ namespace KeyDisplay
             if (o == null) return def;
             long r;
             return long.TryParse(o.ToString(), out r) ? r : def;
+        }
+
+        // 0.9.5：把内置键/鼠标垫恢复成 XAML 初始尺寸、位置与显示名。
+        // 关键：Layout_ 里的 tx/ty 是相对位移（TranslateTransform），RestoreKeyLayout 在没有对应键时
+        // 直接 return，所以"只删布局键"不会清掉已应用的位移/尺寸 → 重置后仍是一片乱。必须主动还原。
+        private readonly System.Collections.Generic.Dictionary<string, double[]> _defaultKeyBox =
+            new System.Collections.Generic.Dictionary<string, double[]>();
+        private double[] _defaultPadBox;   // [w, h, canvasLeft, canvasTop]
+
+        private void CaptureDefaultBoxes()
+        {
+            try
+            {
+                if (_defaultKeyBox.Count > 0) return;
+                foreach (var kv in _keys)
+                {
+                    double w = kv.Value.Width, h = kv.Value.Height;
+                    if (!double.IsNaN(w) && !double.IsNaN(h)) _defaultKeyBox[kv.Key] = new[] { w, h };
+                }
+                foreach (var kv in _mouse)
+                {
+                    double w = kv.Value.Width, h = kv.Value.Height;
+                    if (!double.IsNaN(w) && !double.IsNaN(h)) _defaultKeyBox[kv.Key] = new[] { w, h };
+                }
+                _defaultPadBox = new[] { MousePad.Width, MousePad.Height, Canvas.GetLeft(MousePad), Canvas.GetTop(MousePad) };
+                DiagLog("default boxes captured: keys=" + _defaultKeyBox.Count + " pad=" + (int)_defaultPadBox[0] + "x" + (int)_defaultPadBox[1]);
+            }
+            catch (Exception ex) { DiagLog("capture defaults fail: " + ex.Message); }
+        }
+
+        private void ResetOneKeyToDefault(string name, Border b)
+        {
+            try
+            {
+                double[] box;
+                if (_defaultKeyBox.TryGetValue(name, out box))
+                {
+                    b.Width = box[0];
+                    b.Height = box[1];
+                }
+                SetTransformXY(b, 0, 0);
+                string txt;
+                if (_defaultKeyTexts.TryGetValue(name, out txt))
+                {
+                    var tb = b.Child as TextBlock;
+                    if (tb != null) tb.Text = txt;
+                }
+                b.Visibility = Visibility.Visible;   // 被删除过的默认键一并恢复
+                SetKey(b, false);
+            }
+            catch { }
+        }
+
+        private void ResetPadToDefault()
+        {
+            try
+            {
+                if (_defaultPadBox == null) return;
+                MousePad.Width = _defaultPadBox[0];
+                MousePad.Height = _defaultPadBox[1];
+                Canvas.SetLeft(MousePad, _defaultPadBox[2]);
+                Canvas.SetTop(MousePad, _defaultPadBox[3]);
+                SetTransformXY(MousePad, 0, 0);
+            }
+            catch { }
         }
 
         private string CustomKeysFingerprint()
