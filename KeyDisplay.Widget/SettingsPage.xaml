@@ -272,6 +272,7 @@
 
                                 <Button x:Name="ResetLayoutBtn" Height="32" Margin="0,18,0,0" HorizontalAlignment="Stretch"
                                         Content="重置按键布局（恢复默认布局与按键名）" Click="ResetLayout_Click"/>
+                                <TextBlock x:Name="LayoutStatus" Text="" FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap"/>
 
                                 <!-- 0.9.5：添加按键（87 配列键盘，由代码生成）——点任意键即添加为自定义按键 -->
                                 <Border x:Name="AddKeyToggle" Height="38" CornerRadius="6" BorderThickness="1" Margin="0,18,0,0"

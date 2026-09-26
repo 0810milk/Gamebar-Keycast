@@ -843,22 +843,40 @@ namespace KeyDisplay
             try
             {
                 var v = ApplicationData.Current.LocalSettings.Values;
-                // 仅清除布局与显示名（与主窗口「重置按键布局」同一套键）：
-                // 主窗口下次重载时会套用内置默认布局
-                var rm = new System.Collections.Generic.List<string>();
-                foreach (var kv in v)
-                {
-                    if (kv.Key.StartsWith("Layout_", StringComparison.Ordinal) ||
-                        kv.Key.StartsWith("Custom_", StringComparison.Ordinal) ||
-                        kv.Key.StartsWith("CustomPos_", StringComparison.Ordinal) ||
-                        kv.Key.StartsWith("CustomSize_", StringComparison.Ordinal) ||
-                        kv.Key.StartsWith("DisplayName_", StringComparison.Ordinal) ||
-                        kv.Key.StartsWith("Deleted_", StringComparison.Ordinal))
-                        rm.Add(kv.Key);
-                }
-                foreach (var k in rm) v.Remove(k);
+                // 0.9.5：改为「写标记键 + 通知」由小组件进程执行重置。
+                // 原实现在设置窗口里直接枚举并删除这些键，但跨进程视图可能滞后（实测出现
+                // "removed 0 keys"：一个键都没枚举到 → 重置毫无反应）；而且旧版重置还会把内置默认
+                // 布局（含 Tab 自定义键与鼠标垫默认尺寸/位置）重新套用，只删键是恢复不出来的。
+                long stamp = DateTime.UtcNow.Ticks;
+                v["LayoutResetRequest_"] = stamp;
                 ApplicationData.Current.SignalDataChanged();
-                Diag("reset layout requested (removed " + rm.Count + " keys)");            }
+
+                // 兜底：若本进程视图里确实能看到这些键，顺手也清掉（小组件那边还会再清一次，幂等）
+                int local = 0;
+                try
+                {
+                    var rm = new System.Collections.Generic.List<string>();
+                    foreach (var kv in v)
+                    {
+                        string k = kv.Key;
+                        if (k.StartsWith("Layout_", StringComparison.Ordinal) ||
+                            k.StartsWith("Custom_", StringComparison.Ordinal) ||
+                            k.StartsWith("CustomPos_", StringComparison.Ordinal) ||
+                            k.StartsWith("CustomSize_", StringComparison.Ordinal) ||
+                            k.StartsWith("DisplayName_", StringComparison.Ordinal) ||
+                            k.StartsWith("Deleted_", StringComparison.Ordinal) ||
+                            k == "PadCustom_" || k == "PadW" || k == "PadH" ||
+                            k.StartsWith("PadPos_", StringComparison.Ordinal))
+                            rm.Add(k);
+                    }
+                    foreach (var k in rm) v.Remove(k);
+                    local = rm.Count;
+                }
+                catch { }
+
+                LayoutStatusSet("已请求重置按键布局：小组件会恢复内置默认布局与按键名（含 Tab 键与鼠标垫默认尺寸）");
+                Diag("reset layout requested: marker=" + stamp + " localCleared=" + local);
+            }
             catch (Exception ex) { Diag("reset layout fail: " + ex.Message); }
         }
 
@@ -1770,6 +1788,11 @@ namespace KeyDisplay
                 n++;
             }
             return n;
+        }
+
+        private void LayoutStatusSet(string s)
+        {
+            try { LayoutStatus.Text = s; LayoutStatus.Foreground = B(_pal.Accent); Diag(s); } catch { }
         }
 
         private void PresetStatusSet(string s)

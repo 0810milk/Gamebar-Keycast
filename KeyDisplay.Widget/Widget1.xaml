@@ -111,8 +111,8 @@
                 <TextBlock x:Name="StatusText" Text="" HorizontalAlignment="Right" VerticalAlignment="Top" FontSize="10" Opacity="0.6"/>
                 <!-- 按键右键菜单覆盖层：右键按键弹出（删除/复制/修改显示名）；点遮罩关闭 -->
                 <Grid x:Name="KeyMenuPanel" Grid.RowSpan="2" Visibility="Collapsed" Background="Transparent" Tapped="KeyMenuPanel_Tapped">
-                    <Border x:Name="KeyMenu" Width="130" CornerRadius="8" BorderThickness="1" Tapped="KeyMenu_Tapped">
-                        <StackPanel x:Name="KeyMenuItems" Padding="6"/>
+                    <Border x:Name="KeyMenu" Width="208" CornerRadius="8" BorderThickness="1" Padding="4" Tapped="KeyMenu_Tapped">
+                        <StackPanel x:Name="KeyMenuItems"/>
                     </Border>
                 </Grid>
                 <!-- 修改显示名覆盖层：右键菜单「修改显示名」弹出；确定/取消/点遮罩关闭 -->

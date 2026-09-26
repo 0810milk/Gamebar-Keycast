@@ -454,26 +454,27 @@ namespace KeyDisplay
             CancelLongPress();
             KeyMenuItems.Children.Clear();
             int n = _selectedKeys.Count;
-            AddMenuItem("删除（" + n + " 个）", () =>
+            AddMenuItem("删除（" + n + " 个）", GlyphDelete, () =>
             {
                 CloseKeyContextMenu();
                 MultiDeleteRequest();
-            });
-            AddMenuItem("改名", () =>
+            }, false);
+            AddMenuItem("改名", GlyphRename, () =>
             {
                 CloseKeyContextMenu();
                 MultiRenameOpen();
-            });
-            AddMenuItem("复制（" + n + " 个）", () =>
+            }, false);
+            AddMenuItem("复制（" + n + " 个）", GlyphCopy, () =>
             {
                 CloseKeyContextMenu();
                 MultiCopyApply();
-            });
-            AddMenuItem("取消选择", () =>
+            }, false);
+            AddMenuSeparator();   // 0.9.5：Win11 风格分组线，把「取消选择」与操作项分开
+            AddMenuItem("取消选择", GlyphCancel, () =>
             {
                 CloseKeyContextMenu();
                 ExitMultiSelectMode();
-            });
+            }, false);
             ShowMenu(layerPos);
             DiagLog("multiselect menu open n=" + n);
         }

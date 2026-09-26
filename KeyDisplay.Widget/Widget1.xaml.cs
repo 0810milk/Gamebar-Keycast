@@ -559,6 +559,7 @@ namespace KeyDisplay
             StartupFadeIn(RootPanel);     // 0.8.2 整体启动淡入（320ms，透明度动画无残留）
             // 0.9.5：记录初始键区结构指纹，供设置子窗口改布局时比对触发重建
             try { _customKeysFingerprint = CustomKeysFingerprint(); } catch { }
+            try { _lastLayoutResetReq = ParseLongOr(ApplicationData.Current.LocalSettings.Values[LayoutResetRequestKey], 0); } catch { }   // 0.9.5：启动时登记已有标记，避免把历史重置请求当成新的重复执行
         }
 
         private void OnGameBarDisplayModeChanged(object sender, object e)
@@ -1170,6 +1171,49 @@ namespace KeyDisplay
         // 0.9.5：设置子窗口也可能改动「自定义按键集合」与布局（添加按键 / 应用布局预设 / 重置布局），
         // 因此这里检测 Custom_* 前缀键的集合指纹，有变化就整体重建键区。
         private string _customKeysFingerprint = "";
+        // 0.9.5：设置窗口的「重置按键布局」通过标记键触发，由本进程（真正持有这些键的一方）执行：
+        // 清掉布局/自定义键/显示名/删除记录 + 重新套用内置默认布局预设（含 Tab 与鼠标垫默认尺寸）+ 重建键区。
+        // 原因：设置窗口跨进程枚举这些键时曾出现 removed 0 keys（一个都没枚举到），重置看起来毫无反应。
+        private const string LayoutResetRequestKey = "LayoutResetRequest_";
+        private long _lastLayoutResetReq;
+
+        // 0.9.5：重置按键布局（由设置窗口写标记键触发）—— 清掉用户布局/自定义键/显示名/删除记录
+        // 与鼠标垫自定义，再重新套用内置默认布局预设（含 Tab 自定义键与鼠标垫默认尺寸/位置），
+        // 最后交给 ReloadSettingsFromStore 的结构变化分支重建键区。返回清掉的键数量（用于日志）。
+        private int ResetLayoutToBuiltInDefault(Windows.Foundation.Collections.IPropertySet v)
+        {
+            int n = 0;
+            try
+            {
+                var rm = new System.Collections.Generic.List<string>();
+                foreach (var kv in v)
+                {
+                    string k = kv.Key;
+                    if (k.StartsWith("Layout_", StringComparison.Ordinal) ||
+                        k.StartsWith("Custom_", StringComparison.Ordinal) ||
+                        k.StartsWith("CustomPos_", StringComparison.Ordinal) ||
+                        k.StartsWith("CustomSize_", StringComparison.Ordinal) ||
+                        k.StartsWith("DisplayName_", StringComparison.Ordinal) ||
+                        k.StartsWith("Deleted_", StringComparison.Ordinal) ||
+                        k == "PadCustom_" || k == "PadW" || k == "PadH" ||
+                        k.StartsWith("PadPos_", StringComparison.Ordinal))
+                        rm.Add(k);
+                }
+                foreach (var k in rm) v.Remove(k);
+                n = rm.Count;
+
+                ApplyBuiltInDefaultLayoutIfNeeded();   // Layout_* 已清空 → 重新写入内置默认布局（含 Tab 与鼠标垫默认）
+            }
+            catch (Exception ex) { DiagLog("reset layout impl fail: " + ex.Message); }
+            return n;
+        }
+
+        private static long ParseLongOr(object o, long def)
+        {
+            if (o == null) return def;
+            long r;
+            return long.TryParse(o.ToString(), out r) ? r : def;
+        }
 
         private string CustomKeysFingerprint()
         {
@@ -1193,6 +1237,20 @@ namespace KeyDisplay
         private void ReloadSettingsFromStore()
         {
             var v = ApplicationData.Current.LocalSettings.Values;
+
+            // 0) 0.9.5：处理「重置按键布局」请求（设置窗口只写标记键，实际清理与重建在这里执行）
+            try
+            {
+                long req = ParseLongOr(v[LayoutResetRequestKey], 0);
+                if (req != 0 && req != _lastLayoutResetReq)
+                {
+                    _lastLayoutResetReq = req;
+                    int cleared = ResetLayoutToBuiltInDefault(v);
+                    _customKeysFingerprint = "FORCE";   // 让下面的结构变化分支必定重建键区
+                    DiagLog("layout reset: cleared " + cleared + " keys -> rebuild");
+                }
+            }
+            catch (Exception ex) { DiagLog("layout reset fail: " + ex.Message); }
 
             // 1) 键区结构变化（自定义键增删 / 布局 / 删除记录）→ 全量重建
             string fp = CustomKeysFingerprint();

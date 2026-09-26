@@ -1,8 +1,10 @@
 using System;
 using Windows.Foundation;
+using Windows.UI;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
 using Windows.UI.Xaml.Input;
+using Windows.UI.Xaml.Media;
 
 namespace KeyDisplay
 {
@@ -24,25 +26,71 @@ namespace KeyDisplay
         // 必须用右键时的位置而不是点击位置来定位新键。
         private Point _blankPos;
 
-        // 动态构建一个菜单项：30 高、圆角 6、1px 边框；第一个项顶部 Margin 0，其余顶部 4。
-        // 子元素为居中 TextBlock；点击执行传入动作并标记 Handled 阻止冒泡到遮罩。
+        // 动态构建一个菜单项（0.9.5 Windows 11 风格）：
+        //   高度 32、圆角 4、无边框、左对齐 13px 文字、左侧 16px 图标（Segoe Fluent Icons / MDL2）、
+        //   悬停为轻微叠加色、按下更明显；danger=true 时图标与文字用柔和红（删除类操作，Win11 同款语义）。
+        // 保留 2 参数重载：旧调用点只给文字，自动不带图标。
         private void AddMenuItem(string text, Action action)
+        {
+            AddMenuItem(text, null, action, false);
+        }
+
+        // Win11 菜单常用图标（Segoe Fluent Icons / Segoe MDL2 Assets 同码位）
+        private const string GlyphSelectAll = "\uE8B3";
+        private const string GlyphDelete = "\uE74D";
+        private const string GlyphCopy = "\uE8C8";
+        private const string GlyphRename = "\uE70F";
+        private const string GlyphPaste = "\uE77F";
+        private const string GlyphCancel = "\uE711";
+
+        private void AddMenuItem(string text, string glyph, Action action, bool danger)
         {
             var b = new Border
             {
-                Height = 30,
-                CornerRadius = new CornerRadius(6),
-                BorderThickness = new Thickness(1),
-                Margin = new Thickness(0, 4, 0, 0)
+                Height = 32,
+                CornerRadius = new CornerRadius(4),
+                BorderThickness = new Thickness(0),
+                Margin = new Thickness(0, 2, 0, 0),
+                Background = TransparentBrush
             };
             if (KeyMenuItems.Children.Count == 0) b.Margin = new Thickness(0);
-            b.Child = new TextBlock
+
+            var grid = new Grid { Padding = new Thickness(10, 0, 10, 0) };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var fg = danger ? MenuDangerB() : KeyFgB();
+            var icon = new TextBlock
+            {
+                Text = string.IsNullOrEmpty(glyph) ? "" : glyph,
+                FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
+                FontSize = 14,
+                VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Opacity = 0.9,
+                Foreground = fg
+            };
+            var label = new TextBlock
             {
                 Text = text,
-                FontSize = 12,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center
+                FontSize = 13,
+                VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                Foreground = fg
             };
+            Grid.SetColumn(icon, 0);
+            Grid.SetColumn(label, 1);
+            grid.Children.Add(icon);
+            grid.Children.Add(label);
+            b.Child = grid;
+
+            // 悬停/按下反馈（Win11 菜单项的关键手感）
+            b.PointerEntered += (s, e) => { try { b.Background = MenuHoverB(); } catch { } };
+            b.PointerExited += (s, e) => { try { b.Background = TransparentBrush; } catch { } };
+            b.PointerPressed += (s, e) => { try { b.Background = MenuPressedB(); } catch { } };
+            b.PointerReleased += (s, e) => { try { b.Background = MenuHoverB(); } catch { } };
+
             b.Tapped += (s, e) =>
             {
                 // 0.8.3：Handled 置位优先于 action——action 抛异常（如 LocalSettings 写满）时
@@ -52,6 +100,18 @@ namespace KeyDisplay
             };
             ApplyMenuBorder(b);
             KeyMenuItems.Children.Add(b);
+        }
+
+        // Win11 菜单的分组分隔线（1px，左右留白）
+        private void AddMenuSeparator()
+        {
+            var line = new Border
+            {
+                Height = 1,
+                Margin = new Thickness(10, 4, 10, 4),
+                Background = FloatBorderB()
+            };
+            KeyMenuItems.Children.Add(line);
         }
 
         // 统一显示逻辑：把 KeyMenu 定位到鼠标附近并显示覆盖层。
@@ -92,15 +152,15 @@ namespace KeyDisplay
             KeyMenuItems.Children.Clear();
 
             // 0.9.4 多选入口：进入多选模式，并把当前右键的这个键直接选中（第一个选中项）
-            AddMenuItem("多选", () =>
+            AddMenuItem("多选", GlyphSelectAll, () =>
             {
                 var k = _ctxKey;
                 CloseKeyContextMenu();
                 EnterMultiSelectMode(k);
-            });
+            }, false);
 
             // 删除：复用 DeleteConfirmPanel 三段式确认框（与 0.8.1 前行为一致），仅自定义键可删
-            AddMenuItem("删除", () =>
+            AddMenuItem("删除", GlyphDelete, () =>
             {
                 var k = _ctxKey;
                 CloseKeyContextMenu();
@@ -117,23 +177,23 @@ namespace KeyDisplay
                         DiagLog("delete confirm: " + nm);
                     }
                 }
-            });
+            }, false);
 
             // 复制：复制按键布局（实现位于 Widget1.KeyCopyPaste.cs，签名 private void CopySelectedKey(Border key)）
-            AddMenuItem("复制", () =>
+            AddMenuItem("复制", GlyphCopy, () =>
             {
                 var k = _ctxKey;
                 CloseKeyContextMenu();
                 if (k != null) CopySelectedKey(k);
-            });
+            }, false);
 
             // 修改显示名：打开改名输入框（实现位于 Widget1.KeyRename.cs，签名 private void OpenKeyRename(Border key)）
-            AddMenuItem("修改显示名", () =>
+            AddMenuItem("修改显示名", GlyphRename, () =>
             {
                 var k = _ctxKey;
                 CloseKeyContextMenu();
                 if (k != null) OpenKeyRename(k);
-            });
+            }, false);
 
             ShowMenu(layerPos);
             DiagLog("key menu open: " + NameOf(key));
@@ -144,11 +204,11 @@ namespace KeyDisplay
         {
             CancelLongPress();
             KeyMenuItems.Children.Clear();
-            AddMenuItem("隐藏鼠标垫", () =>
+            AddMenuItem("隐藏鼠标垫", null, () =>
             {
                 CloseKeyContextMenu();
                 HidePad();
-            });
+            }, false);
             ShowMenu(layerPos);
             DiagLog("pad menu open");
         }
@@ -176,21 +236,21 @@ namespace KeyDisplay
                 string label = selCount > 0 ? ("粘贴选中的 " + selCount + " 个按键")
                     : hasGroup ? ("粘贴（" + _keyGroupClipboard.Count + " 个）")
                     : "粘贴";
-                AddMenuItem(label, () =>
+                AddMenuItem(label, GlyphPaste, () =>
                 {
                     CloseKeyContextMenu();
                     if (selCount > 0) PasteSelectionAt(_blankPos);
                     else if (hasGroup) PasteGroupAt(_blankPos);
                     else PasteKeyAt(_blankPos);
-                });
+                }, false);
             }
 
             // 显示鼠标垫（实现位于 Widget1.xaml.cs，签名 private void ShowPad()）
-            if (showpad) AddMenuItem("显示鼠标垫", () =>
+            if (showpad) AddMenuItem("显示鼠标垫", null, () =>
             {
                 CloseKeyContextMenu();
                 ShowPad();
-            });
+            }, false);
 
             ShowMenu(layerPos);
             DiagLog("blank menu open: paste=" + paste + " showpad=" + showpad);
@@ -216,20 +276,87 @@ namespace KeyDisplay
             e.Handled = true;
         }
 
-        // 刷新右键菜单主题配色：菜单框应用浮层派生色（0.8.2 起，避免与面板/按键同色融为一体）；
-        // 菜单项在 AddMenuItem 内各自 ApplyMenuBorder
+        // 刷新右键菜单主题配色（0.9.5 Win11 风格）：菜单框用浮层派生色 + 圆角 + 柔和投影；
+        // 菜单项在 AddMenuItem 内各自着色，悬停/按下色由 MenuHoverB/MenuPressedB 现算
         private void ApplyKeyMenuTheme()
         {
             KeyMenu.Background = FloatPanelB();
             KeyMenu.BorderBrush = FloatBorderB();
+            KeyMenu.CornerRadius = new CornerRadius(8);
+            try
+            {
+                // Win11 菜单有柔和外投影：UWP 1903+ 支持 ThemeShadow（需要 Translation.Z > 0），失败就退化
+                KeyMenu.Shadow = new Windows.UI.Xaml.Media.ThemeShadow();
+                KeyMenu.Translation = new System.Numerics.Vector3(0, 0, 32);
+            }
+            catch { }
         }
 
-        // 单个菜单项：底/边框沿用浮层派生色（与菜单框同一色系，0.8.2）；子元素是 TextBlock 才设前景（非 TextBlock 跳过）
+        // 菜单项底色：默认透明（Win11 无边框无填充），悬停/按下用轻微叠加
+        private static readonly Windows.UI.Xaml.Media.SolidColorBrush TransparentBrush =
+            new Windows.UI.Xaml.Media.SolidColorBrush(Colors.Transparent);
+
+        private Windows.UI.Xaml.Media.Brush MenuHoverB()
+        {
+            var c = PanelColorOf(PanelB());
+            bool dark = (0.299 * c.R + 0.587 * c.G + 0.114 * c.B) / 255.0 < 0.5;
+            return new Windows.UI.Xaml.Media.SolidColorBrush(dark
+                ? Color.FromArgb(0x1F, 0xFF, 0xFF, 0xFF)
+                : Color.FromArgb(0x14, 0x00, 0x00, 0x00));
+        }
+
+        private Windows.UI.Xaml.Media.Brush MenuPressedB()
+        {
+            var c = PanelColorOf(PanelB());
+            bool dark = (0.299 * c.R + 0.587 * c.G + 0.114 * c.B) / 255.0 < 0.5;
+            return new Windows.UI.Xaml.Media.SolidColorBrush(dark
+                ? Color.FromArgb(0x33, 0xFF, 0xFF, 0xFF)
+                : Color.FromArgb(0x22, 0x00, 0x00, 0x00));
+        }
+
+        // 危险项（删除类）的红色：深色底用柔和亮红、浅色底用 Win11 的 #C42B1C
+        private Windows.UI.Xaml.Media.Brush MenuDangerB()
+        {
+            var c = PanelColorOf(PanelB());
+            bool dark = (0.299 * c.R + 0.587 * c.G + 0.114 * c.B) / 255.0 < 0.5;
+            return new Windows.UI.Xaml.Media.SolidColorBrush(dark
+                ? Color.FromArgb(0xFF, 0xFF, 0x99, 0xA4)
+                : Color.FromArgb(0xFF, 0xC4, 0x2B, 0x1C));
+        }
+
+        // 从 Brush 取 Color（非 SolidColorBrush 时回落深色面板）
+        private static Color PanelColorOf(Windows.UI.Xaml.Media.Brush b)
+        {
+            var s = b as Windows.UI.Xaml.Media.SolidColorBrush;
+            return s != null ? s.Color : Color.FromArgb(0xFF, 0x1F, 0x1F, 0x1F);
+        }
+
+        // 单个菜单项：底色/边框沿用浮层派生色系（0.8.2）；0.9.5 起项内是 Grid（图标+文字），
+        // 需递归给其中的 TextBlock 上色（危险项保持自己的红色，不覆盖）
         private void ApplyMenuBorder(Border b)
         {
-            b.Background = FloatPanelB();
-            b.BorderBrush = FloatBorderB();
-            if (b.Child is TextBlock tb) tb.Foreground = KeyFgB();
+            if (b.BorderThickness.Top > 0)
+            {
+                b.Background = FloatPanelB();
+                b.BorderBrush = FloatBorderB();
+            }
+            var fg = KeyFgB();
+            var grid = b.Child as Grid;
+            if (grid == null) return;
+            foreach (var ch in grid.Children)
+            {
+                var tb = ch as TextBlock;
+                if (tb != null && !IsDangerForeground(tb.Foreground)) tb.Foreground = fg;
+            }
+        }
+
+        // 危险项判定：红的 G/B 明显低于 R，且不是主题前景色 → 视为危险色，主题刷新时不覆盖
+        private static bool IsDangerForeground(Windows.UI.Xaml.Media.Brush brush)
+        {
+            var s = brush as Windows.UI.Xaml.Media.SolidColorBrush;
+            if (s == null) return false;
+            var c = s.Color;
+            return c.R > 0x80 && c.G < 0xC0 && c.B < 0xC0 && (c.R - c.G) > 0x40;
         }
     }
 }
