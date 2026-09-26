@@ -138,24 +138,27 @@
                                     <Slider x:Name="MouseSpeedSlider" Grid.Column="0" Minimum="0.5" Maximum="4" StepFrequency="0.1" ValueChanged="MouseSpeed_Changed"/>
                                     <TextBlock x:Name="MouseSpeedVal" Grid.Column="1" Text="1.0×" FontSize="13" Margin="12,0,0,0" VerticalAlignment="Center" MinWidth="46"/>
                                 </Grid>
-                                <!-- 0.9.5：鼠标光标按键 —— 把鼠标垫上的光标映射到一个按键，按下时呈现"按下色" -->
-                                <TextBlock x:Name="DotKeyTitle" Text="鼠标光标按键" FontSize="15" FontWeight="SemiBold" Margin="0,16,0,0"/>
-                                <TextBlock x:Name="DotKeyDesc" Text="把鼠标垫上的光标映射到一个按键：该键按下时，光标会显示为「鼠标点按下」色（颜色页可调）。选「无」则关闭。" FontSize="12" Opacity="0.7" Margin="0,4,0,0" TextWrapping="Wrap"/>
-                                <Grid Margin="0,8,0,0">
+                                <!-- 0.9.5：鼠标光标按键 —— 开关 + 按键捕获框（点击后按任意键即可识别，不再堆一排按钮） -->
+                                <Grid Margin="0,16,0,0">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
-                                    </Grid.RowDefinitions>
-                                    <Button x:Name="DotK0" Grid.Row="0" Grid.Column="0" Height="30" Margin="0,0,3,0" FontSize="12" MinWidth="0" HorizontalAlignment="Stretch" Content="无" Tag="0" Click="DotKey_Click"/>
-                                    <Button x:Name="DotK1" Grid.Row="0" Grid.Column="1" Height="30" Margin="3,0,3,0" FontSize="12" MinWidth="0" HorizontalAlignment="Stretch" Content="鼠标左键" Tag="1" Click="DotKey_Click"/>
-                                    <Button x:Name="DotK2" Grid.Row="0" Grid.Column="2" Height="30" Margin="3,0,3,0" FontSize="12" MinWidth="0" HorizontalAlignment="Stretch" Content="鼠标右键" Tag="2" Click="DotKey_Click"/>
-                                    <Button x:Name="DotK4" Grid.Row="0" Grid.Column="3" Height="30" Margin="3,0,0,0" FontSize="12" MinWidth="0" HorizontalAlignment="Stretch" Content="鼠标中键" Tag="4" Click="DotKey_Click"/>
-                                    <Button x:Name="DotK5" Grid.Row="1" Grid.Column="0" Height="30" Margin="0,6,3,0" FontSize="12" MinWidth="0" HorizontalAlignment="Stretch" Content="侧下键" Tag="5" Click="DotKey_Click"/>
-                                    <Button x:Name="DotK6" Grid.Row="1" Grid.Column="1" Height="30" Margin="3,6,3,0" FontSize="12" MinWidth="0" HorizontalAlignment="Stretch" Content="侧上键" Tag="6" Click="DotKey_Click"/>
-                                    <Button x:Name="DotK7" Grid.Row="1" Grid.Column="2" Height="30" Margin="3,6,3,0" FontSize="12" MinWidth="0" HorizontalAlignment="Stretch" Content="滚轮上" Tag="7" Click="DotKey_Click"/>
-                                    <Button x:Name="DotK8" Grid.Row="1" Grid.Column="3" Height="30" Margin="3,6,0,0" FontSize="12" MinWidth="0" HorizontalAlignment="Stretch" Content="滚轮下" Tag="8" Click="DotKey_Click"/>
+                                    <TextBlock x:Name="DotKeyTitle" Grid.Column="0" Text="鼠标光标按键" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                    <ToggleSwitch x:Name="DotKeyToggle" Grid.Column="1" OnContent="开" OffContent="关" Toggled="DotKeyToggle_Toggled"/>
+                                </Grid>
+                                <TextBlock x:Name="DotKeyDesc" Text="开启后：把鼠标垫上的光标映射到一个按键，该键按下时光标显示为「鼠标点按下」色（颜色页可调）。" FontSize="12" Opacity="0.7" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock x:Name="DotKeyBindLbl" Grid.Column="0" Text="映射按键" FontSize="13" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                    <Border x:Name="DotKeyCapture" Grid.Column="1" Height="34" CornerRadius="6" BorderThickness="1"
+                                            Tapped="DotKeyCapture_Tapped"
+                                            PointerPressed="DotKeyCapture_PointerPressed" PointerWheelChanged="DotKeyCapture_Wheel"
+                                            PointerEntered="DotKeyCapture_Enter" PointerExited="DotKeyCapture_Exit">
+                                        <TextBlock x:Name="DotKeyCaptureText" Text="未设置（点击后按任意键）" FontSize="13"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                    </Border>
                                 </Grid>
                                 <TextBlock x:Name="DotKeyStatus" Text="" FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap"/>
                                 <Button x:Name="MouseSpeedResetBtn" Height="30" Margin="0,6,0,0" HorizontalAlignment="Left" MinWidth="112"

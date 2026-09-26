@@ -178,6 +178,7 @@ namespace KeyDisplay
         private double _mouseSpeed = 1.0;
         // 0.9.5：鼠标光标按键（0=关闭；1/2/4/5/6=左右中/侧下/侧上；7/8=滚轮上/下）——该键按下时光标用"按下色"
         private int _dotKeyVk;
+        private bool _dotKeyOn;   // 0.9.5：鼠标光标按键开关（关闭时忽略映射）
         // 0.9.5：按键区背景是否全透明（用户要求默认透明：键位/鼠标垫直接浮在游戏画面上）
         private bool _panelTransparent = true;
 
@@ -1020,7 +1021,7 @@ namespace KeyDisplay
             Canvas.SetTop(MouseDot, _smoothY);
             MouseDot.Visibility = Visibility.Visible;
             // 0.9.5：鼠标光标按键映射 —— 命中的键按下时，光标改用"鼠标点按下"色
-            try { MouseDot.Fill = IsDotKeyDown(_dotKeyVk) ? DotPressedB() : DotB(); } catch { }
+            try { MouseDot.Fill = IsDotKeyDown(_dotKeyOn ? _dotKeyVk : 0) ? DotPressedB() : DotB(); } catch { }
         }
 
         // 鼠标垫尺寸跟随屏幕纵横比：随帧下发的 vs_w/vs_h 就是鼠标坐标的映射基准，
@@ -1462,6 +1463,7 @@ namespace KeyDisplay
             if (_mouseSpeed < 0.5) _mouseSpeed = 0.5;
             if (_mouseSpeed > 4.0) _mouseSpeed = 4.0;
             _dotKeyVk = (int)ParseDoubleOr(v["MouseDotKeyVk_"], _dotKeyVk);
+            _dotKeyOn = !(v["MouseDotKeyOn_"] != null && v["MouseDotKeyOn_"].ToString() == "0") && _dotKeyVk != 0;
             _panelTransparent = !(v["PanelTransparent_"] != null && v["PanelTransparent_"].ToString() == "0");
             DiagLog("panel transparent = " + _panelTransparent);
             try

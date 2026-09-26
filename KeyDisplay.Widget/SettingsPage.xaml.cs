@@ -74,6 +74,8 @@ namespace KeyDisplay
                     ShowSection("theme");
                     SetAboutVersion();   // 0.9.5：关于页版本号
                     LoadAvatar();        // 0.9.5：关于页作者头像
+                    // 0.9.5：鼠标光标按键的键盘捕获挂在页面级（Border 不能聚焦）：只要处于捕获态，按下的键即被识别
+                    try { this.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(DotKeyCapture_KeyDown), true); } catch { }
                     HookStore();         // 0.9.5：主窗口改主题时本窗口同步
                     // 0.9.5：窗口尺寸变化时只重算调色盘的「并排 / 换行」位置（缩放由 Viewbox 自动完成，开销极小）
                     RootGrid.SizeChanged += (s2, e2) => ApplyPickerScale();
@@ -401,7 +403,9 @@ namespace KeyDisplay
             _mouseSpeed = ReadDouble(v["MouseSpeed_"], 1.0, 0.5, 4.0);
             MouseSpeedSlider.Value = _mouseSpeed;
             MouseSpeedVal.Text = FormatSpeed(_mouseSpeed);
-            _dotKeyVk = (int)ReadDouble(v["MouseDotKeyVk_"], 0, 0, 8);
+            _dotKeyVk = (int)ReadDouble(v["MouseDotKeyVk_"], 0, 0, 255);
+            _dotKeyName = (v["MouseDotKeyName_"] as string) ?? "";
+            _dotKeyOn = !(v["MouseDotKeyOn_"] != null && v["MouseDotKeyOn_"].ToString() == "0") && _dotKeyVk != 0;
             _panelBgTransparent = !(v["PanelTransparent_"] != null && v["PanelTransparent_"].ToString() == "0");
             _locked = !(v["LayoutLocked"] is bool lb && !lb);
         }
@@ -784,56 +788,125 @@ namespace KeyDisplay
             Save("KeyFontWeight_", _keyFontWeightLevel);
         }
 
-        // ===================== 0.9.5：鼠标光标按键（鼠标点映射到某个按键）=====================
-        // 选中后：该键按下时，鼠标垫上的光标用「鼠标点按下」色绘制（颜色页第 10 槽可调）。
-        // 持久化键 MouseDotKeyVk_：0=关闭；1/2/4/5/6=鼠标左右中/侧下/侧上；7/8=滚轮上/下（与 companion 的 VK 约定一致）。
+        // ===================== 0.9.5：鼠标光标按键（开关 + 按键捕获）=====================
+        // 开关 MouseDotKeyOn_（1/0）；映射按键 MouseDotKeyVk_ + 显示名 MouseDotKeyName_。
+        // 捕获方式：点一下捕获框 → 框进入"请按任意键"状态 → 下一次按键/鼠标键即被识别为映射。
+        // VK 约定与 companion 一致：1/2/4=左/右/中键，5/6=侧下/侧上，7/8=滚轮上/下，其余为键盘 VK。
 
+        private bool _dotKeyOn;
         private int _dotKeyVk;
+        private string _dotKeyName = "";
+        private bool _dotCapturing;
 
-        private Button DotKeyBtnOf(int vk)
+        private void DotKeyToggle_Toggled(object sender, RoutedEventArgs e)
         {
-            switch (vk)
-            {
-                case 0: return DotK0; case 1: return DotK1; case 2: return DotK2; case 4: return DotK4;
-                case 5: return DotK5; case 6: return DotK6; case 7: return DotK7; default: return DotK8;
-            }
+            if (!_loaded) return;
+            _dotKeyOn = DotKeyToggle.IsOn;
+            Save("MouseDotKeyOn_", _dotKeyOn ? 1 : 0);
+            ApplyDotKeyStyles();
+        }
+
+        // 点击捕获框：进入捕获态（再点一次取消）
+        private void DotKeyCapture_Tapped(object sender, TappedRoutedEventArgs e)
+        {
+            e.Handled = true;
+            if (_dotCapturing) { EndDotCapture(false); return; }
+            _dotCapturing = true;
+
+            ApplyDotKeyStyles();
+        }
+
+        private void DotKeyCapture_KeyDown(object sender, KeyRoutedEventArgs e)
+        {
+            if (!_dotCapturing) return;
+            e.Handled = true;
+            int vk = (int)e.Key;
+            if (vk == 0x1B) { EndDotCapture(false); return; }             // Esc 取消
+            BindDotKey(vk, ((Windows.System.VirtualKey)vk).ToString());
+        }
+
+        // 捕获鼠标按键（第一次点击只是进入捕获态，之后按下才算绑定）
+        private void DotKeyCapture_PointerPressed(object sender, PointerRoutedEventArgs e)
+        {
+            if (!_dotCapturing) return;
+            e.Handled = true;
+            var p = e.GetCurrentPoint(DotKeyCapture).Properties;
+            if (p.IsRightButtonPressed) { BindDotKey(2, "鼠标右键"); return; }
+            if (p.IsMiddleButtonPressed) { BindDotKey(4, "鼠标中键"); return; }
+            if (p.IsXButton1Pressed) { BindDotKey(6, "侧上键"); return; }
+            if (p.IsXButton2Pressed) { BindDotKey(5, "侧下键"); return; }
+            if (p.IsLeftButtonPressed) { BindDotKey(1, "鼠标左键"); return; }
+        }
+
+        // 捕获滚轮
+        private void DotKeyCapture_Wheel(object sender, PointerRoutedEventArgs e)
+        {
+            if (!_dotCapturing) return;
+            e.Handled = true;
+            BindDotKey(e.GetCurrentPoint(DotKeyCapture).Properties.MouseWheelDelta > 0 ? 7 : 8,
+                       e.GetCurrentPoint(DotKeyCapture).Properties.MouseWheelDelta > 0 ? "滚轮上" : "滚轮下");
+        }
+
+        private void DotKeyCapture_Enter(object sender, PointerRoutedEventArgs e)
+        {
+            if (_dotCapturing) return;
+            try { DotKeyCapture.Background = B(_pal.Card); } catch { }
+        }
+
+        private void DotKeyCapture_Exit(object sender, PointerRoutedEventArgs e)
+        {
+            if (_dotCapturing) return;
+            ApplyDotKeyStyles();
+        }
+
+        private void BindDotKey(int vk, string name)
+        {
+            _dotKeyVk = vk;
+            _dotKeyName = string.IsNullOrEmpty(name) ? ("VK " + vk) : name;
+            _dotKeyOn = true;                 // 绑定即视为启用（用户按了键就是要用它）
+            EndDotCapture(true);
+            Save("MouseDotKeyVk_", _dotKeyVk);
+            Save("MouseDotKeyName_", _dotKeyName);
+            Save("MouseDotKeyOn_", 1);
+            try { DotKeyToggle.IsOn = true; } catch { }
+            ApplyDotKeyStyles();
+            DotKeyStatusSet("已识别并绑定：" + _dotKeyName + "　（该键按下时光标显示按下色）");
+        }
+
+        private void EndDotCapture(bool keepText)
+        {
+            _dotCapturing = false;
+            ApplyDotKeyStyles();
+        }
+
+        private void DotKeyStatusSet(string s)
+        {
+            try { DotKeyStatus.Text = s; DotKeyStatus.Foreground = B(_pal.Accent); } catch { }
         }
 
         private void ApplyDotKeyStyles()
         {
             try
             {
-                int[] all = { 0, 1, 2, 4, 5, 6, 7, 8 };
-                foreach (int vk in all)
+                if (DotKeyStatus != null && !_dotCapturing && string.IsNullOrEmpty(_dotKeyName) && _dotKeyVk == 0)
+                    DotKeyStatus.Text = "尚未设置映射按键：点一下右边方框，然后按你想映射的键。";
+
+                if (DotKeyCaptureText != null)
                 {
-                    var b = DotKeyBtnOf(vk);
-                    if (b == null) continue;
-                    bool sel = vk == _dotKeyVk;
-                    b.Background = sel ? B(_pal.Accent) : B(_pal.Card2);
-                    b.BorderBrush = sel ? B(_pal.Accent) : B(_pal.Border);
-                    b.Foreground = sel ? B(_pal.AccentFg) : B(_pal.Text);
+                    DotKeyCaptureText.Text = _dotCapturing
+                        ? "请按任意键…（键盘键或鼠标键，Esc 取消）"
+                        : (string.IsNullOrEmpty(_dotKeyName) ? "未设置（点击后按任意键）" : _dotKeyName + "（点击可改）");
+                    DotKeyCaptureText.Foreground = _dotCapturing ? B(_pal.Accent) : B(_pal.Text);
                 }
-                if (DotKeyStatus != null)
+                if (DotKeyCapture != null)
                 {
-                    DotKeyStatus.Text = _dotKeyVk == 0
-                        ? "当前：关闭（光标使用普通颜色）"
-                        : "当前：光标本按下会显示为「鼠标点按下」色";
-                    DotKeyStatus.Foreground = B(_pal.Subtle);
+                    DotKeyCapture.BorderBrush = B(_dotCapturing ? _pal.Accent : _pal.Border);
+                    DotKeyCapture.BorderThickness = new Thickness(_dotCapturing ? 2 : 1);
+                    DotKeyCapture.Background = B(_dotCapturing ? _pal.Card : _pal.Card2);
                 }
+                if (DotKeyToggle != null) DotKeyToggle.IsOn = _dotKeyOn;
             }
             catch { }
-        }
-
-        private void DotKey_Click(object sender, RoutedEventArgs e)
-        {
-            var b = sender as Button;
-            if (b == null) return;
-            int vk;
-            if (!int.TryParse(b.Tag as string, out vk)) return;
-            _dotKeyVk = vk;
-            Save("MouseDotKeyVk_", vk);
-            ApplyDotKeyStyles();
-            FlashButton(b, "已应用 ✓");
         }
         // ===================== 0.9.5：鼠标速度（鼠标点移动倍率）=====================
         // 鼠标点原来与屏幕 1:1 映射：走完整个屏幕才碰到垫面边缘。倍率放大后只需更少鼠标位移就能到边，
