@@ -2322,7 +2322,7 @@ namespace KeyDisplay
                 double w = _dragStartW, h = _dragStartH, ml = _dragStartML, mt = _dragStartMT;
                 if (key == MousePad)
                 {
-                    // 鼠标垫：任意边/四角拖动都等比例缩放（宽高比 = 起点比例），不做自由缩放、不做缩放吸附。
+                    // 鼠标垫：任意边/四角拖动都等比例缩放（宽高比 = 起点比例），不做自由缩放；0.9.5 起同样支持参考线吸附（等比保持）。
                     ComputePadEqualScale(ref w, ref h, ref ml, ref mt, dx, dy);
                     // 0.7.1 尺寸上限：鼠标垫同样按窗口可视边界钳制（等比保比例，锚定边补偿按主导轴重算）。
                     // 宽 = RootPanel 可视边界；高 = 面板底边上方（不遮挡面板下边缘）。
@@ -2349,6 +2349,27 @@ namespace KeyDisplay
                             {
                                 mt = _dragMode.Contains("t") ? _dragStartMT + (_dragStartH - h) : _dragStartMT;
                                 ml = _dragStartML;
+                            }
+                        }
+                    }
+                    // 0.9.5（用户要求）：鼠标垫等比缩放也做参考线吸附。
+                    // 做法：先用与按键同一套 ApplyDragSnap 判定"被调整的边"，取主导轴作为吸附结果，
+                    // 另一轴按起点比例重算，从而在吸附的同时保持等比；吸附到的最小尺寸不得小于 MinPadW/MinPadH。
+                    {
+                        double sw = w, sh = h, sml = ml, smt = mt;
+                        ApplyDragSnap(key, ref sw, ref sh, ref sml, ref smt);
+                        double dw = Math.Abs(sw - w), dh = Math.Abs(sh - h);
+                        if (dw > 0.01 || dh > 0.01)
+                        {
+                            double rw = _dragStartW > 1 ? _dragStartW : 1, rh = _dragStartH > 1 ? _dragStartH : 1;
+                            double nw, nh;
+                            if (dw / rw >= dh / rh) { nw = sw; nh = sw * (rh / rw); }
+                            else { nh = sh; nw = sh * (rw / rh); }
+                            if (nw >= MinPadW && nh >= MinPadH)
+                            {
+                                w = nw; h = nh;
+                                if (_dragMode.Contains("l")) ml = (_dragStartML + _dragStartW) - w;
+                                if (_dragMode.Contains("t")) mt = (_dragStartMT + _dragStartH) - h;
                             }
                         }
                     }
