@@ -179,6 +179,7 @@ namespace KeyDisplay
         // 0.9.5：鼠标光标按键（0=关闭；1/2/4/5/6=左右中/侧下/侧上；7/8=滚轮上/下）——该键按下时光标用"按下色"
         private int _dotKeyVk;
         private double _dotSize = 10;   // 0.9.5：光标点大小（px）
+        private double _keyScaleUser;   // 0.9.5：整体按键大小（-20..+20 %，0=原尺寸）
         private bool _dotKeyOn;   // 0.9.5：鼠标光标按键开关（关闭时忽略映射）
         // 0.9.5：按键区背景是否全透明（用户要求默认透明：键位/鼠标垫直接浮在游戏画面上）
         private bool _panelTransparent = true;
@@ -781,6 +782,10 @@ namespace KeyDisplay
             const double needW = 380, needH = 272;                   // 键区固有设计尺寸
             double scale = Math.Min(1.0, Math.Min(availW / needW, availH / needH));
             if (scale < 0.4) scale = 0.4;                            // 下限：再小就看不清了
+            // 0.9.5：叠加"整体按键大小"（用户可在设置窗口按 -20%..+20% 调整，0 = 原尺寸）
+            scale *= (1.0 + _keyScaleUser / 100.0);
+            if (scale < 0.2) scale = 0.2;
+            if (scale > 2.0) scale = 2.0;
             _keyScale.ScaleX = scale;
             _keyScale.ScaleY = scale;
             // 0.9.5：键区缩放/窗口尺寸变化时，若右键菜单开着则重算位置（否则菜单不跟随窗口）
@@ -1564,6 +1569,10 @@ namespace KeyDisplay
             if (_dotSize < 4) _dotSize = 4;
             if (_dotSize > 30) _dotSize = 30;
             try { MouseDot.Width = _dotSize; MouseDot.Height = _dotSize; } catch { }
+            _keyScaleUser = ParseDoubleOr(v["KeyScale_"], 0);
+            if (_keyScaleUser < -20) _keyScaleUser = -20;
+            if (_keyScaleUser > 20) _keyScaleUser = 20;
+            FitLayoutToWindow();   // 整体大小变化后立即重算键区缩放
             _panelTransparent = !(v["PanelTransparent_"] != null && v["PanelTransparent_"].ToString() == "0");
             DiagLog("panel transparent = " + _panelTransparent);
             try

@@ -406,6 +406,9 @@ namespace KeyDisplay
             _dotSize = ReadDouble(v["DotSize_"], 10, 4, 30);
             DotSizeSlider.Value = _dotSize;
             DotSizeVal.Text = ((int)_dotSize) + " px";
+            _keyScaleUser = (int)ReadDouble(v["KeyScale_"], 0, -20, 20);
+            KeyScaleSlider.Value = _keyScaleUser;
+            KeyScaleVal.Text = (_keyScaleUser > 0 ? "+" : "") + _keyScaleUser;
             _dotKeyVk = (int)ReadDouble(v["MouseDotKeyVk_"], 0, 0, 255);
             _dotKeyName = (v["MouseDotKeyName_"] as string) ?? "";
             _dotKeyOn = !(v["MouseDotKeyOn_"] != null && v["MouseDotKeyOn_"].ToString() == "0") && _dotKeyVk != 0;
@@ -430,6 +433,7 @@ namespace KeyDisplay
         private bool _padVisible = true;
         private double _mouseSpeed = 1.0;   // 0.9.5：鼠标点移动倍率（0.5..4.0）
         private double _dotSize = 10;       // 0.9.5：光标点大小（4..30 px）
+        private int _keyScaleUser;          // 0.9.5：整体按键大小（-20..+20 %）
         private bool _panelBgTransparent = true;   // 0.9.5：按键区背景全透明（默认透明）
         private bool _locked = true;
 
@@ -927,6 +931,14 @@ namespace KeyDisplay
             _mouseSpeed = e.NewValue;
             MouseSpeedVal.Text = FormatSpeed(_mouseSpeed);
             Save("MouseSpeed_", Math.Round(_mouseSpeed, 2));
+        }
+
+        private void KeyScale_Changed(object sender, Windows.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+        {
+            if (!_loaded) return;
+            _keyScaleUser = (int)Math.Round(e.NewValue);
+            KeyScaleVal.Text = (_keyScaleUser > 0 ? "+" : "") + _keyScaleUser;
+            Save("KeyScale_", _keyScaleUser);
         }
 
         private void DotSize_Changed(object sender, Windows.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)

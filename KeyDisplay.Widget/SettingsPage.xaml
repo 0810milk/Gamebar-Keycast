@@ -278,6 +278,17 @@
                         <Border x:Name="LayoutCard" CornerRadius="8" BorderThickness="1" Padding="16">
                             <StackPanel>
                                 <TextBlock x:Name="LayoutCardTitle" Text="显示与布局" FontSize="15" FontWeight="SemiBold"/>
+                                <!-- 0.9.5：整体按键大小 —— 按百分比整体缩放面板（默认 0，范围 -20 ~ +20） -->
+                                <Grid Margin="0,12,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock x:Name="KeyScaleLbl" Grid.Column="0" Text="整体按键大小" FontSize="13" VerticalAlignment="Center"/>
+                                    <TextBlock x:Name="KeyScaleVal" Grid.Column="1" Text="0" FontSize="13" Margin="12,0,0,0" VerticalAlignment="Center" MinWidth="46" TextAlignment="Right"/>
+                                </Grid>
+                                <Slider x:Name="KeyScaleSlider" Minimum="-20" Maximum="20" StepFrequency="1" ValueChanged="KeyScale_Changed" Margin="0,4,0,0"/>
+                                <TextBlock x:Name="KeyScaleDesc" Text="按百分比整体放大/缩小面板上的按键（0 = 原尺寸）" FontSize="12" Opacity="0.7" Margin="0,2,0,0" TextWrapping="Wrap"/>
 
                                 <TextBlock x:Name="OpacityLbl" Text="按键透明度" FontSize="13" Margin="0,14,0,0"/>
                                 <Grid Margin="0,6,0,0">
