@@ -733,6 +733,8 @@ namespace KeyDisplay
             if (scale < 0.4) scale = 0.4;                            // 下限：再小就看不清了
             _keyScale.ScaleX = scale;
             _keyScale.ScaleY = scale;
+            // 0.9.5：键区缩放/窗口尺寸变化时，若右键菜单开着则重算位置（否则菜单不跟随窗口）
+            if (KeyMenuPanel != null && KeyMenuPanel.Visibility == Visibility.Visible) PositionMenu();
         }
 
         private void ApplyTheme()
@@ -1143,6 +1145,7 @@ namespace KeyDisplay
             DeleteConfirmNo.Background = KeyBgB();
             DeleteConfirmNo.BorderBrush = BorderB();
             DeleteConfirmNoText.Foreground = KeyFgB();
+            RefreshKeyMenuColors();   // 0.9.5：配色变化立即刷新已打开的右键菜单
         }
 
 

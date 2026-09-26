@@ -115,25 +115,44 @@ namespace KeyDisplay
         }
 
         // 统一显示逻辑：把 KeyMenu 定位到鼠标附近并显示覆盖层。
-        // layerPos 为 KeyLayer 坐标；KeyMenuPanel 覆盖层 Grid 与 KeyLayer 左上角对齐（同为根 Grid 的直接子元素、Row0 起点），
-        // 所以直接用 KeyMenu.Margin 的 Left/Top 即可完成定位。
+        // layerPos 为 KeyLayer **本地（未缩放）**坐标；覆盖层 KeyMenuPanel 与 KeyLayer 左上角对齐，
+        // 但它不参与 KeyLayer 的缩放，所以定位时必须乘上当前 _keyScale，否则窗口缩放后菜单位置会偏。
         private void ShowMenu(Point layerPos)
         {
-            // 定位：下界保 4px，上界按窗口可视区钳制（菜单 130 宽 × 约 120 高，防右下角右键时溢出被裁剪）
-            // 0.8.3：layerPos 是 KeyLayer 坐标；负坐标键左缘补偿给 KeyLayer 加了 Margin.Left，
-            // 菜单必须同量右移，否则相对右键目标整体偏移（最多 300px）
-            double mx = Math.Max(4, layerPos.X + 8 + KeyLayer.Margin.Left);
-            double my = Math.Max(4, layerPos.Y + 8);
-            double winW = KeyMenuPanel.ActualWidth > 0 ? KeyMenuPanel.ActualWidth : 340;
-            double winH = KeyMenuPanel.ActualHeight > 0 ? KeyMenuPanel.ActualHeight : 240;
-            mx = Math.Min(mx, Math.Max(4, winW - 134));
-            my = Math.Min(my, Math.Max(4, winH - 120));
-            KeyMenu.Margin = new Thickness(mx, my, 0, 0);
-            KeyMenu.HorizontalAlignment = HorizontalAlignment.Left;
-            KeyMenu.VerticalAlignment = VerticalAlignment.Top;
+            _menuAnchorLocal = layerPos;
+            _menuAnchorValid = true;
+            PositionMenu();
             KeyMenuPanel.Visibility = Visibility.Visible;
             FadeIn(KeyMenuPanel);   // 0.8.2 弹层淡入
             ApplyKeyMenuTheme();
+        }
+
+        // 菜单锚点（KeyLayer 本地坐标）与位置重算：窗口尺寸/键区缩放变化时由 FitLayoutToWindow 调用，
+        // 保证菜单始终贴在右键的位置（原来只在打开时算一次，缩放窗口后就不跟随了）。
+        private Point _menuAnchorLocal;
+        private bool _menuAnchorValid;
+
+        private void PositionMenu()
+        {
+            try
+            {
+                if (!_menuAnchorValid || KeyMenu == null) return;
+                double s = (_keyScale != null && _keyScale.ScaleX > 0.05) ? _keyScale.ScaleX : 1.0;
+                double mx = Math.Max(4, _menuAnchorLocal.X * s + 8 + KeyLayer.Margin.Left);
+                double my = Math.Max(4, _menuAnchorLocal.Y * s + 8);
+
+                double winW = KeyMenuPanel.ActualWidth > 0 ? KeyMenuPanel.ActualWidth : 340;
+                double winH = KeyMenuPanel.ActualHeight > 0 ? KeyMenuPanel.ActualHeight : 240;
+                double menuW = KeyMenu.ActualWidth > 0 ? KeyMenu.ActualWidth : KeyMenu.Width;
+                double menuH = KeyMenu.ActualHeight > 0 ? KeyMenu.ActualHeight : 200;
+                mx = Math.Min(mx, Math.Max(4, winW - menuW - 8));
+                my = Math.Min(my, Math.Max(4, winH - menuH - 8));
+
+                KeyMenu.Margin = new Thickness(mx, my, 0, 0);
+                KeyMenu.HorizontalAlignment = HorizontalAlignment.Left;
+                KeyMenu.VerticalAlignment = VerticalAlignment.Top;
+            }
+            catch { }
         }
 
         // 右键按键菜单：记录目标键，清空并重建「删除/复制/修改显示名」三项。
@@ -329,6 +348,31 @@ namespace KeyDisplay
         {
             var s = b as Windows.UI.Xaml.Media.SolidColorBrush;
             return s != null ? s.Color : Color.FromArgb(0xFF, 0x1F, 0x1F, 0x1F);
+        }
+
+        // 主题/配色变化时刷新已打开的右键菜单（0.9.5 修复：原来只有打开菜单时才上色，
+        // 菜单开着改主题不会跟着变，必须重新打开才看到）
+        private void RefreshKeyMenuColors()
+        {
+            try
+            {
+                ApplyKeyMenuTheme();
+                foreach (var ch in KeyMenuItems.Children)
+                {
+                    var b = ch as Border;
+                    if (b == null) continue;
+                    if (b.Height == 1) { b.Background = FloatBorderB(); continue; }   // 分隔线
+                    b.Background = TransparentBrush;                                   // 复位悬停/按下残留
+                    var grid = b.Child as Grid;
+                    if (grid == null) continue;
+                    foreach (var c2 in grid.Children)
+                    {
+                        var tb = c2 as TextBlock;
+                        if (tb != null && !IsDangerForeground(tb.Foreground)) tb.Foreground = KeyFgB();
+                    }
+                }
+            }
+            catch { }
         }
 
         // 单个菜单项：底色/边框沿用浮层派生色系（0.8.2）；0.9.5 起项内是 Grid（图标+文字），
