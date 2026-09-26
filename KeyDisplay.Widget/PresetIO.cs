@@ -79,7 +79,7 @@ namespace KeyDisplay
             var data = new JsonObject();
             data.SetNamedValue("theme", JsonValue.CreateStringValue(p.Theme ?? "dark"));
             var colors = new JsonObject();
-            string[] keys = { "panel", "border", "keyBg", "keyFg", "pressedBg", "pressedFg", "pad", "dot", "accent" };
+            string[] keys = { "panel", "border", "keyBg", "keyFg", "pressedBg", "pressedFg", "pad", "dot", "accent", "dotPressed" };
             for (int k = 0; k < keys.Length; k++)
             {
                 colors.SetNamedValue(keys[k],
@@ -193,12 +193,12 @@ namespace KeyDisplay
                 if (t == "light" || t == "custom") p.Theme = t;
             }
 
-            p.Colors = new string[9];   // 0.9.5：9 槽（第 9 项 accent）；旧预设缺该字段时留空串
+            p.Colors = new string[10];   // 0.9.5：10 槽（accent + dotPressed）；旧预设缺该字段时留空串
             IJsonValue cv = data.GetNamedValue("colors", null);
             if (cv != null && cv.ValueType == JsonValueType.Object)
             {
                 JsonObject colors = cv.GetObject();
-                string[] keys = { "panel", "border", "keyBg", "keyFg", "pressedBg", "pressedFg", "pad", "dot", "accent" };
+                string[] keys = { "panel", "border", "keyBg", "keyFg", "pressedBg", "pressedFg", "pad", "dot", "accent", "dotPressed" };
                 for (int k = 0; k < keys.Length; k++)
                 {
                     string s = GetStringValue(colors, keys[k], "");

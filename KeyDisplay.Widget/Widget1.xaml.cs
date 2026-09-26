@@ -122,6 +122,7 @@ namespace KeyDisplay
         private readonly SolidColorBrush _darkPanel = new SolidColorBrush(Color.FromArgb(0xE8, 0x12, 0x12, 0x12));       // 深灰黑面板（半透明玻璃感，不带蓝调）
         private readonly SolidColorBrush _darkPad = new SolidColorBrush(Color.FromArgb(0x4D, 0x00, 0x00, 0x00));        // 鼠标垫半透明黑
         private readonly SolidColorBrush _darkDot = new SolidColorBrush(Colors.White);                                   // 鼠标点白色
+        private readonly SolidColorBrush _darkDotPressed = new SolidColorBrush(Color.FromArgb(0xFF, 0x4C, 0xC2, 0xFF));  // 0.9.5：鼠标点按下（亮蓝）
         private readonly SolidColorBrush _darkAccent = new SolidColorBrush(Color.FromArgb(0xFF, 0x4C, 0xC2, 0xFF));      // 强调色亮蓝 #FF4CC2FF
 
         // 亮色主题画刷（0.9.4：中性白玻璃——去掉 0.9.3 引入的冷蓝调）
@@ -144,6 +145,7 @@ namespace KeyDisplay
         private readonly SolidColorBrush _pinkPressedFg = new SolidColorBrush(Color.FromArgb(0xFF, 0xB0, 0x57, 0x7E));  // 按下深粉字
         private readonly SolidColorBrush _pinkPad = new SolidColorBrush(Color.FromArgb(0x4D, 0xFF, 0xB3, 0xC6));      // 鼠标垫 #4DFFB3C6
         private readonly SolidColorBrush _pinkDot = new SolidColorBrush(Color.FromArgb(0xFF, 0xB0, 0x57, 0x7E));     // 鼠标点深粉
+        private readonly SolidColorBrush _pinkDotPressed = new SolidColorBrush(Color.FromArgb(0xFF, 0xC2, 0x18, 0x5B)); // 0.9.5：鼠标点按下（玫红）
         private readonly SolidColorBrush _pinkAccent = new SolidColorBrush(Color.FromArgb(0xFF, 0xC2, 0x18, 0x5B));     // 强调色玫红 #FFC2185B
 
         // 灰色主题画刷（0.9.4：中性浅灰玻璃 + 黑字 + 深灰按下——去掉 0.9.3 引入的冷蓝调）
@@ -155,6 +157,7 @@ namespace KeyDisplay
         private readonly SolidColorBrush _grayPressedFg = new SolidColorBrush(Colors.White);  // 按下白字
         private readonly SolidColorBrush _grayPad = new SolidColorBrush(Color.FromArgb(0x47, 0x00, 0x00, 0x00));      // 鼠标垫半透明黑
         private readonly SolidColorBrush _grayDot = new SolidColorBrush(Color.FromArgb(0xFF, 0x1A, 0x1A, 0x1A));      // 鼠标点近黑
+        private readonly SolidColorBrush _grayDotPressed = new SolidColorBrush(Color.FromArgb(0xFF, 0x00, 0x67, 0xC0)); // 0.9.5：鼠标点按下（深蓝）
         private readonly SolidColorBrush _grayAccent = new SolidColorBrush(Color.FromArgb(0xFF, 0x00, 0x67, 0xC0));     // 强调色深蓝 #FF0067C0
 
         // 蓝色主题画刷（浅蓝玻璃 + 深蓝字；0.8.3 面板通透化）
@@ -166,12 +169,15 @@ namespace KeyDisplay
         private readonly SolidColorBrush _bluePressedFg = new SolidColorBrush(Color.FromArgb(0xFF, 0x1F, 0x4E, 0x79));  // 按下深蓝字
         private readonly SolidColorBrush _bluePad = new SolidColorBrush(Color.FromArgb(0x59, 0xBF, 0xD9, 0xEE));      // 鼠标垫 #59BFD9EE
         private readonly SolidColorBrush _blueDot = new SolidColorBrush(Color.FromArgb(0xFF, 0x1F, 0x4E, 0x79));     // 鼠标点深蓝
+        private readonly SolidColorBrush _blueDotPressed = new SolidColorBrush(Color.FromArgb(0xFF, 0x0A, 0x64, 0xB4)); // 0.9.5：鼠标点按下（深蓝）
         private readonly SolidColorBrush _blueAccent = new SolidColorBrush(Color.FromArgb(0xFF, 0x0A, 0x64, 0xB4));     // 强调色深蓝 #FF0A64B4
 
         // 按键透明度滑条设定值（0~100，默认 100）；锁定开=按此值，锁定关=临时强制 100%
         private double _keyOpacity = 100.0;
         // 0.9.5：鼠标速度（鼠标点移动倍率）：1.0 = 屏幕与垫面 1:1；调大后更少位移就碰到垫面边缘
         private double _mouseSpeed = 1.0;
+        // 0.9.5：鼠标光标按键（0=关闭；1/2/4/5/6=左右中/侧下/侧上；7/8=滚轮上/下）——该键按下时光标用"按下色"
+        private int _dotKeyVk;
         // 0.9.5：按键区背景是否全透明（用户要求默认透明：键位/鼠标垫直接浮在游戏画面上）
         private bool _panelTransparent = true;
 
@@ -245,12 +251,13 @@ namespace KeyDisplay
             catch { }
         }
 
-        // ===================== 自定义主题色（9 槽位，custom 态）=====================
+        // ===================== 自定义主题色（10 槽位，custom 态）=====================
         // 持久化键（Custom_ 前缀，存 "#RRGGBB"）；缺省回落 dark 预设对应值
         private static readonly string[] CustomKeys = { "CustomPanel_", "CustomBorder_", "CustomKeyBg_", "CustomKeyFg_",
-            "CustomPressedBg_", "CustomPressedFg_", "CustomPad_", "CustomDot_", "CustomAccent_" };
-        // 动态画刷：custom 态下 9 个语义方法返回它们；启动/修改时用 Custom_ 键刷新
-        private readonly SolidColorBrush[] _customBrushes = new SolidColorBrush[9];
+            "CustomPressedBg_", "CustomPressedFg_", "CustomPad_", "CustomDot_", "CustomAccent_",
+            "CustomDotPressed_" };   // 0.9.5：第 10 槽「鼠标点·按下色」
+        // 动态画刷：custom 态下各语义方法返回它们；启动/修改时用 Custom_ 键刷新
+        private readonly SolidColorBrush[] _customBrushes = new SolidColorBrush[10];   // 0.9.5：9→10（新增鼠标点按下色）
         private bool _defaultPadPending = false;   // 内置默认预设的垫尺寸待首帧快照按本机屏幕比例重算（宽度沿用发布者，高度=宽×本机屏高/宽）
 
 
@@ -270,6 +277,8 @@ namespace KeyDisplay
         private Brush PressFgB() => _theme == "custom" ? _customBrushes[5] : P(_darkPressedFg, _grayPressedFg, _lightPressedFg, _pinkPressedFg, _bluePressedFg); // 按下文字
         private Brush PadB() => _theme == "custom" ? _customBrushes[6] : P(_darkPad, _grayPad, _lightPad, _pinkPad, _bluePad);             // 鼠标垫背景
         private Brush DotB() => _theme == "custom" ? _customBrushes[7] : P(_darkDefaultFg, _grayDot, _darkDefaultBg, _pinkDot, _blueDot);  // 鼠标点（dark=白、light=黑、gray=黑、pink=深粉、blue=深蓝）
+        // 0.9.5：鼠标点按下色（当「鼠标光标按键」被按下时使用）
+        private Brush DotPressedB() => _theme == "custom" ? _customBrushes[9] : P(_darkDotPressed, _grayDotPressed, _grayDotPressed, _pinkDotPressed, _blueDotPressed);
         private Brush AccentB() => _theme == "custom" ? _customBrushes[8] : P(_darkAccent, _grayAccent, _lightAccent, _pinkAccent, _blueAccent);   // 强调色（面板工具按钮/高亮）
         // 强调色前景对比色：亮度感知加权判亮（>0.55）返回近黑字，否则白字；取不到 SolidColorBrush 时回落白色
         private Brush AccentFgB()
@@ -320,11 +329,11 @@ namespace KeyDisplay
             catch { return new SolidColorBrush(Colors.DarkGray); }
         }
 
-        // 内置默认布局预设（0.8.2 更新）：来自用户提供的"数据区\默认.json"（导出格式，PresetIO 可解析），
+        // 内置默认布局预设（0.9.5 更新）：用户 2026-09-26 导出的当前布局（Tab 0,-224 / CapsLock 0,-170，隐藏全部鼠标键）。
 // 含鼠标垫位置 padPos(94,0) 与 Tab 键尺寸 56;48（用户当前实际配置，以此为准）。
 // 启动时若用户从未自定义过布局（无 Layout_* 持久化）自动套用；「重置布局」也回到这套。
         private const string BuiltInDefaultLayoutJson =
-            @"{""app"":""KeyDisplay"",""formatVersion"":1,""type"":""layout"",""name"":""默认"",""savedAt"":""2026-08-20T08:34:58"",""data"":{""keyOpacity"":100,""padVisible"":true,""padW"":223.58695983886719,""padH"":139.75822448730469,""padPosX"":94,""padPosY"":0,""keys"":{""Layout_X2"":""36;36;190;7.33332824707031"",""Layout_WheelUp"":""36;36;230.666732788086;57.3333358764648"",""Layout_M"":""36;36;98;51.3333358764648"",""Layout_D"":""52;48;68;1.99999809265137"",""Layout_S"":""52;48;66.0000076293945;2"",""Layout_Alt"":""51;48;-96;3.99998474121094"",""Layout_A"":""52;48;62.0000076293945;1.99999046325684"",""Layout_Shift"":""68;48;-13.9999904632568;-54"",""Layout_X1"":""36;36;278;5.99996948242188"",""Layout_Ctrl"":""58;48;-90;3.99998474121094"",""Layout_MR"":""36;36;102;51.3333435058594"",""Layout_WheelDown"":""36;36;230.666702270508;61.3333320617676"",""Layout_F"":""52;48;72;2.00000381469727"",""Layout_L"":""36;36;94;51.3333358764648"",""Layout_R"":""52;48;62;1.9073486328125E-06"",""Layout_Space"":""176;48;113.333335876465;-52.0000228881836"",""Layout_E"":""52;48;60;1.9073486328125E-06"",""Layout_Q"":""52;48;52.6666793823242;1.9073486328125E-06"",""Layout_W"":""52;48;55.9999923706055;1.9073486328125E-06""},""customKeys"":{""Tab"":{""pos"":""-13.9999904632568;-224"",""size"":""56;48""}},""deletedKeys"":[]}}";
+            @"{""formatVersion"":1,""type"":""layout"",""name"":""默认"",""savedAt"":""2026-09-26T14:50:39"",""data"":{""keyOpacity"":98,""padVisible"":true,""keys"":{""Layout_D"":""52;48;75.9999923706055;-1.9999885559082"",""Layout_S"":""52;48;75.9999923706055;-1.9999885559082"",""Layout_Alt"":""68;48;1.99999237060547;0"",""Layout_Shift"":""66;48;0;0"",""Layout_A"":""52;48;75.9999923706055;-1.9999885559082"",""Layout_Ctrl"":""68;48;2;-7.62939453125E-06"",""Layout_F"":""52;48;75.9999923706055;-1.9999885559082"",""Layout_R"":""64;48;63.9999923706055;2.00027847290039"",""Layout_Space"":""76;48;226;-56.0000076293945"",""Layout_E"":""52;48;63.9999923706055;2.00027847290039"",""Layout_Q"":""52;48;63.9999923706055;2.00027847290039"",""Layout_W"":""52;48;63.9999923706055;2.00027847290039""},""customKeys"":{""Tab"":{""pos"":""0;-224"",""size"":""56;48""},""CapsLock"":{""pos"":""0;-170"",""size"":""68;48""}},""deletedKeys"":[""X1"",""MR"",""L"",""M"",""X2"",""WheelUp"",""WheelDown""]}}";
 
         // 首次启动初始化默认布局：仅当用户从未自定义过布局（无 Layout_* 键）时，把内置默认预设写入持久化。
         // 只写持久化不重建 UI——构造函数场景由后续 Restore* 恢复链应用；重置场景由调用方补重建。
@@ -461,8 +470,9 @@ namespace KeyDisplay
             }
             catch { }
 
-            // 0.9.5：这里原先会套用自带的「内置默认布局预设」，但那份 JSON 的键位偏移基于 0.7.x 的另一套
-            // 基准（且 Layout_ 的 tx/ty 是相对位移），叠到当前 XAML 基准会互相重叠——已停用。\n            // 现在首次启动就是 XAML 内置布局（与鼠标键位置、鼠标垫位置天然一致）。\n            CaptureDefaultBoxes();   // 记录 XAML 初始尺寸/位置，供「重置按键布局」精确还原
+            // 0.9.5：无用户布局自定义时套用内置默认布局（用户 2026-09-26 导出的当前布局：
+            // Tab(0,-224) / CapsLock(0,-170)、隐藏全部鼠标键）。已有布局的用户不受影响（函数内部会提前返回）。
+            ApplyBuiltInDefaultLayoutIfNeeded();
 
             // 布局自定义：所有按键/鼠标键附加指针处理（边缘/四角拖拽缩放）；鼠标垫也参与（长按移动 + 等比缩放）
             foreach (var kv in _keys) AttachResize(kv.Value);
@@ -948,6 +958,8 @@ namespace KeyDisplay
                 }
 
                 UpdatePadSize(snap.VsW, snap.VsH);
+                _lastMouseBits = snap.Mouse;          // 0.9.5：缓存鼠标位（光标按键映射用）
+                _lastExtraKeys = snap.ExtraKeys;      // 0.9.5：缓存 VK 位图（同上）
                 // 0.7.1：内置默认预设的垫尺寸在首帧快照到达后按本机虚拟屏幕比例重算（宽度沿用发布者，比例跟随本机）
                 if (_defaultPadPending && snap.VsW > 0 && snap.VsH > 0) ApplyDefaultPadRatio(snap.VsW, snap.VsH);
                 // 目标点：绝对屏幕坐标 → 垫面位置（点 = 屏幕的真实镜像）
@@ -1007,6 +1019,8 @@ namespace KeyDisplay
             Canvas.SetLeft(MouseDot, _smoothX);
             Canvas.SetTop(MouseDot, _smoothY);
             MouseDot.Visibility = Visibility.Visible;
+            // 0.9.5：鼠标光标按键映射 —— 命中的键按下时，光标改用"鼠标点按下"色
+            try { MouseDot.Fill = IsDotKeyDown(_dotKeyVk) ? DotPressedB() : DotB(); } catch { }
         }
 
         // 鼠标垫尺寸跟随屏幕纵横比：随帧下发的 vs_w/vs_h 就是鼠标坐标的映射基准，
@@ -1245,7 +1259,8 @@ namespace KeyDisplay
                 // 关键：主动把内置键与鼠标垫还原成 XAML 初始尺寸/位置/显示名（旧位移不会自己消失）
                 foreach (var kv in _keys) ResetOneKeyToDefault(kv.Key, kv.Value);
                 foreach (var kv in _mouse) ResetOneKeyToDefault(kv.Key, kv.Value);
-                ApplyDefaultPadOnly();   // 0.9.5：鼠标垫恢复发布默认（223.59 宽 / (94,0)，高度按屏幕比例重算）
+                ApplyBuiltInDefaultLayoutIfNeeded();   // 0.9.5：键位/自定义键/隐藏键回到内置默认布局
+                ApplyDefaultPadOnly();                 // 0.9.5：鼠标垫恢复发布默认（223.59 宽 / (94,0)，高度按屏幕比例重算）
 
                 // 内置默认的自定义键：Tab（历史默认就有；这里给出合理位置：键盘块下方，尺寸 56×48）
                 v["Custom_Tab"] = "1";
@@ -1331,6 +1346,35 @@ namespace KeyDisplay
             catch { }
         }
 
+        // 判定"鼠标光标按键"是否按下。按 snapshot 缓存上次结果，供动画帧复用。
+        private bool _dotKeyDownCached;
+
+        private bool _dotKeyDown;
+        private byte _lastMouseBits;
+        private byte[] _lastExtraKeys;
+
+        private bool IsDotKeyDown(int vk)
+        {
+            if (vk <= 0) return false;
+            // 鼠标键：优先用 mouse 位（可靠、每帧更新）；滚轮 7/8 与其它键走 VK 位图
+            switch (vk)
+            {
+                case 1: return (_lastMouseBits & 0x01) != 0;
+                case 2: return (_lastMouseBits & 0x02) != 0;
+                case 4: return (_lastMouseBits & 0x04) != 0;
+                case 5: return (_lastMouseBits & 0x08) != 0;
+                case 6: return (_lastMouseBits & 0x10) != 0;
+            }
+            return IsVkLit(vk);
+        }
+
+        // 从最近一帧快照读 VK 位（ExtraKeys[vk>>3] 的第 vk&7 位）
+        private bool IsVkLit(int vk)
+        {
+            var ex = _lastExtraKeys;
+            if (ex == null || vk < 0 || vk > 255) return false;
+            return ((ex[vk >> 3] >> (vk & 7)) & 1) != 0;
+        }
         private string CustomKeysFingerprint()
         {
             var v = ApplicationData.Current.LocalSettings.Values;
@@ -1417,6 +1461,7 @@ namespace KeyDisplay
             _mouseSpeed = ParseDoubleOr(v["MouseSpeed_"], _mouseSpeed);
             if (_mouseSpeed < 0.5) _mouseSpeed = 0.5;
             if (_mouseSpeed > 4.0) _mouseSpeed = 4.0;
+            _dotKeyVk = (int)ParseDoubleOr(v["MouseDotKeyVk_"], _dotKeyVk);
             _panelTransparent = !(v["PanelTransparent_"] != null && v["PanelTransparent_"].ToString() == "0");
             DiagLog("panel transparent = " + _panelTransparent);
             try
@@ -1878,11 +1923,11 @@ namespace KeyDisplay
         // 当前主题预设的第 k 槽颜色（dark/gray/light/pink/blue 从现有画刷字段取，与五态主题一致）
         private Color PresetColor(int k)
         {
-            Brush[] d = { _darkPanel, _darkBorder, _darkDefaultBg, _darkDefaultFg, _darkPressedBg, _darkPressedFg, _darkPad, _darkDot, _darkAccent };
-            Brush[] g = { _grayPanel, _grayBorder, _grayKeyBg, _grayKeyFg, _grayPressedBg, _grayPressedFg, _grayPad, _grayDot, _grayAccent };
-            Brush[] l = { _lightPanel, _lightBorder, _lightDefaultBg, _lightDefaultFg, _lightPressedBg, _lightPressedFg, _lightPad, _darkDefaultBg, _lightAccent };
-            Brush[] p = { _pinkPanel, _pinkBorder, _pinkKeyBg, _pinkKeyFg, _pinkPressedBg, _pinkPressedFg, _pinkPad, _pinkDot, _pinkAccent };
-            Brush[] b = { _bluePanel, _blueBorder, _blueKeyBg, _blueKeyFg, _bluePressedBg, _bluePressedFg, _bluePad, _blueDot, _blueAccent };
+            Brush[] d = { _darkPanel, _darkBorder, _darkDefaultBg, _darkDefaultFg, _darkPressedBg, _darkPressedFg, _darkPad, _darkDot, _darkAccent, _darkDotPressed };
+            Brush[] g = { _grayPanel, _grayBorder, _grayKeyBg, _grayKeyFg, _grayPressedBg, _grayPressedFg, _grayPad, _grayDot, _grayAccent, _grayDotPressed };
+            Brush[] l = { _lightPanel, _lightBorder, _lightDefaultBg, _lightDefaultFg, _lightPressedBg, _lightPressedFg, _lightPad, _darkDefaultBg, _lightAccent, _grayDotPressed };
+            Brush[] p = { _pinkPanel, _pinkBorder, _pinkKeyBg, _pinkKeyFg, _pinkPressedBg, _pinkPressedFg, _pinkPad, _pinkDot, _pinkAccent, _pinkDotPressed };
+            Brush[] b = { _bluePanel, _blueBorder, _blueKeyBg, _blueKeyFg, _bluePressedBg, _bluePressedFg, _bluePad, _blueDot, _blueAccent, _blueDotPressed };
             var pick = _theme == "dark" ? d : _theme == "gray" ? g : _theme == "light" ? l : _theme == "pink" ? p : b;
             return ((SolidColorBrush)pick[k]).Color;
         }

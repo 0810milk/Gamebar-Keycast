@@ -29,10 +29,10 @@ namespace KeyDisplay
         private static readonly string[] CustomKeys = {
             "CustomPanel_", "CustomBorder_", "CustomKeyBg_", "CustomKeyFg_",
             "CustomPressedBg_", "CustomPressedFg_", "CustomPad_", "CustomDot_",
-            "CustomAccent_" };   // 0.9.5：第 9 槽「强调色」追加在末尾（避免既有索引错位）
+            "CustomAccent_", "CustomDotPressed_" };   // 0.9.5：第 9 槽强调色、第 10 槽「鼠标点·按下色」
 
         // 颜色页的显示顺序：面板 → 强调色 → 边框 → …（强调色在数组里是索引 8）
-        private static readonly int[] SlotOrder = { 0, 8, 1, 2, 3, 4, 5, 6, 7 };
+        private static readonly int[] SlotOrder = { 0, 8, 1, 2, 3, 4, 5, 6, 7, 9 };   // 0.9.5：末尾追加「鼠标点按下」
 
         private sealed class Palette
         {
@@ -50,11 +50,11 @@ namespace KeyDisplay
         // 五个内置主题的 9 槽预设色（与主小组件 Widget1.xaml.cs 的预设画刷逐位一致：
         // 面板/边框/按键底/按键字/按下底/按下字/鼠标垫/鼠标点/强调色）
         private static readonly string[][] ThemeSlotHex = {
-            new[] { "#E8121212", "#52FFFFFF", "#F21A1A1A", "#FFFFFFFF", "#FFFFFFFF", "#FF101010", "#4D000000", "#FFFFFFFF", "#FF4CC2FF" }, // dark
-            new[] { "#E0CFCFCF", "#5C5A5A5A", "#FFEAEAEA", "#FF1A1A1A", "#FF4A4A4A", "#FFFFFFFF", "#47000000", "#FF1A1A1A", "#FF0067C0" }, // gray
-            new[] { "#E0F5F5F5", "#59333333", "#F2FFFFFF", "#FF000000", "#FF000000", "#FFFFFFFF", "#42000000", "#F21A1A1A", "#FF0067C0" }, // light
-            new[] { "#E0FFB3C6", "#CCB0577E", "#FFFFB3C6", "#FFFFFFFF", "#FFFFFFFF", "#FFB0577E", "#4DFFB3C6", "#FFB0577E", "#FFC2185B" }, // pink
-            new[] { "#E0C3DCF0", "#663A6EA5", "#FFD2E5F7", "#FF1F4E79", "#FFFFFFFF", "#FF1F4E79", "#59BFD9EE", "#FF1F4E79", "#FF0A64B4" }, // blue
+            new[] { "#E8121212", "#52FFFFFF", "#F21A1A1A", "#FFFFFFFF", "#FFFFFFFF", "#FF101010", "#4D000000", "#FFFFFFFF", "#FF4CC2FF", "#FF4CC2FF" }, // dark
+            new[] { "#E0CFCFCF", "#5C5A5A5A", "#FFEAEAEA", "#FF1A1A1A", "#FF4A4A4A", "#FFFFFFFF", "#47000000", "#FF1A1A1A", "#FF0067C0", "#FF0067C0" }, // gray
+            new[] { "#E0F5F5F5", "#59333333", "#F2FFFFFF", "#FF000000", "#FF000000", "#FFFFFFFF", "#42000000", "#F21A1A1A", "#FF0067C0", "#FF0067C0" }, // light
+            new[] { "#E0FFB3C6", "#CCB0577E", "#FFFFB3C6", "#FFFFFFFF", "#FFFFFFFF", "#FFB0577E", "#4DFFB3C6", "#FFB0577E", "#FFC2185B", "#FFC2185B" }, // pink
+            new[] { "#E0C3DCF0", "#663A6EA5", "#FFD2E5F7", "#FF1F4E79", "#FFFFFFFF", "#FF1F4E79", "#59BFD9EE", "#FF1F4E79", "#FF0A64B4", "#FF0A64B4" }, // blue
         };
 
         private Palette _pal;
@@ -306,6 +306,7 @@ namespace KeyDisplay
             ApplyNavSelection();
             BuildSlotRows();
             RefreshSlotRows();
+            ApplyDotKeyStyles();
             PaintKeyPicker();
             PaintPickerChrome();
             if (_presetsRaw != null && _presetsRaw.Length > 0) RenderPresets();   // 预设行按新配色重建
@@ -400,6 +401,7 @@ namespace KeyDisplay
             _mouseSpeed = ReadDouble(v["MouseSpeed_"], 1.0, 0.5, 4.0);
             MouseSpeedSlider.Value = _mouseSpeed;
             MouseSpeedVal.Text = FormatSpeed(_mouseSpeed);
+            _dotKeyVk = (int)ReadDouble(v["MouseDotKeyVk_"], 0, 0, 8);
             _panelBgTransparent = !(v["PanelTransparent_"] != null && v["PanelTransparent_"].ToString() == "0");
             _locked = !(v["LayoutLocked"] is bool lb && !lb);
         }
@@ -626,11 +628,11 @@ namespace KeyDisplay
             slot = -1;
             if (tag == null) return false;
             var s = tag as string;
-            if (s != null) return int.TryParse(s, out slot) && slot >= 0 && slot < 9;
+            if (s != null) return int.TryParse(s, out slot) && slot >= 0 && slot < 10;
             try
             {
                 slot = Convert.ToInt32(tag, CultureInfo.InvariantCulture);
-                return slot >= 0 && slot < 9;
+                return slot >= 0 && slot < 10;
             }
             catch { return false; }
         }        private static string ToHex(Color c)
@@ -782,6 +784,57 @@ namespace KeyDisplay
             Save("KeyFontWeight_", _keyFontWeightLevel);
         }
 
+        // ===================== 0.9.5：鼠标光标按键（鼠标点映射到某个按键）=====================
+        // 选中后：该键按下时，鼠标垫上的光标用「鼠标点按下」色绘制（颜色页第 10 槽可调）。
+        // 持久化键 MouseDotKeyVk_：0=关闭；1/2/4/5/6=鼠标左右中/侧下/侧上；7/8=滚轮上/下（与 companion 的 VK 约定一致）。
+
+        private int _dotKeyVk;
+
+        private Button DotKeyBtnOf(int vk)
+        {
+            switch (vk)
+            {
+                case 0: return DotK0; case 1: return DotK1; case 2: return DotK2; case 4: return DotK4;
+                case 5: return DotK5; case 6: return DotK6; case 7: return DotK7; default: return DotK8;
+            }
+        }
+
+        private void ApplyDotKeyStyles()
+        {
+            try
+            {
+                int[] all = { 0, 1, 2, 4, 5, 6, 7, 8 };
+                foreach (int vk in all)
+                {
+                    var b = DotKeyBtnOf(vk);
+                    if (b == null) continue;
+                    bool sel = vk == _dotKeyVk;
+                    b.Background = sel ? B(_pal.Accent) : B(_pal.Card2);
+                    b.BorderBrush = sel ? B(_pal.Accent) : B(_pal.Border);
+                    b.Foreground = sel ? B(_pal.AccentFg) : B(_pal.Text);
+                }
+                if (DotKeyStatus != null)
+                {
+                    DotKeyStatus.Text = _dotKeyVk == 0
+                        ? "当前：关闭（光标使用普通颜色）"
+                        : "当前：光标本按下会显示为「鼠标点按下」色";
+                    DotKeyStatus.Foreground = B(_pal.Subtle);
+                }
+            }
+            catch { }
+        }
+
+        private void DotKey_Click(object sender, RoutedEventArgs e)
+        {
+            var b = sender as Button;
+            if (b == null) return;
+            int vk;
+            if (!int.TryParse(b.Tag as string, out vk)) return;
+            _dotKeyVk = vk;
+            Save("MouseDotKeyVk_", vk);
+            ApplyDotKeyStyles();
+            FlashButton(b, "已应用 ✓");
+        }
         // ===================== 0.9.5：鼠标速度（鼠标点移动倍率）=====================
         // 鼠标点原来与屏幕 1:1 映射：走完整个屏幕才碰到垫面边缘。倍率放大后只需更少鼠标位移就能到边，
         // 游戏内隐藏/锁定光标时用起来更顺手。倍率由小组件侧应用（LocalSettings 键 MouseSpeed_）。
@@ -1014,10 +1067,11 @@ namespace KeyDisplay
 
         // ===================== 0.9.5：色槽名称与常用色 =====================
 
+        // 0.9.5：各主题第 10 槽（鼠标点按下）默认色 —— 取该主题强调色，深色底也清晰可见
         private static readonly string[] SwatchHex = {
             "#FFFFFF", "#000000", "#FF0000", "#FF8000", "#FFFF00", "#80FF00", "#00FF00", "#00FF80",
             "#00FFFF", "#0080FF", "#0000FF", "#8000FF", "#FF00FF", "#FF0080", "#808080", "#404040" };
-        private static readonly string[] SlotNames = { "面板", "边框", "按键底", "文字", "按下底", "按下字", "鼠标垫", "鼠标点", "强调色" };
+        private static readonly string[] SlotNames = { "面板", "边框", "按键底", "文字", "按下底", "按下字", "鼠标垫", "鼠标点", "强调色", "鼠标点按下" };
         // ===================== 0.9.5：颜色页右侧的调色盘面板 =====================
         // 点击某行的色块后，在同一张卡片内、颜色列表右侧展开该槽对应的调色盘面板
         // （明度饱和度方块 / 色相条 / 透明度条 / 常用色），拖动即时预览并生效。
@@ -2301,7 +2355,7 @@ namespace KeyDisplay
                             var colors = data.GetNamedObject("colors");
                             // 字段顺序 = CustomKeys 顺序；0.9.5 新增第 9 项 "accent"。
                             // 旧预设（只有 8 项、没有 accent）靠 ContainsKey 判断跳过，向后兼容。
-                            string[] fields = { "panel", "border", "keyBg", "keyFg", "pressedBg", "pressedFg", "pad", "dot", "accent" };
+                            string[] fields = { "panel", "border", "keyBg", "keyFg", "pressedBg", "pressedFg", "pad", "dot", "accent", "dotPressed" };
                             for (int k = 0; k < fields.Length && k < CustomKeys.Length; k++)
                             {
                                 if (colors.ContainsKey(fields[k]))
@@ -2386,7 +2440,7 @@ namespace KeyDisplay
                 {
                     data.SetNamedValue("theme", Windows.Data.Json.JsonValue.CreateStringValue((v["Theme"] as string) ?? "dark"));
                     var colors = new Windows.Data.Json.JsonObject();
-                    string[] fields = { "panel", "border", "keyBg", "keyFg", "pressedBg", "pressedFg", "pad", "dot", "accent" };
+                    string[] fields = { "panel", "border", "keyBg", "keyFg", "pressedBg", "pressedFg", "pad", "dot", "accent", "dotPressed" };
                     for (int k = 0; k < fields.Length && k < CustomKeys.Length; k++) colors.SetNamedValue(fields[k], Windows.Data.Json.JsonValue.CreateStringValue(SlotText(k)));
                     data.SetNamedValue("colors", colors);
                 }
