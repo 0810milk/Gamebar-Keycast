@@ -391,12 +391,10 @@ namespace KeyDisplay
         // ===== 批量：删除（确认框 + 循环删除）=====
         private void MultiDeleteRequest()
         {
+            // 0.9.5（用户要求）：去掉二次确认，直接批量删除
             if (_selectedKeys.Count == 0) return;
-            _multiDeletePending = true;
-            DeleteConfirmText.Text = "删除 " + _selectedKeys.Count + " 个控件 ？";
-            DeleteConfirmPanel.Visibility = Visibility.Visible;
-            FadeIn(DeleteConfirmPanel);
-            DiagLog("multiselect delete confirm: " + _selectedKeys.Count);
+            DiagLog("multiselect delete (no confirm): " + _selectedKeys.Count);
+            MultiDeleteApply();
         }
 
         // 由 DeleteConfirmYes_Click 在 _multiDeletePending 时调用

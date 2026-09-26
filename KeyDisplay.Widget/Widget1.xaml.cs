@@ -1577,6 +1577,7 @@ namespace KeyDisplay
                 Text = KeyDisplayName(name),   // 显示名（0.8.1）：DisplayName_<名> 持久化，无则默认（空格键显示「空格」）
                 FontSize = _keyFontSize,       // 0.9.4：跟随"字体大小"设置（原硬编码 18 导致粘贴键与默认键字号不一致）
                 FontWeight = _keyFontWeight,   // 0.9.4：跟随"字体粗细"设置
+                FontFamily = CurrentFontFamily(),   // 0.9.5 修复：此前漏了字体族 → 复制粘贴/新增出来的键字体与原有键不一致
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center
             };
@@ -1587,6 +1588,7 @@ namespace KeyDisplay
             CustomKeysPanel.Visibility = Visibility.Visible;
             AttachResize(border);       // 复用拖拽缩放/hover/锁定/长按移动机制
             SetKey(border, false);      // 初始主题样式
+            ApplyKeyFontTo(border);     // 0.9.5：兜底再应用一次字号/字重/字体族，确保与现有键完全一致
             ApplicationData.Current.LocalSettings.Values["Custom_" + name] = "1";
             // 移动位置持久化：若已存 CustomPos_<名>（tx;ty）则应用 transform，否则写默认 (0,0)
             string pos = ApplicationData.Current.LocalSettings.Values["CustomPos_" + name] as string;

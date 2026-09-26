@@ -178,7 +178,7 @@ namespace KeyDisplay
                 EnterMultiSelectMode(k);
             }, false);
 
-            // 删除：复用 DeleteConfirmPanel 三段式确认框（与 0.8.1 前行为一致），仅自定义键可删
+            // 0.9.5（用户要求）：去掉二次确认，直接删除（右键删除 = 立即生效）
             AddMenuItem("删除", GlyphDelete, () =>
             {
                 var k = _ctxKey;
@@ -188,15 +188,11 @@ namespace KeyDisplay
                     string nm = NameOf(k);
                     if (!string.IsNullOrEmpty(nm) && nm != "?" && nm != "Pad")
                     {
-                        _deleteConfirmKey = k;
-                        _multiDeletePending = false;
-                        DeleteConfirmText.Text = "删除控件 " + nm + " ？";
-                        DeleteConfirmPanel.Visibility = Visibility.Visible;
-                        FadeIn(DeleteConfirmPanel);   // 0.8.2 弹层淡入
-                        DiagLog("delete confirm: " + nm);
+                        ConfirmDeleteKey(k);
+                        DiagLog("delete key (no confirm): " + nm);
                     }
                 }
-            }, false);
+            }, true);
 
             // 复制：复制按键布局（实现位于 Widget1.KeyCopyPaste.cs，签名 private void CopySelectedKey(Border key)）
             AddMenuItem("复制", GlyphCopy, () =>
