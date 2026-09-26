@@ -607,7 +607,8 @@ namespace KeyDisplay
             StartupFadeIn(RootPanel);     // 0.8.2 整体启动淡入（320ms，透明度动画无残留）
             // 0.9.5：记录初始键区结构指纹，供设置子窗口改布局时比对触发重建
             try { _customKeysFingerprint = CustomKeysFingerprint(); } catch { }
-            try { _lastLayoutResetReq = ParseLongOr(ApplicationData.Current.LocalSettings.Values[LayoutResetRequestKey], 0); } catch { }   // 0.9.5：启动时登记已有标记，避免把历史重置请求当成新的重复执行
+            try { _lastLayoutResetReq = ParseLongOr(ApplicationData.Current.LocalSettings.Values[LayoutResetRequestKey], 0); } catch { }
+            try { _lastLayoutSnapshotReq = ParseLongOr(ApplicationData.Current.LocalSettings.Values["LayoutSnapshotRequest_"], 0); } catch { }   // 0.9.5：启动时登记已有标记，避免把历史重置请求当成新的重复执行
         }
 
         private void OnGameBarDisplayModeChanged(object sender, object e)
@@ -1376,6 +1377,89 @@ namespace KeyDisplay
             if (ex == null || vk < 0 || vk > 255) return false;
             return ((ex[vk >> 3] >> (vk & 7)) & 1) != 0;
         }
+        // ===================== 0.9.5：布局快照（设置窗口保存布局预设时取真实值）=====================
+        // 背景：设置窗口进程读 LocalSettings 的视图会滞后（曾出现"重置布局 removed 0 keys"），
+        // 于是"保存布局预设"保存到的可能是小组件里的旧值 → 预设与实际不一致。
+        // 解决：设置窗口写 LayoutSnapshotRequest_ 请求，本进程把**自己内存里的真实布局**写成
+        // LocalFolder\layout-snapshot.json（文件不走 LocalSettings 缓存），设置窗口读取该文件。
+        private long _lastLayoutSnapshotReq;
+
+        // 把当前真实布局序列化为快照 JSON（字段与布局预设的 data 一致）
+        private void WriteLayoutSnapshot(long stamp)
+        {
+            try
+            {
+                var sb = new System.Text.StringBuilder();
+                sb.Append("{\"stamp\":").Append(stamp);
+                sb.Append(",\"keyOpacity\":").Append((int)Math.Round(_keyOpacity));
+                sb.Append(",\"padVisible\":").Append(_padVisible ? "true" : "false");
+                sb.Append(",\"padW\":").Append(MousePad.Width.ToString("0.####", CultureInfo.InvariantCulture));
+                sb.Append(",\"padH\":").Append(MousePad.Height.ToString("0.####", CultureInfo.InvariantCulture));
+                double ptx, pty; GetTransformXY(MousePad, out ptx, out pty);
+                sb.Append(",\"padPosX\":").Append(ptx.ToString("0.####", CultureInfo.InvariantCulture));
+                sb.Append(",\"padPosY\":").Append(pty.ToString("0.####", CultureInfo.InvariantCulture));
+
+                sb.Append(",\"keys\":{");
+                bool first = true;
+                foreach (var kv in _keys) AppendLiveKeyJson(sb, ref first, kv.Key, kv.Value);
+                foreach (var kv in _mouse) AppendLiveKeyJson(sb, ref first, kv.Key, kv.Value);
+                sb.Append("}");
+
+                sb.Append(",\"customKeys\":{");
+                first = true;
+                foreach (var kv in _customKeys)
+                {
+                    double tx, ty; GetTransformXY(kv.Value, out tx, out ty);
+                    string pos = tx.ToString("0.####", CultureInfo.InvariantCulture) + ";" + ty.ToString("0.####", CultureInfo.InvariantCulture);
+                    string size = ((int)Math.Round(kv.Value.Width)) + ";" + ((int)Math.Round(kv.Value.Height));
+                    var tb = kv.Value.Child as TextBlock;
+                    string disp = tb != null ? tb.Text : kv.Key;
+                    if (!first) sb.Append(",");
+                    first = false;
+                    sb.Append("\"").Append(EscapeJsonStr(kv.Key)).Append("\":{\"pos\":\"").Append(pos)
+                      .Append("\",\"size\":\"").Append(size).Append("\"");
+                    if (!string.IsNullOrEmpty(disp)) sb.Append(",\"displayName\":\"").Append(EscapeJsonStr(disp)).Append("\"");
+                    sb.Append("}");
+                }
+                sb.Append("}");
+
+                sb.Append(",\"deletedKeys\":[");
+                bool firstDel = true;
+                var vs = ApplicationData.Current.LocalSettings.Values;
+                foreach (var kv in vs)
+                {
+                    if (!kv.Key.StartsWith("Deleted_", StringComparison.Ordinal)) continue;
+                    if (!firstDel) sb.Append(",");
+                    firstDel = false;
+                    sb.Append("\"").Append(EscapeJsonStr(kv.Key.Substring("Deleted_".Length))).Append("\"");
+                }
+                sb.Append("]}");
+
+                string path = System.IO.Path.Combine(ApplicationData.Current.LocalFolder.Path, "layout-snapshot.json");
+                System.IO.File.WriteAllText(path, sb.ToString());
+                DiagLog("layout snapshot written: stamp=" + stamp + " bytes=" + sb.Length);
+            }
+            catch (Exception ex) { DiagLog("layout snapshot fail: " + ex.Message); }
+        }
+
+        private void AppendLiveKeyJson(System.Text.StringBuilder sb, ref bool first, string name, Border b)
+        {
+            if (b == null) return;
+            if (b.Visibility == Visibility.Collapsed) return;   // 已删除/隐藏的默认键不进布局
+            double tx, ty; GetTransformXY(b, out tx, out ty);
+            if (!first) sb.Append(",");
+            first = false;
+            sb.Append("\"Layout_").Append(EscapeJsonStr(name)).Append("\":\"")
+              .Append(((int)Math.Round(b.Width))).Append(";").Append(((int)Math.Round(b.Height))).Append(";")
+              .Append(tx.ToString("0.####", CultureInfo.InvariantCulture)).Append(";")
+              .Append(ty.ToString("0.####", CultureInfo.InvariantCulture)).Append("\"");
+        }
+
+        private static string EscapeJsonStr(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            return s.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        }
         private string CustomKeysFingerprint()
         {
             var v = ApplicationData.Current.LocalSettings.Values;
@@ -1412,6 +1496,18 @@ namespace KeyDisplay
                 }
             }
             catch (Exception ex) { DiagLog("layout reset fail: " + ex.Message); }
+
+            // 0.9.5：布局快照请求（设置窗口保存布局预设时用）
+            try
+            {
+                long sreq = ParseLongOr(v["LayoutSnapshotRequest_"], 0);
+                if (sreq != 0 && sreq != _lastLayoutSnapshotReq)
+                {
+                    _lastLayoutSnapshotReq = sreq;
+                    WriteLayoutSnapshot(sreq);
+                }
+            }
+            catch (Exception ex) { DiagLog("layout snapshot req fail: " + ex.Message); }
 
             // 1) 键区结构变化（自定义键增删 / 布局 / 删除记录）→ 全量重建
             string fp = CustomKeysFingerprint();

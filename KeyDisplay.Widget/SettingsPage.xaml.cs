@@ -2494,6 +2494,50 @@ namespace KeyDisplay
         private void SaveThemePreset_Click(object sender, RoutedEventArgs e) { SaveCurrentPreset("theme"); }
         private void SaveLayoutPreset_Click(object sender, RoutedEventArgs e) { SaveCurrentPreset("layout"); }
 
+        // ===================== 0.9.5：向小组件索取"真实布局快照" =====================
+        // 设置窗口自己的 LocalSettings 视图可能滞后（实测过 "removed 0 keys"），直接枚举会保存出旧值。
+        // 这里写请求标记 → 等小组件把真实布局写进 LocalFolder\layout-snapshot.json → 读该文件（文件不走缓存）。
+        private async System.Threading.Tasks.Task<Windows.Data.Json.JsonObject> RequestLayoutSnapshotAsync()
+        {
+            try
+            {
+                var v = ApplicationData.Current.LocalSettings.Values;
+                long stamp = DateTime.UtcNow.Ticks;
+                v["LayoutSnapshotRequest_"] = stamp;
+                ApplicationData.Current.SignalDataChanged();
+                string path = System.IO.Path.Combine(ApplicationData.Current.LocalFolder.Path, "layout-snapshot.json");
+                for (int i = 0; i < 40; i++)   // 最多约 2 秒
+                {
+                    await System.Threading.Tasks.Task.Delay(50);
+                    try
+                    {
+                        if (!System.IO.File.Exists(path)) continue;
+                        var o = Windows.Data.Json.JsonObject.Parse(System.IO.File.ReadAllText(path));
+                        if (o.ContainsKey("stamp") && (long)o.GetNamedNumber("stamp") == stamp) return o;
+                    }
+                    catch { }
+                }
+                Diag("snapshot timeout (widget not running?)");
+            }
+            catch (Exception ex) { Diag("snapshot request fail: " + ex.Message); }
+            return null;
+        }
+
+        // 把快照里的字段搬进预设 data（键/自定义键/隐藏键/透明度/鼠标垫全部取小组件真实值）
+        private static Windows.Data.Json.JsonObject BuildLayoutDataFromSnapshot(Windows.Data.Json.JsonObject snap)
+        {
+            var data = new Windows.Data.Json.JsonObject();
+            if (snap.ContainsKey("keyOpacity")) data.SetNamedValue("keyOpacity", Windows.Data.Json.JsonValue.CreateNumberValue(snap.GetNamedNumber("keyOpacity")));
+            if (snap.ContainsKey("padVisible")) data.SetNamedValue("padVisible", Windows.Data.Json.JsonValue.CreateBooleanValue(snap.GetNamedBoolean("padVisible")));
+            string[] padNum = { "padW", "padH", "padPosX", "padPosY" };
+            foreach (var f in padNum)
+                if (snap.ContainsKey(f)) data.SetNamedValue(f, Windows.Data.Json.JsonValue.CreateNumberValue(snap.GetNamedNumber(f)));
+            string[] objs = { "keys", "customKeys" };
+            foreach (var f in objs)
+                if (snap.ContainsKey(f)) data.SetNamedValue(f, snap.GetNamedObject(f));
+            if (snap.ContainsKey("deletedKeys")) data.SetNamedValue("deletedKeys", snap.GetNamedArray("deletedKeys"));
+            return data;
+        }
         private async void SaveCurrentPreset(string type)
         {
             try
@@ -2519,6 +2563,15 @@ namespace KeyDisplay
                 }
                 else
                 {
+                    // 0.9.5：优先使用小组件的真实布局快照（避免保存出旧值）
+                    var snap = await RequestLayoutSnapshotAsync();
+                    if (snap != null)
+                    {
+                        data = BuildLayoutDataFromSnapshot(snap);
+                        PresetStatusSet(snap.ContainsKey("stamp") ? "已从小组件读取真实布局快照" : "已读取布局快照");
+                    }
+                    else
+                    {
                     data.SetNamedValue("keyOpacity", Windows.Data.Json.JsonValue.CreateNumberValue(ReadDouble(v["KeyOpacity_"], 100, 10, 100)));
                     data.SetNamedValue("padVisible", Windows.Data.Json.JsonValue.CreateBooleanValue(!(v["PadVisible_"] != null && v["PadVisible_"].ToString() == "0")));
                     // 0.9.5：布局预设补写鼠标垫尺寸/位置（此前漏了 → 导出的预设不带垫子信息，
@@ -2560,6 +2613,7 @@ namespace KeyDisplay
                     data.SetNamedValue("keys", keys);
                     data.SetNamedValue("customKeys", ckeys);
                     data.SetNamedValue("deletedKeys", deleted);
+                    }
                 }
 
                 var entry = new Windows.Data.Json.JsonObject();
