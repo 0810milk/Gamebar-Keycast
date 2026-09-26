@@ -1824,17 +1824,23 @@ namespace KeyDisplay
         {
             try
             {
+                // 0.9.5 性能：原来固定等 600ms + 最多 8×(2500ms 超时 + 700ms 间隔)，最坏要十几秒。
+                // 现在：已连接就直接发；未连接只按 30ms 轮询等最多 ~600ms；请求 1.2s 超时、最多试 2 次。
                 if (_reader == null)
                 {
                     _reader = new InputStateReader();
                     _reader.Start();
-                    await System.Threading.Tasks.Task.Delay(600);
                 }
-                for (int i = 0; i < 8; i++)
+                if (!_reader.Connected)
                 {
-                    var resp = await _reader.RequestPresetAsync(cmd, payload, 2500);
+                    for (int w = 0; w < 20 && !_reader.Connected; w++)
+                        await System.Threading.Tasks.Task.Delay(30);
+                }
+                for (int i = 0; i < 2; i++)
+                {
+                    var resp = await _reader.RequestPresetAsync(cmd, payload, 1200);
                     if (resp != null) return resp;
-                    await System.Threading.Tasks.Task.Delay(700);
+                    if (i == 0) await System.Threading.Tasks.Task.Delay(120);
                 }
             }
             catch (Exception ex) { Diag("preset request fail: " + ex.Message); }
@@ -2506,9 +2512,9 @@ namespace KeyDisplay
                 v["LayoutSnapshotRequest_"] = stamp;
                 ApplicationData.Current.SignalDataChanged();
                 string path = System.IO.Path.Combine(ApplicationData.Current.LocalFolder.Path, "layout-snapshot.json");
-                for (int i = 0; i < 40; i++)   // 最多约 2 秒
+                for (int i = 0; i < 25; i++)   // 最多约 0.5 秒（原来是 2 秒，保存太慢）
                 {
-                    await System.Threading.Tasks.Task.Delay(50);
+                    await System.Threading.Tasks.Task.Delay(20);
                     try
                     {
                         if (!System.IO.File.Exists(path)) continue;
@@ -2621,7 +2627,15 @@ namespace KeyDisplay
                 entry.SetNamedValue("type", Windows.Data.Json.JsonValue.CreateStringValue(type));
                 entry.SetNamedValue("savedAt", Windows.Data.Json.JsonValue.CreateStringValue(DateTime.Now.ToString("s")));
                 entry.SetNamedValue("data", data);
-                arr.Add(entry);
+                // 0.9.5（用户要求）：重名不再追加 (1)/(2) 副本，直接覆盖同名预设（保留原有顺序）
+                bool replaced = false;
+                for (int i = 0; i < arr.Count; i++)
+                {
+                    var o2 = arr[i].GetObject();
+                    string nm2 = o2.ContainsKey("name") ? o2.GetNamedString("name") : "";
+                    if (nm2 == name) { arr[i] = entry; replaced = true; break; }
+                }
+                if (!replaced) arr.Add(entry);
 
                 var resp = await PresetRequestAsync("PUT_PRESETS", root.Stringify());
                 if (resp != null && resp.StartsWith("OK")) { PresetStatusSet("已保存预设：" + name); await LoadPresetsAsync(); }
