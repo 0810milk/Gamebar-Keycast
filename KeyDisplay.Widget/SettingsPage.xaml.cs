@@ -406,7 +406,7 @@ namespace KeyDisplay
             _dotSize = ReadDouble(v["DotSize_"], 10, 4, 30);
             DotSizeSlider.Value = _dotSize;
             DotSizeVal.Text = ((int)_dotSize) + " px";
-            _keyScaleUser = (int)ReadDouble(v["KeyScale_"], 0, -50, 50);
+            _keyScaleUser = (int)ReadDouble(v["KeyScale_"], 0, -100, 100);
             KeyScaleSlider.Value = _keyScaleUser;
             KeyScaleVal.Text = (_keyScaleUser > 0 ? "+" : "") + _keyScaleUser;
             _dotKeyVk = (int)ReadDouble(v["MouseDotKeyVk_"], 0, 0, 255);
