@@ -11,8 +11,8 @@
 ; 卸载流程：先结束伴生进程与小组件进程 → 移除 UWP 包与证书 → Inno 删除文件与注册表。
 
 #define MyAppName "按键显示"
-; 版本号与 VERSION.md 保持一致（当前 1.0.0 中秋版本），发布时同步修改
-#define MyAppVersion "1.0.0"
+; 版本号与 VERSION.md 保持一致（当前 1.0.1 中秋版本），发布时同步修改
+#define MyAppVersion "1.0.1"
 #define MyAppPublisher "KeyDisplay"
 #define MyAppEdition "中秋版本"
 #define MyAppExeName "KeyDisplayCompanion.exe"

@@ -1660,7 +1660,7 @@ namespace KeyDisplay
         }
 
         // 0.9.5：产品版本（与 VERSION.md 一致）；UWP 包版本另行显示，便于排障
-        internal const string ProductVersion = "1.0.0 中秋版本";
+        internal const string ProductVersion = "1.0.1 中秋版本";
 
         private void SetAboutVersion()
         {
