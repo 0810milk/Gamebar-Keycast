@@ -147,14 +147,14 @@ namespace KeyDisplay
         private readonly SolidColorBrush _pinkAccent = new SolidColorBrush(Color.FromArgb(0xFF, 0xC2, 0x18, 0x5B));     // 强调色玫红 #FFC2185B
 
         // 灰色主题画刷（0.9.4：中性浅灰玻璃 + 黑字 + 深灰按下——去掉 0.9.3 引入的冷蓝调）
-        private readonly SolidColorBrush _grayPanel = new SolidColorBrush(Color.FromArgb(0xE0, 0xEE, 0xEE, 0xEE));   // 面板中性浅灰
-        private readonly SolidColorBrush _grayBorder = new SolidColorBrush(Color.FromArgb(0x5C, 0x6B, 0x6B, 0x6B));  // 边框
-        private readonly SolidColorBrush _grayKeyBg = new SolidColorBrush(Color.FromArgb(0xF5, 0xF7, 0xF7, 0xF7));   // 按键浅灰白
-        private readonly SolidColorBrush _grayKeyFg = new SolidColorBrush(Color.FromArgb(0xFF, 0x1F, 0x1F, 0x1F));   // 默认文字近黑
-        private readonly SolidColorBrush _grayPressedBg = new SolidColorBrush(Color.FromArgb(0xFF, 0x3A, 0x3A, 0x3A));  // 按下深灰底
+        private readonly SolidColorBrush _grayPanel = new SolidColorBrush(Color.FromArgb(0xE0, 0xCF, 0xCF, 0xCF));   // 面板中性中灰（0.9.5 修复：原 #EEEEEE 与「白」#F5F5F5 几乎同色，现拉开明显差距）
+        private readonly SolidColorBrush _grayBorder = new SolidColorBrush(Color.FromArgb(0x5C, 0x5A, 0x5A, 0x5A));  // 边框
+        private readonly SolidColorBrush _grayKeyBg = new SolidColorBrush(Color.FromArgb(0xFF, 0xEA, 0xEA, 0xEA));   // 按键浅灰（比面板亮一档，保证可辨）
+        private readonly SolidColorBrush _grayKeyFg = new SolidColorBrush(Color.FromArgb(0xFF, 0x1A, 0x1A, 0x1A));   // 默认文字近黑
+        private readonly SolidColorBrush _grayPressedBg = new SolidColorBrush(Color.FromArgb(0xFF, 0x4A, 0x4A, 0x4A));  // 按下深灰底
         private readonly SolidColorBrush _grayPressedFg = new SolidColorBrush(Colors.White);  // 按下白字
-        private readonly SolidColorBrush _grayPad = new SolidColorBrush(Color.FromArgb(0x42, 0x00, 0x00, 0x00));      // 鼠标垫半透明黑
-        private readonly SolidColorBrush _grayDot = new SolidColorBrush(Color.FromArgb(0xFF, 0x1F, 0x1F, 0x1F));      // 鼠标点近黑
+        private readonly SolidColorBrush _grayPad = new SolidColorBrush(Color.FromArgb(0x47, 0x00, 0x00, 0x00));      // 鼠标垫半透明黑
+        private readonly SolidColorBrush _grayDot = new SolidColorBrush(Color.FromArgb(0xFF, 0x1A, 0x1A, 0x1A));      // 鼠标点近黑
         private readonly SolidColorBrush _grayAccent = new SolidColorBrush(Color.FromArgb(0xFF, 0x00, 0x67, 0xC0));     // 强调色深蓝 #FF0067C0
 
         // 蓝色主题画刷（浅蓝玻璃 + 深蓝字；0.8.3 面板通透化）

@@ -51,7 +51,7 @@ namespace KeyDisplay
         // 面板/边框/按键底/按键字/按下底/按下字/鼠标垫/鼠标点/强调色）
         private static readonly string[][] ThemeSlotHex = {
             new[] { "#E8121212", "#52FFFFFF", "#F21A1A1A", "#FFFFFFFF", "#FFFFFFFF", "#FF101010", "#4D000000", "#FFFFFFFF", "#FF4CC2FF" }, // dark
-            new[] { "#E0EEEEEE", "#5C6B6B6B", "#F5F7F7F7", "#FF1F1F1F", "#FF3A3A3A", "#FFFFFFFF", "#42000000", "#FF1F1F1F", "#FF0067C0" }, // gray
+            new[] { "#E0CFCFCF", "#5C5A5A5A", "#FFEAEAEA", "#FF1A1A1A", "#FF4A4A4A", "#FFFFFFFF", "#47000000", "#FF1A1A1A", "#FF0067C0" }, // gray
             new[] { "#E0F5F5F5", "#59333333", "#F2FFFFFF", "#FF000000", "#FF000000", "#FFFFFFFF", "#42000000", "#F21A1A1A", "#FF0067C0" }, // light
             new[] { "#E0FFB3C6", "#CCB0577E", "#FFFFB3C6", "#FFFFFFFF", "#FFFFFFFF", "#FFB0577E", "#4DFFB3C6", "#FFB0577E", "#FFC2185B" }, // pink
             new[] { "#E0C3DCF0", "#663A6EA5", "#FFD2E5F7", "#FF1F4E79", "#FFFFFFFF", "#FF1F4E79", "#59BFD9EE", "#FF1F4E79", "#FF0A64B4" }, // blue
