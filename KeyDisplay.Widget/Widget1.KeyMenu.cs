@@ -109,7 +109,7 @@ namespace KeyDisplay
             {
                 Height = 1,
                 Margin = new Thickness(10, 4, 10, 4),
-                Background = FloatBorderB()
+                Background = BorderB()
             };
             KeyMenuItems.Children.Add(line);
         }
@@ -299,8 +299,10 @@ namespace KeyDisplay
         // 菜单项在 AddMenuItem 内各自着色，悬停/按下色由 MenuHoverB/MenuPressedB 现算
         private void ApplyKeyMenuTheme()
         {
-            KeyMenu.Background = FloatPanelB();
-            KeyMenu.BorderBrush = FloatBorderB();
+            // 0.9.5（用户要求）：菜单配色跟随「按键底 / 边框 / 字体」三个色槽——底色用按键底色、
+            // 边框用边框色、图标与文字用字体色，与面板上的按钮同一套配色，改色即同步
+            KeyMenu.Background = KeyBgB();
+            KeyMenu.BorderBrush = BorderB();
             KeyMenu.CornerRadius = new CornerRadius(8);
             try
             {
@@ -317,7 +319,7 @@ namespace KeyDisplay
 
         private Windows.UI.Xaml.Media.Brush MenuHoverB()
         {
-            var c = PanelColorOf(PanelB());
+            var c = PanelColorOf(KeyBgB());
             bool dark = (0.299 * c.R + 0.587 * c.G + 0.114 * c.B) / 255.0 < 0.5;
             return new Windows.UI.Xaml.Media.SolidColorBrush(dark
                 ? Color.FromArgb(0x1F, 0xFF, 0xFF, 0xFF)
@@ -326,7 +328,7 @@ namespace KeyDisplay
 
         private Windows.UI.Xaml.Media.Brush MenuPressedB()
         {
-            var c = PanelColorOf(PanelB());
+            var c = PanelColorOf(KeyBgB());
             bool dark = (0.299 * c.R + 0.587 * c.G + 0.114 * c.B) / 255.0 < 0.5;
             return new Windows.UI.Xaml.Media.SolidColorBrush(dark
                 ? Color.FromArgb(0x33, 0xFF, 0xFF, 0xFF)
@@ -336,7 +338,7 @@ namespace KeyDisplay
         // 危险项（删除类）的红色：深色底用柔和亮红、浅色底用 Win11 的 #C42B1C
         private Windows.UI.Xaml.Media.Brush MenuDangerB()
         {
-            var c = PanelColorOf(PanelB());
+            var c = PanelColorOf(KeyBgB());
             bool dark = (0.299 * c.R + 0.587 * c.G + 0.114 * c.B) / 255.0 < 0.5;
             return new Windows.UI.Xaml.Media.SolidColorBrush(dark
                 ? Color.FromArgb(0xFF, 0xFF, 0x99, 0xA4)
@@ -361,7 +363,7 @@ namespace KeyDisplay
                 {
                     var b = ch as Border;
                     if (b == null) continue;
-                    if (b.Height == 1) { b.Background = FloatBorderB(); continue; }   // 分隔线
+                    if (b.Height == 1) { b.Background = BorderB(); continue; }   // 分隔线
                     b.Background = TransparentBrush;                                   // 复位悬停/按下残留
                     var grid = b.Child as Grid;
                     if (grid == null) continue;
