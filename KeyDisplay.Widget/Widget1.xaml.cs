@@ -2359,6 +2359,28 @@ namespace KeyDisplay
                         double sw = w, sh = h, sml = ml, smt = mt;
                         ApplyDragSnap(key, ref sw, ref sh, ref sml, ref smt);
                         double dw = Math.Abs(sw - w), dh = Math.Abs(sh - h);
+                        // 0.9.5：比例缩放下"另一条边"同样在动（拖右缘 → 下缘也外移；拖下缘 → 右缘也外移），
+                        // 主边没吸到就用垂直方向那条边再试一次（临时替换 _dragMode，仅取吸附增量）
+                        if (dw <= 0.01 && dh <= 0.01)
+                        {
+                            string saved = _dragMode;
+                            try
+                            {
+                                bool horiz = _dragMode.Contains("l") || _dragMode.Contains("r");
+                                bool vert = _dragMode.Contains("t") || _dragMode.Contains("b");
+                                if (horiz && !vert) _dragMode = "b";        // 拖水平边 → 试下缘
+                                else if (vert && !horiz) _dragMode = "r";   // 拖垂直边 → 试右缘
+                                else _dragMode = null;                      // 边角同时拖：主判定已覆盖两轴
+                                if (!string.IsNullOrEmpty(_dragMode))
+                                {
+                                    double sw2 = w, sh2 = h, sml2 = ml, smt2 = mt;
+                                    ApplyDragSnap(key, ref sw2, ref sh2, ref sml2, ref smt2);
+                                    if (Math.Abs(sw2 - w) > 0.01 || Math.Abs(sh2 - h) > 0.01)
+                                    { sw = sw2; sh = sh2; sml = sml2; smt = smt2; dw = Math.Abs(sw - w); dh = Math.Abs(sh - h); }
+                                }
+                            }
+                            finally { _dragMode = saved; }
+                        }
                         if (dw > 0.01 || dh > 0.01)
                         {
                             double rw = _dragStartW > 1 ? _dragStartW : 1, rh = _dragStartH > 1 ? _dragStartH : 1;
