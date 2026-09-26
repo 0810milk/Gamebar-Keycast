@@ -1711,6 +1711,22 @@ namespace KeyDisplay
                 case "Backspace": return 0x08;
                 case "Tab": return 0x09;
                 case "Caps": return 0x14;
+                // 0.9.5：设置窗口「添加按键」键盘使用的键名别名（此前对不上映射表 → VK 取 -1 → 永不点亮）
+                case "CapsLock": return 0x14;
+                case "Win": return 0x5B;          // 左Win（右Win 见 右Win）
+                case "Shift": return 0xA0;        // 左Shift
+                case "Ctrl": return 0xA2;         // 左Ctrl
+                case "Alt": return 0xA4;          // 左Alt
+                case "Insert": return 0x2D;
+                case "Delete": return 0x2E;
+                case "Up": return 0x26;
+                case "Down": return 0x28;
+                case "Left": return 0x25;
+                case "Right": return 0x27;
+                case "\u2191": return 0x26;       // ↑
+                case "\u2193": return 0x28;       // ↓
+                case "\u2190": return 0x25;       // ←
+                case "\u2192": return 0x27;       // →
                 case "Enter": return 0x0D;
                 case "Space": return 0x20;
                 case "Ins": return 0x2D;
