@@ -2521,6 +2521,23 @@ namespace KeyDisplay
                 {
                     data.SetNamedValue("keyOpacity", Windows.Data.Json.JsonValue.CreateNumberValue(ReadDouble(v["KeyOpacity_"], 100, 10, 100)));
                     data.SetNamedValue("padVisible", Windows.Data.Json.JsonValue.CreateBooleanValue(!(v["PadVisible_"] != null && v["PadVisible_"].ToString() == "0")));
+                    // 0.9.5：布局预设补写鼠标垫尺寸/位置（此前漏了 → 导出的预设不带垫子信息，
+                    // 导致无法用导出文件同步默认布局的鼠标垫大小与位置）
+                    try
+                    {
+                        double pw, ph, px, py;
+                        if (double.TryParse(v["PadW"] as string, NumberStyles.Float, CultureInfo.InvariantCulture, out pw) &&
+                            double.TryParse(v["PadH"] as string, NumberStyles.Float, CultureInfo.InvariantCulture, out ph) && pw > 0 && ph > 0)
+                        {
+                            data.SetNamedValue("padW", Windows.Data.Json.JsonValue.CreateNumberValue(pw));
+                            data.SetNamedValue("padH", Windows.Data.Json.JsonValue.CreateNumberValue(ph));
+                            if (double.TryParse(v["PadPos_left"] as string, NumberStyles.Float, CultureInfo.InvariantCulture, out px))
+                                data.SetNamedValue("padPosX", Windows.Data.Json.JsonValue.CreateNumberValue(px));
+                            if (double.TryParse(v["PadPos_top"] as string, NumberStyles.Float, CultureInfo.InvariantCulture, out py))
+                                data.SetNamedValue("padPosY", Windows.Data.Json.JsonValue.CreateNumberValue(py));
+                        }
+                    }
+                    catch { }
                     var keys = new Windows.Data.Json.JsonObject();
                     var ckeys = new Windows.Data.Json.JsonObject();
                     var deleted = new Windows.Data.Json.JsonArray();
