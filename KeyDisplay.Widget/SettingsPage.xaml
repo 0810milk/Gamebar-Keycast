@@ -163,6 +163,18 @@
                                 <TextBlock x:Name="DotKeyStatus" Text="" FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap"/>
                                 <Button x:Name="MouseSpeedResetBtn" Height="30" Margin="0,6,0,0" HorizontalAlignment="Left" MinWidth="112"
                                         FontSize="12" Content="恢复 1.0×" Click="MouseSpeedReset_Click"/>
+
+                                <!-- 0.9.5：光标大小 —— 鼠标垫上那个光标点的尺寸 -->
+                                <TextBlock x:Name="DotSizeTitle" Text="光标大小" FontSize="15" FontWeight="SemiBold" Margin="0,16,0,0"/>
+                                <TextBlock x:Name="DotSizeDesc" Text="鼠标垫上那个光标点的大小（像素）。" FontSize="12" Opacity="0.7" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                                <Grid Margin="0,8,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Slider x:Name="DotSizeSlider" Grid.Column="0" Minimum="4" Maximum="30" StepFrequency="1" ValueChanged="DotSize_Changed"/>
+                                    <TextBlock x:Name="DotSizeVal" Grid.Column="1" Text="10 px" FontSize="13" Margin="12,0,0,0" VerticalAlignment="Center" MinWidth="52"/>
+                                </Grid>
                             </StackPanel>
                         </Border>
 

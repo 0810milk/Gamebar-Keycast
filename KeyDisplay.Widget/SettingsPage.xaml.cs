@@ -403,6 +403,9 @@ namespace KeyDisplay
             _mouseSpeed = ReadDouble(v["MouseSpeed_"], 1.0, 0.5, 4.0);
             MouseSpeedSlider.Value = _mouseSpeed;
             MouseSpeedVal.Text = FormatSpeed(_mouseSpeed);
+            _dotSize = ReadDouble(v["DotSize_"], 10, 4, 30);
+            DotSizeSlider.Value = _dotSize;
+            DotSizeVal.Text = ((int)_dotSize) + " px";
             _dotKeyVk = (int)ReadDouble(v["MouseDotKeyVk_"], 0, 0, 255);
             _dotKeyName = (v["MouseDotKeyName_"] as string) ?? "";
             _dotKeyOn = !(v["MouseDotKeyOn_"] != null && v["MouseDotKeyOn_"].ToString() == "0") && _dotKeyVk != 0;
@@ -426,6 +429,7 @@ namespace KeyDisplay
         private double _opacity = 100;
         private bool _padVisible = true;
         private double _mouseSpeed = 1.0;   // 0.9.5：鼠标点移动倍率（0.5..4.0）
+        private double _dotSize = 10;       // 0.9.5：光标点大小（4..30 px）
         private bool _panelBgTransparent = true;   // 0.9.5：按键区背景全透明（默认透明）
         private bool _locked = true;
 
@@ -923,6 +927,14 @@ namespace KeyDisplay
             _mouseSpeed = e.NewValue;
             MouseSpeedVal.Text = FormatSpeed(_mouseSpeed);
             Save("MouseSpeed_", Math.Round(_mouseSpeed, 2));
+        }
+
+        private void DotSize_Changed(object sender, Windows.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+        {
+            if (!_loaded) return;
+            _dotSize = e.NewValue;
+            DotSizeVal.Text = ((int)_dotSize) + " px";
+            Save("DotSize_", (int)_dotSize);
         }
 
         private void MouseSpeedReset_Click(object sender, RoutedEventArgs e)

@@ -178,6 +178,7 @@ namespace KeyDisplay
         private double _mouseSpeed = 1.0;
         // 0.9.5：鼠标光标按键（0=关闭；1/2/4/5/6=左右中/侧下/侧上；7/8=滚轮上/下）——该键按下时光标用"按下色"
         private int _dotKeyVk;
+        private double _dotSize = 10;   // 0.9.5：光标点大小（px）
         private bool _dotKeyOn;   // 0.9.5：鼠标光标按键开关（关闭时忽略映射）
         // 0.9.5：按键区背景是否全透明（用户要求默认透明：键位/鼠标垫直接浮在游戏画面上）
         private bool _panelTransparent = true;
@@ -975,8 +976,9 @@ namespace KeyDisplay
                     tx = _padW / 2.0 + (tx - _padW / 2.0) * _mouseSpeed;
                     ty = _padH / 2.0 + (ty - _padH / 2.0) * _mouseSpeed;
                 }
-                tx = Math.Max(0.0, Math.Min(_padW - 10.0, tx));
-                ty = Math.Max(0.0, Math.Min(_padH - 10.0, ty));
+                // 0.9.5：边界钳制跟随光标尺寸（原来写死 10，光标变大后会溢出垫面）
+                tx = Math.Max(0.0, Math.Min(_padW - _dotSize, tx));
+                ty = Math.Max(0.0, Math.Min(_padH - _dotSize, ty));
                 _targetX = tx;
                 _targetY = ty;
                 // 尚无初始位置（首帧）时直接就位，避免点从角落飞过来
@@ -1558,6 +1560,10 @@ namespace KeyDisplay
             if (_mouseSpeed > 4.0) _mouseSpeed = 4.0;
             _dotKeyVk = (int)ParseDoubleOr(v["MouseDotKeyVk_"], _dotKeyVk);
             _dotKeyOn = !(v["MouseDotKeyOn_"] != null && v["MouseDotKeyOn_"].ToString() == "0") && _dotKeyVk != 0;
+            _dotSize = ParseDoubleOr(v["DotSize_"], _dotSize);
+            if (_dotSize < 4) _dotSize = 4;
+            if (_dotSize > 30) _dotSize = 30;
+            try { MouseDot.Width = _dotSize; MouseDot.Height = _dotSize; } catch { }
             _panelTransparent = !(v["PanelTransparent_"] != null && v["PanelTransparent_"].ToString() == "0");
             DiagLog("panel transparent = " + _panelTransparent);
             try
