@@ -785,7 +785,7 @@ namespace KeyDisplay
             // 0.9.5：叠加"整体按键大小"（用户可在设置窗口按 -20%..+20% 调整，0 = 原尺寸）
             scale *= (1.0 + _keyScaleUser / 100.0);
             if (scale < 0.2) scale = 0.2;
-            if (scale > 2.0) scale = 2.0;
+            if (scale > 3.0) scale = 3.0;
             _keyScale.ScaleX = scale;
             _keyScale.ScaleY = scale;
             // 0.9.5：键区缩放/窗口尺寸变化时，若右键菜单开着则重算位置（否则菜单不跟随窗口）
@@ -1570,8 +1570,8 @@ namespace KeyDisplay
             if (_dotSize > 30) _dotSize = 30;
             try { MouseDot.Width = _dotSize; MouseDot.Height = _dotSize; } catch { }
             _keyScaleUser = ParseDoubleOr(v["KeyScale_"], 0);
-            if (_keyScaleUser < -20) _keyScaleUser = -20;
-            if (_keyScaleUser > 20) _keyScaleUser = 20;
+            if (_keyScaleUser < -50) _keyScaleUser = -50;
+            if (_keyScaleUser > 50) _keyScaleUser = 50;
             FitLayoutToWindow();   // 整体大小变化后立即重算键区缩放
             _panelTransparent = !(v["PanelTransparent_"] != null && v["PanelTransparent_"].ToString() == "0");
             DiagLog("panel transparent = " + _panelTransparent);
