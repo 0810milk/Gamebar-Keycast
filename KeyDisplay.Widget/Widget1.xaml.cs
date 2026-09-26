@@ -328,6 +328,27 @@ namespace KeyDisplay
 
         // 首次启动初始化默认布局：仅当用户从未自定义过布局（无 Layout_* 键）时，把内置默认预设写入持久化。
         // 只写持久化不重建 UI——构造函数场景由后续 Restore* 恢复链应用；重置场景由调用方补重建。
+        // 0.9.5：内置默认鼠标垫（宽度沿用发布值 223.59，高度按本机屏幕比例在首帧重算）。
+        // 注意：不再套用自带的"内置默认布局预设"——那份 JSON 的键位偏移是按 0.7.x 时代的另一套
+        // 基准算的（例如 Shift ty=-54、Space tx=+113/ty=-52），叠加到现在的 XAML 基准位置上会互相
+        // 重叠，用户点"重置按键布局"就会看到布局乱掉。现在重置 = 清掉用户自定义 + 回到 XAML 内置布局。
+        private const double DefaultPadWidth = 223.59;
+
+        private void ApplyDefaultPadOnly()
+        {
+            try
+            {
+                var v = ApplicationData.Current.LocalSettings.Values;
+                v["PadCustom_"] = 1;
+                v["PadW"] = DefaultPadWidth.ToString(CultureInfo.InvariantCulture);
+                v["PadH"] = "139.76";
+                v.Remove("PadPos_left");
+                v.Remove("PadPos_top");
+                _defaultPadPending = true;   // 首帧快照到达后按本机屏幕比例重算高度
+                DiagLog("default pad applied: " + (int)DefaultPadWidth);
+            }
+            catch (Exception ex) { DiagLog("default pad fail: " + ex.Message); }
+        }
         private void ApplyBuiltInDefaultLayoutIfNeeded()
         {
             try
@@ -424,8 +445,10 @@ namespace KeyDisplay
 
             RegisterDefaultKeys();   // 登记全部默认键（键盘 12 键 + 鼠标 5 键）到字典
 
-            // 0.7.1：首次启动（无用户布局自定义）自动套用内置默认预设（写入持久化，由下方 Restore* 链应用）
-            ApplyBuiltInDefaultLayoutIfNeeded();
+            // 0.9.5：首次启动（无用户布局自定义）只恢复默认鼠标垫。
+            // 这里原先会套用自带的"内置默认布局预设"，但那份 JSON 的键位偏移基于 0.7.x 的另一套基准，
+            // 叠到现在的 XAML 基准位置会互相重叠（Shift/Space 等会被上移压住别的键）——已停用。
+            ApplyDefaultPadOnly();
 
             // 布局自定义：所有按键/鼠标键附加指针处理（边缘/四角拖拽缩放）；鼠标垫也参与（长按移动 + 等比缩放）
             foreach (var kv in _keys) AttachResize(kv.Value);
@@ -1205,7 +1228,7 @@ namespace KeyDisplay
                 foreach (var k in rm) v.Remove(k);
                 n = rm.Count;
 
-                ApplyBuiltInDefaultLayoutIfNeeded();   // Layout_* 已清空 → 重新写入内置默认布局（含 Tab 与鼠标垫默认）
+                ApplyDefaultPadOnly();   // 0.9.5：键位回到 XAML 内置布局（不再套过时预设），鼠标垫恢复默认尺寸
             }
             catch (Exception ex) { DiagLog("reset layout impl fail: " + ex.Message); }
             return n;
