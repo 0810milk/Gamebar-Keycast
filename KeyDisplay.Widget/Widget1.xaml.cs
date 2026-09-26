@@ -342,10 +342,10 @@ namespace KeyDisplay
         // 注意：键位不再套用上面那份内置预设（它的偏移基于 0.7.x 的另一套基准，叠到当前 XAML 基准会重叠），
         // 但鼠标垫的尺寸与位置必须沿用发布值——否则会掉回 XAML 的 80×80(=1:1) 与 (242,0)，用户看到的就是
         // "鼠标垫变成 1:1 了 / 位置不对"。
-        private const double DefaultPadWidth = 246;     // 0.9.5：按用户实际鼠标垫（日志实测 246×153，16:10）同步
-        private const double DefaultPadHeight = 153.75;   // 首帧会用本机屏幕比例重算（246 × 屏高/屏宽）
-        private const double DefaultPadLeft = 94;
-        private const double DefaultPadTop = 0;
+        private const double DefaultPadWidth = 246.371;   // 0.9.5：按用户导出实测同步
+        private const double DefaultPadHeight = 154.0;    // 首帧会用本机屏幕比例重算（宽度 × 屏高/屏宽）
+        private const double DefaultPadLeft = 72;      // 0.9.5：按用户导出实测同步（原 94 为发布旧值）
+        private const double DefaultPadTop = 2.0;      // 0.9.5：同上
 
         private void ApplyDefaultPadOnly()
         {
@@ -1264,11 +1264,9 @@ namespace KeyDisplay
                 ApplyBuiltInDefaultLayoutIfNeeded();   // 0.9.5：键位/自定义键/隐藏键回到内置默认布局
                 ApplyDefaultPadOnly();                 // 0.9.5：鼠标垫恢复发布默认（223.59 宽 / (94,0)，高度按屏幕比例重算）
 
-                // 内置默认的自定义键：Tab（历史默认就有；这里给出合理位置：键盘块下方，尺寸 56×48）
-                v["Custom_Tab"] = "1";
-                v["CustomPos_Tab"] = "0;0";
-                v["CustomSize_Tab"] = "56;48";
-                v.Remove("DisplayName_Tab");
+                // 0.9.5 修复：这里原先硬写 CustomPos_Tab="0;0"，会把内置默认里 Tab 的真实位置
+                // （自定义键面板内的 0,-222，即显示在 Q 左侧、CapsLock 上方）覆盖掉 → 重置后 Tab 掉到下方。
+                // 现在完全交给内置默认预设（ApplyBuiltInDefaultLayoutIfNeeded 已写入 Tab/CapsLock 的位置与尺寸）。
 
                 DiagLog("layout reset: cleared " + n + " keys, defaults restored");
             }
