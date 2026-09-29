@@ -308,7 +308,12 @@ def _keyboard_proc(n_code, w_param, l_param):
             kb = ctypes.cast(l_param, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
             down = w_param in (WM_KEYDOWN, WM_SYSKEYDOWN)
             # v3：任意 VK 直接写入 256 位位图（widget 无法自行查键，需伴生进程全量采集）
-            _state.set_vk(kb.vkCode, down)
+            # 0.9.6 修复：0x07/0x08 在协议里是"滚轮上/下"的合成 VK（由鼠标钩子写入），
+            # 而 VK_BACK=0x08 是真实按键——原来把 Backspace 直接写进这一位，会让小组件的
+            # 「滚轮下」跟着亮；又因为校准与滚轮过期逻辑都会跳过这两位，keyup 一旦丢失就永久卡亮。
+            # 键盘钩子因此避开这两位（滚轮状态仍由鼠标钩子的滚轮分支负责）。
+            if kb.vkCode != 0x07 and kb.vkCode != 0x08:
+                _state.set_vk(kb.vkCode, down)
             for name, vk in VK.items():
                 if kb.vkCode == vk or kb.vkCode == VK_RIGHT.get(name, -1):
                     _state.set_key(name, down)

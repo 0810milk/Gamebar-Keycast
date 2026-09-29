@@ -1564,6 +1564,13 @@ namespace KeyDisplay
                     }
                     if (_customKeys.Count == 0) CustomKeysPanel.Visibility = Visibility.Collapsed;
                     RegisterDefaultKeys();
+                    // 0.9.6 修复：被删除过的内置键在重建时必须先恢复可见。
+                    // 原来只有 ResetOneKeyToDefault 会写 Visibility.Visible，而被删的键此刻已不在 _keys/_mouse 里，
+                    // 于是"删除某键 → 重置布局/应用不含它的预设"后该键永远不显示（字典里有、渲染循环还在 SetKey、
+                    // 还进吸附候选），要重启一次才冒出来。这里先全部恢复，紧接着的 RestoreDeletions()
+                    // 会按 Deleted_ 标记把仍然删除的键重新折叠——顺序不能反。
+                    foreach (var kv in _keys) { try { kv.Value.Visibility = Visibility.Visible; } catch { } }
+                    foreach (var kv in _mouse) { try { kv.Value.Visibility = Visibility.Visible; } catch { } }
                     RestoreLayout();
                     RestoreDeletions();
                     RestorePadVisibility();
@@ -1572,6 +1579,11 @@ namespace KeyDisplay
                 catch (Exception ex) { DiagLog("rebuild keys fail: " + ex.Message); }
             }
             _customKeysFingerprint = fp;
+
+            // 0.9.6 修复：鼠标垫自定义（PadCustom_/PadW/PadH/PadPos_*）此前只在启动时恢复一次，
+            // 设置窗口「应用」带 padW/padH 的布局预设后垫子当场不变、要重启才跳到预设尺寸。
+            // 这里每次重载都按存储值同步一次（未自定义时函数内部会立即返回，不影响"跟随屏幕比例"的自动路径）。
+            RestorePadCustom();
 
             // 2) 外观设置
             string theme = (v["Theme"] as string) ?? "dark";
@@ -2417,35 +2429,53 @@ namespace KeyDisplay
 
         // 移动：移动模式中平移位置；拖拽中实时缩放；未拖拽且解锁时更新边缘高亮。
         // 长按取消带位移阈值：微小走动（<15px）不打断长按计时，保证长按移动能稳定触发。
+        // 0.9.6 修复：当前键区图层缩放（窗口自适应 × 整体按键大小）。
+        // 指针增量是屏幕像素，而按键的 Width/Height/Margin/TranslateTransform 都在 KeyLayer 图层单位里，
+        // 而 KeyLayer 上挂着 _keyScale 缩放。把屏幕增量直接当图层增量会让拖拽/缩放速度乘上缩放倍数
+        // （整体按键大小调到非 0 时尤其明显），吸附用的 SnapCanvas 视觉边也会算错。
+        // scale = 1（默认）时乘除都是 1，行为与修复前完全一致。
+        private double CurrentLayerScale()
+        {
+            try
+            {
+                double s = _keyScale != null ? _keyScale.ScaleX : 1.0;
+                if (s > 0.01 && !double.IsNaN(s) && !double.IsInfinity(s)) return s;
+            }
+            catch { }
+            return 1.0;
+        }
+
         private void Key_PointerMoved(object sender, PointerRoutedEventArgs e)
         {
             var b = sender as Border;
             if (b == null) return;
+            double layerScale = CurrentLayerScale();   // 图层缩放：屏幕像素增量 ↔ 图层单位的换算系数
             if (_moveKey != null)
             {
                 var key = _moveKey;
                 if (b != key) return;
-                double dx = e.GetCurrentPoint(null).Position.X - _moveStartX;
-                double dy = e.GetCurrentPoint(null).Position.Y - _moveStartY;
+                double dx = (e.GetCurrentPoint(null).Position.X - _moveStartX) / layerScale;
+                double dy = (e.GetCurrentPoint(null).Position.Y - _moveStartY) / layerScale;
                 // 位置用 TranslateTransform 渲染变换表达（不写 Margin，避免 StackPanel 流式布局挤压兄弟元素）
                 double tx = _moveStartTX + dx;
                 double ty = _moveStartTY + dy;
                 double w = (key.ActualWidth > 0 ? key.ActualWidth : key.Width);
                 double h = (key.ActualHeight > 0 ? key.ActualHeight : key.Height);
-                // 被拖按键当前四边（SnapCanvas 坐标）：起点视觉基准 + transform 位移增量（免布局刷新）
+                // 被拖按键当前四边（SnapCanvas 坐标）：起点视觉基准 + transform 位移增量换算成视觉量（免布局刷新）
                 double[] ea = new double[4];
-                ea[0] = _moveBaseLeft + (tx - _moveStartTX);
-                ea[1] = ea[0] + w;
-                ea[2] = _moveBaseTop + (ty - _moveStartTY);
-                ea[3] = ea[2] + h;
+                ea[0] = _moveBaseLeft + (tx - _moveStartTX) * layerScale;
+                ea[1] = ea[0] + w * layerScale;
+                ea[2] = _moveBaseTop + (ty - _moveStartTY) * layerScale;
+                ea[3] = ea[2] + h * layerScale;
                 var rects = CollectOtherRects(key);
                 var hitH = ComputeAxisSnap(true, ea, rects);
                 var hitV = ComputeAxisSnap(false, ea, rects);
                 // 滞回：未吸附 ≤8 触发、已吸附 ≤10 保持、>10 脱离；两轴独立，只修正吸附到的轴
                 bool snapH = hitH.Active && ShouldSnap(hitH.Delta, ref _snapActiveH);
                 bool snapV = hitV.Active && ShouldSnap(hitV.Delta, ref _snapActiveV);
-                if (snapH) tx += hitH.Delta;
-                if (snapV) ty += hitV.Delta;
+                // 吸附修正量是 SnapCanvas 视觉像素，写回 transform 前要换算回图层单位
+                if (snapH) tx += hitH.Delta / layerScale;
+                if (snapV) ty += hitV.Delta / layerScale;
                 key.RenderTransform = new TranslateTransform { X = tx, Y = ty };
                 // 0.9.4：整组移动 —— 把被拖键的最终位移（含吸附修正）同步给组内其他键
                 ApplyGroupMove(tx - _moveStartTX, ty - _moveStartTY);
@@ -2458,8 +2488,9 @@ namespace KeyDisplay
             {
                 var key = _dragKey;   // 捕获期间 CaptureLost 可能已把 _dragKey 置空，用局部变量
                 if (b != key) return;
-                double dx = e.GetCurrentPoint(null).Position.X - _dragStartX;
-                double dy = e.GetCurrentPoint(null).Position.Y - _dragStartY;
+                // 0.9.6 修复：屏幕像素增量 → 图层单位（w/h/ml/mt 都是图层单位，见 CurrentLayerScale 注释）
+                double dx = (e.GetCurrentPoint(null).Position.X - _dragStartX) / layerScale;
+                double dy = (e.GetCurrentPoint(null).Position.Y - _dragStartY) / layerScale;
                 double w = _dragStartW, h = _dragStartH, ml = _dragStartML, mt = _dragStartMT;
                 if (key == MousePad)
                 {
@@ -2469,15 +2500,20 @@ namespace KeyDisplay
                     // 宽 = RootPanel 可视边界；高 = 面板底边上方（不遮挡面板下边缘）。
                     if (_dragBaseLeft < RootPanel.ActualWidth - 8 && _dragBaseTop < RootPanel.ActualHeight - 16 - 8)
                     {
-                        double padL = _dragBaseLeft + (ml - _dragStartML), padT = _dragBaseTop + (mt - _dragStartMT);
+                        // 0.9.6：视觉坐标与图层单位统一（padL/padT/maxW/maxH 为视觉量，w/h 为图层单位）
+                        double padL = _dragBaseLeft + (ml - _dragStartML) * layerScale, padT = _dragBaseTop + (mt - _dragStartMT) * layerScale;
                         double maxW = RootPanel.ActualWidth - 8 - padL, maxH = RootPanel.ActualHeight - 16 - 8 - padT;
                         double f = 1.0;
-                        if (w > maxW) f = Math.Min(f, maxW / w);
-                        if (h > maxH) f = Math.Min(f, maxH / h);
+                        if (w * layerScale > maxW) f = Math.Min(f, maxW / (w * layerScale));
+                        if (h * layerScale > maxH) f = Math.Min(f, maxH / (h * layerScale));
                         if (f < 1.0)
                         {
-                            w = Math.Max(MinPadW, w * f);
-                            h = Math.Max(MinPadH, h * f);
+                            // 0.9.6 修复：两轴共用同一个缩放系数（原来各自 Math.Max 兜最小值会把等比拉坏，
+                            // 抬起后被持久化，此后光标映射看起来被拉伸）
+                            double fMin = Math.Max(MinPadW / Math.Max(1.0, w), MinPadH / Math.Max(1.0, h));
+                            if (f < fMin) f = fMin;
+                            w *= f;
+                            h *= f;
                             bool hasH = _dragMode.Contains("l") || _dragMode.Contains("r");
                             bool hasV = _dragMode.Contains("t") || _dragMode.Contains("b");
                             bool hDom = hasH && (!hasV || (Math.Abs(dx) / _dragStartW) >= (Math.Abs(dy) / _dragStartH));
@@ -2563,15 +2599,18 @@ namespace KeyDisplay
                 // 高度钳制 = 面板底边上方。钳制仅在"锚定边未出界"时生效，
                 // 避免把已拖出界的键突然压小；钳制触发时按锚定规则重算 l/t 补偿（保持对边不动）。
                 // 窗口可视边界（页面坐标）：宽 = RootPanel.ActualWidth - 8；底 = RootPanel.ActualHeight - 16(Padding 底) - 8
-                double clampW = double.MaxValue, clampH = double.MaxValue;
-                if (_dragMode.Contains("r") && _dragBaseLeft + _dragStartW <= RootPanel.ActualWidth - 8)
-                    clampW = RootPanel.ActualWidth - 8 - _dragBaseLeft;
+                // 0.9.6：钳制量按图层缩放换算（_dragBaseLeft/_dragBaseTop 是视觉量，_dragStartW/H 与 w/h 是图层单位）
+                double clampWv = double.MaxValue, clampHv = double.MaxValue;
+                if (_dragMode.Contains("r") && _dragBaseLeft + _dragStartW * layerScale <= RootPanel.ActualWidth - 8)
+                    clampWv = RootPanel.ActualWidth - 8 - _dragBaseLeft;
                 else if (_dragMode.Contains("l") && _dragBaseLeft >= 8)
-                    clampW = (_dragBaseLeft + _dragStartW) - 8;
-                if (_dragMode.Contains("b") && _dragBaseTop + _dragStartH <= RootPanel.ActualHeight - 16 - 8)
-                    clampH = RootPanel.ActualHeight - 16 - 8 - _dragBaseTop;
+                    clampWv = (_dragBaseLeft + _dragStartW * layerScale) - 8;
+                if (_dragMode.Contains("b") && _dragBaseTop + _dragStartH * layerScale <= RootPanel.ActualHeight - 16 - 8)
+                    clampHv = RootPanel.ActualHeight - 16 - 8 - _dragBaseTop;
                 else if (_dragMode.Contains("t") && _dragBaseTop >= 16 + 8)
-                    clampH = (_dragBaseTop + _dragStartH) - (16 + 8);
+                    clampHv = (_dragBaseTop + _dragStartH * layerScale) - (16 + 8);
+                double clampW = clampWv == double.MaxValue ? double.MaxValue : clampWv / layerScale;
+                double clampH = clampHv == double.MaxValue ? double.MaxValue : clampHv / layerScale;
                 if (w > clampW) { w = Math.Max(MinKeyW, clampW); if (_dragMode.Contains("l")) ml = (_dragStartML + _dragStartW) - w; }
                 if (h > clampH) { h = Math.Max(MinKeyH, clampH); if (_dragMode.Contains("t")) mt = (_dragStartMT + _dragStartH) - h; }
 
@@ -2821,13 +2860,17 @@ namespace KeyDisplay
         // 修正直接写回 w/h/ml/mt，仍受调用方的最小尺寸保护。
         private void ApplyDragSnap(Border key, ref double w, ref double h, ref double ml, ref double mt)
         {
+            // 0.9.6 修复：w/h/ml/mt 是图层单位，而吸附判定统一用 SnapCanvas 视觉坐标（其他键的视觉矩形），
+            // 所以这里按图层缩放把尺寸/位移换算成视觉量再比较；命中增量写回图层单位前再除回去。
+            // scale = 1 时与修复前完全一致。
+            double s = CurrentLayerScale();
             // 被调按键当前四边（SnapCanvas 坐标）：起点视觉基准 + 缩放增量反推
             double baseL = _dragBaseLeft, baseT = _dragBaseTop;
-            double baseRight = baseL + _dragStartW, baseBot = baseT + _dragStartH;
-            double left = baseL + (ml - _dragStartML);
-            double top = baseT + (mt - _dragStartMT);
-            double right = left + w;
-            double bot = top + h;
+            double baseRight = baseL + _dragStartW * s, baseBot = baseT + _dragStartH * s;
+            double left = baseL + (ml - _dragStartML) * s;
+            double top = baseT + (mt - _dragStartMT) * s;
+            double right = left + w * s;
+            double bot = top + h * s;
             var rects = CollectOtherRects(key);
             bool anyH = false, anyV = false;
             SnapHit hitH = new SnapHit(), hitV = new SnapHit();
@@ -2866,26 +2909,26 @@ namespace KeyDisplay
             {
                 if (_dragMode.Contains("r"))
                 {
-                    // 右缘移动：delta 加到宽度（左缘固定）
-                    w = Math.Max(MinKeyW, w + hitH.Delta);
+                    // 右缘移动：delta 加到宽度（左缘固定）；视觉增量换算回图层单位
+                    w = Math.Max(MinKeyW, w + hitH.Delta / s);
                 }
                 else
                 {
                     // 左缘移动：delta 加到 ml，宽度反向收缩（右缘固定）
-                    ml += hitH.Delta;
-                    w = Math.Max(MinKeyW, w - hitH.Delta);
+                    ml += hitH.Delta / s;
+                    w = Math.Max(MinKeyW, w - hitH.Delta / s);
                 }
             }
             if (snappedV)
             {
                 if (_dragMode.Contains("b"))
                 {
-                    h = Math.Max(MinKeyH, h + hitV.Delta);
+                    h = Math.Max(MinKeyH, h + hitV.Delta / s);
                 }
                 else
                 {
-                    mt += hitV.Delta;
-                    h = Math.Max(MinKeyH, h - hitV.Delta);
+                    mt += hitV.Delta / s;
+                    h = Math.Max(MinKeyH, h - hitV.Delta / s);
                 }
             }
 

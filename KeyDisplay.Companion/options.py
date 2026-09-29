@@ -52,6 +52,11 @@ def clamp_push_hz(value):
     """把任意数值夹到最近的合法推送频率（白名单）。"""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError("pushHz 必须是数字")
+    # 0.9.6 修复：json 标准允许 Infinity/1e999 这类字面量，int(float('inf')) 会抛 OverflowError，
+    # 而调用方只捕获 ValueError → 损坏的 options.json 会让伴生进程启动即崩（表现：按键全不亮）。
+    # 这里对非有限值按"非法值"处理，走已有的 ValueError 回退路径（load() 会回退默认值）。
+    if value != value or value < -1e9 or value > 1e9:
+        raise ValueError("pushHz 必须是有限数值")
     value = int(value)
     return min(LEGAL_PUSH_HZ, key=lambda v: abs(v - value))
 

@@ -675,10 +675,10 @@ namespace KeyDisplay
                 // 首次进入自定义：以「深色预设」填充（主窗口有同样的逻辑），避免 8 槽为空
                 var v = ApplicationData.Current.LocalSettings.Values;
                 bool any = false;
-                for (int k = 0; k < 8; k++) if (!string.IsNullOrEmpty(v[CustomKeys[k]] as string)) { any = true; break; }
+                for (int k = 0; k < CustomKeys.Length; k++) if (!string.IsNullOrEmpty(v[CustomKeys[k]] as string)) { any = true; break; }
                 if (!any)
                 {
-                    for (int k = 0; k < 8; k++) Save(CustomKeys[k], ThemeSlotHex[0][k]);
+                    for (int k = 0; k < CustomKeys.Length; k++) Save(CustomKeys[k], ThemeSlotHex[0][k]);
                 }
             }
             RefreshSlotRows();   // 切主题后各槽显示色随之更新
@@ -809,6 +809,17 @@ namespace KeyDisplay
         private void DotKeyToggle_Toggled(object sender, RoutedEventArgs e)
         {
             if (!_loaded) return;
+            if (DotKeyToggle.IsOn && _dotKeyVk == 0)
+            {
+                // F10 修复：没有映射按键时开关不能停在"开"（读取侧要求 _dotKeyVk != 0，重开窗口会变回"关"）
+                _dotKeyOn = false;
+                DotKeyToggle.Toggled -= DotKeyToggle_Toggled;   // 先摘事件再复位，避免递归触发 Toggled
+                try { DotKeyToggle.IsOn = false; }
+                finally { DotKeyToggle.Toggled += DotKeyToggle_Toggled; }
+                Save("MouseDotKeyOn_", 0);
+                DotKeyStatusSet("请先按右侧捕获框设置映射按键");
+                return;
+            }
             _dotKeyOn = DotKeyToggle.IsOn;
             Save("MouseDotKeyOn_", _dotKeyOn ? 1 : 0);
             ApplyDotKeyStyles();
@@ -841,8 +852,8 @@ namespace KeyDisplay
             var p = e.GetCurrentPoint(DotKeyCapture).Properties;
             if (p.IsRightButtonPressed) { BindDotKey(2, "鼠标右键"); return; }
             if (p.IsMiddleButtonPressed) { BindDotKey(4, "鼠标中键"); return; }
-            if (p.IsXButton1Pressed) { BindDotKey(6, "侧上键"); return; }
-            if (p.IsXButton2Pressed) { BindDotKey(5, "侧下键"); return; }
+            if (p.IsXButton1Pressed) { BindDotKey(5, "侧上键"); return; }
+            if (p.IsXButton2Pressed) { BindDotKey(6, "侧下键"); return; }
             if (p.IsLeftButtonPressed) { BindDotKey(1, "鼠标左键"); return; }
         }
 
@@ -1009,8 +1020,9 @@ namespace KeyDisplay
                     foreach (var kv in v)
                     {
                         string k = kv.Key;
+                        // F5 修复：CustomKeys 里的 10 个自定义颜色键不能被当布局键一并删掉
                         if (k.StartsWith("Layout_", StringComparison.Ordinal) ||
-                            k.StartsWith("Custom_", StringComparison.Ordinal) ||
+                            (k.StartsWith("Custom_", StringComparison.Ordinal) && Array.IndexOf(CustomKeys, k) < 0) ||
                             k.StartsWith("CustomPos_", StringComparison.Ordinal) ||
                             k.StartsWith("CustomSize_", StringComparison.Ordinal) ||
                             k.StartsWith("DisplayName_", StringComparison.Ordinal) ||
@@ -1035,7 +1047,7 @@ namespace KeyDisplay
             try
             {
                 var v = ApplicationData.Current.LocalSettings.Values;
-                for (int k = 0; k < 8; k++) v.Remove(CustomKeys[k]);
+                for (int k = 0; k < CustomKeys.Length; k++) v.Remove(CustomKeys[k]);
                 v.Remove(CustomKeys[8]);
                 v.Remove(SettingsPanelKey);     // 设置窗口的面板/强调色覆盖值一并清掉，回到跟随主题
                 v.Remove(SettingsAccentKey);
@@ -2236,8 +2248,10 @@ namespace KeyDisplay
         // 导出至粘贴板（保留）
         private void ExportPresetToClipboard(string name, string type, Button src)
         {
-            string err;
-            string json = BuildSinglePresetJson(name, type, out err);
+            string err = null;
+            string json = null;
+            try { json = BuildSinglePresetJson(name, type, out err); }   // F8 修复：presets.json 结构异常不再让设置窗口崩溃
+            catch (Exception ex) { PresetStatusSet("导出失败：" + ex.Message); return; }
             if (json == null) { PresetStatusSet(err); return; }
             CopyJsonToClipboard(json, "已导出预设「" + name + "」至粘贴板（" + type + "）");
             FlashButton(src, "已复制 ✓");
@@ -2246,8 +2260,10 @@ namespace KeyDisplay
         // 导出成文件（文件选择器；不可用时回退到应用本地文件夹）
         private async void ExportPresetToFile(string name, string type, Button src)
         {
-            string err;
-            string json = BuildSinglePresetJson(name, type, out err);
+            string err = null;
+            string json = null;
+            try { json = BuildSinglePresetJson(name, type, out err); }   // F8 修复：presets.json 结构异常不再让设置窗口崩溃
+            catch (Exception ex) { PresetStatusSet("导出失败：" + ex.Message); return; }
             if (json == null) { PresetStatusSet(err); return; }
             string baseName = SanitizeFileName(name) + (type == "layout" ? "-布局" : "-主题");
             try
@@ -2453,6 +2469,9 @@ namespace KeyDisplay
                     {
                         string theme = data.ContainsKey("theme") ? data.GetNamedString("theme") : "dark";
                         v["Theme"] = theme;
+                        // F9 修复：与 Theme_Click 一致，清掉设置窗口的面板/强调色覆盖值
+                        v.Remove(SettingsPanelKey);
+                        v.Remove(SettingsAccentKey);
                         if (data.ContainsKey("colors"))
                         {
                             var colors = data.GetNamedObject("colors");
@@ -2474,12 +2493,24 @@ namespace KeyDisplay
                         {
                             double pw = data.GetNamedNumber("padW");
                             double ph = data.GetNamedNumber("padH");
-                            if (pw > 0 && ph > 0) { v["PadCustom_"] = 1; v["PadW"] = pw.ToString(CultureInfo.InvariantCulture); v["PadH"] = ph.ToString(CultureInfo.InvariantCulture); }
+                            if (pw > 0 && ph > 0)
+                            {
+                                v["PadCustom_"] = 1; v["PadW"] = pw.ToString(CultureInfo.InvariantCulture); v["PadH"] = ph.ToString(CultureInfo.InvariantCulture);
+                                // F3 修复：保存侧会写 padPosX/padPosY，应用侧此前漏写 → 鼠标垫位置不恢复
+                                if (data.ContainsKey("padPosX")) v["PadPos_left"] = data.GetNamedNumber("padPosX").ToString(CultureInfo.InvariantCulture);
+                                if (data.ContainsKey("padPosY")) v["PadPos_top"] = data.GetNamedNumber("padPosY").ToString(CultureInfo.InvariantCulture);
+                            }
                         }
                         if (data.ContainsKey("keys"))
                         {
                             var keys = data.GetNamedObject("keys");
-                            foreach (var kv in keys) v[kv.Key] = kv.Value.GetString();
+                            foreach (var kv in keys)
+                            {
+                                // F7 修复：只接受 Layout_ 前缀且值为字符串的条目，避免写入任意 LocalSettings 键或中途抛异常
+                                if (!kv.Key.StartsWith("Layout_", StringComparison.Ordinal) ||
+                                    kv.Value.ValueType != Windows.Data.Json.JsonValueType.String) continue;
+                                v[kv.Key] = kv.Value.GetString();
+                            }
                         }
                         if (data.ContainsKey("customKeys"))
                         {
@@ -2506,7 +2537,11 @@ namespace KeyDisplay
                             var rm2 = new System.Collections.Generic.List<string>();
                             foreach (var kv in v) if (kv.Key.StartsWith("Deleted_", StringComparison.Ordinal)) rm2.Add(kv.Key);
                             foreach (var k in rm2) v.Remove(k);
-                            foreach (var dk in data.GetNamedArray("deletedKeys")) v["Deleted_" + dk.GetString()] = 1;
+                            foreach (var dk in data.GetNamedArray("deletedKeys"))
+                            {
+                                if (dk.ValueType != Windows.Data.Json.JsonValueType.String) continue;   // F7 修复：非字符串元素跳过
+                                v["Deleted_" + dk.GetString()] = 1;
+                            }
                         }
                     }
 
@@ -2543,7 +2578,18 @@ namespace KeyDisplay
                     {
                         if (!System.IO.File.Exists(path)) continue;
                         var o = Windows.Data.Json.JsonObject.Parse(System.IO.File.ReadAllText(path));
-                        if (o.ContainsKey("stamp") && (long)o.GetNamedNumber("stamp") == stamp) return o;
+                        // F2 修复：stamp 是 18 位 Ticks，经 JSON 往返变成 double（ULP≈128），精确判等几乎必然失败 → 容差比较
+                        Windows.Data.Json.IJsonValue sv;
+                        if (o.TryGetValue("stamp", out sv))
+                        {
+                            if (sv.ValueType == Windows.Data.Json.JsonValueType.String)
+                            {
+                                long ls;
+                                if (long.TryParse(sv.GetString(), out ls) && ls == stamp) return o;
+                            }
+                            else if (sv.ValueType == Windows.Data.Json.JsonValueType.Number &&
+                                     Math.Abs(sv.GetNumber() - (double)stamp) < 1024.0) return o;
+                        }
                     }
                     catch { }
                 }
@@ -2588,7 +2634,8 @@ namespace KeyDisplay
                     data.SetNamedValue("theme", Windows.Data.Json.JsonValue.CreateStringValue((v["Theme"] as string) ?? "dark"));
                     var colors = new Windows.Data.Json.JsonObject();
                     string[] fields = { "panel", "border", "keyBg", "keyFg", "pressedBg", "pressedFg", "pad", "dot", "accent", "dotPressed" };
-                    for (int k = 0; k < fields.Length && k < CustomKeys.Length; k++) colors.SetNamedValue(fields[k], Windows.Data.Json.JsonValue.CreateStringValue(SlotText(k)));
+                    // F4 修复：0/8 槽在设置窗口里被 SettingsPanel_/SettingsAccent_ 覆盖，存预设时必须取小组件真实色槽值
+                    for (int k = 0; k < fields.Length && k < CustomKeys.Length; k++) colors.SetNamedValue(fields[k], Windows.Data.Json.JsonValue.CreateStringValue(IsSettingsScopeSlot(k) ? WidgetSlotHex(k) : SlotText(k)));
                     data.SetNamedValue("colors", colors);
                 }
                 else

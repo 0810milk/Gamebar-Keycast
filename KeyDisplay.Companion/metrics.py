@@ -144,6 +144,11 @@ def get_display_mode():
         if user32.EnumDisplaySettingsW(None, ENUM_CURRENT_SETTINGS,
                                        ctypes.byref(dm)):
             hz = dm.dmDisplayFrequency
+            # 0.9.6 修复：DEVMODE 约定 dmDisplayFrequency==1 表示"硬件默认频率"，
+            # 部分显卡驱动 / 远程会话 / 虚拟机会原样上报 1。若用户开了"跟随刷新率"，
+            # 推送频率就会变成 1Hz（小组件几乎不再刷新），所以这里按"取不到"处理（0 → 上层回退）。
+            if hz is not None and hz < 30:
+                hz = 0
             width = dm.dmPelsWidth
             height = dm.dmPelsHeight
     except Exception as exc:  # noqa: BLE001

@@ -141,8 +141,11 @@ namespace KeyDisplay
                 double mx = Math.Max(4, _menuAnchorLocal.X * s + 8 + KeyLayer.Margin.Left);
                 double my = Math.Max(4, _menuAnchorLocal.Y * s + 8);
 
-                double winW = KeyMenuPanel.ActualWidth > 0 ? KeyMenuPanel.ActualWidth : 340;
-                double winH = KeyMenuPanel.ActualHeight > 0 ? KeyMenuPanel.ActualHeight : 240;
+                // 0.9.6 修复：首次打开菜单时 KeyMenuPanel 还从未参与布局（折叠元素 ActualWidth=0），
+                // 原来回落到硬编码 340×240，窗口不等于该尺寸时菜单会被夹错位置（更宽时明显偏左）。
+                // 改用 RootPanel 的实际可视尺寸兜底。
+                double winW = KeyMenuPanel.ActualWidth > 0 ? KeyMenuPanel.ActualWidth : Math.Max(120, RootPanel.ActualWidth - 32);
+                double winH = KeyMenuPanel.ActualHeight > 0 ? KeyMenuPanel.ActualHeight : Math.Max(120, RootPanel.ActualHeight - 16);
                 double menuW = KeyMenu.ActualWidth > 0 ? KeyMenu.ActualWidth : KeyMenu.Width;
                 double menuH = KeyMenu.ActualHeight > 0 ? KeyMenu.ActualHeight : 200;
                 mx = Math.Min(mx, Math.Max(4, winW - menuW - 8));
