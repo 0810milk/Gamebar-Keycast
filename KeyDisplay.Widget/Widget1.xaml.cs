@@ -611,6 +611,15 @@ namespace KeyDisplay
             try { _customKeysFingerprint = CustomKeysFingerprint(); } catch { }
             try { _lastLayoutResetReq = ParseLongOr(ApplicationData.Current.LocalSettings.Values[LayoutResetRequestKey], 0); } catch { }
             try { _lastLayoutSnapshotReq = ParseLongOr(ApplicationData.Current.LocalSettings.Values["LayoutSnapshotRequest_"], 0); } catch { }   // 0.9.5：启动时登记已有标记，避免把历史重置请求当成新的重复执行
+            // 0.9.6 修复：冷启动也要从存储恢复全部设置。
+            // 原来 ReloadSettingsFromStore() 只挂在 AppDataChanged（设置子窗口改动时的实时重载）上，
+            // 冷启动只走了 RestoreCustomKeys/RestoreKeyFontSettings/HookWindowAdapt，
+            // 于是「整体按键大小 KeyScale_」以及光标大小 DotSize_、鼠标速度 MouseSpeed_、
+            // 鼠标光标按键 MouseDotKeyOn_/Vk_、面板透明 PanelTransparent_ 等在关闭小组件
+            // 重新进入后全部回到默认值。此处放在标记键登记之后（不会被当成新重置请求误触发），
+            // 也在 HookWindowAdapt() 之后（_keyScale 已建好，整体缩放立即生效）。
+            try { ReloadSettingsFromStore(); DiagLog("cold start: settings applied from store"); }
+            catch (Exception ex) { DiagLog("cold start settings fail: " + ex.Message); }
         }
 
         private void OnGameBarDisplayModeChanged(object sender, object e)
@@ -834,22 +843,36 @@ namespace KeyDisplay
             ApplicationData.Current.LocalSettings.Values["Theme"] = _theme;
         }
 
+        // 0.9.6 性能：多选框描边用的固定厚度（原来每帧 new Thickness(2)，改为复用同一实例）
+        private static readonly Thickness SelectedBorderThickness = new Thickness(2);
+
         private void SetKey(Border border, bool down)
         {
-            border.Background = down ? PressBgB() : KeyBgB();
+            // 0.9.6 性能：本方法在渲染循环里对每个键每帧调用（60~480Hz），而依赖属性写入
+            // 会触发失效/重绘。这里改成"幂等写入"——只在当前值确实不等于目标值时才写，
+            // 外观结果与原实现完全一致（被别处改过样式的键依然会被纠正回来）。
+            var bg = down ? PressBgB() : KeyBgB();
+            if (!ReferenceEquals(border.Background, bg)) border.Background = bg;
             // 0.9.4：多选模式下选中的键保持固定红框——渲染循环每帧都会调 SetKey，
             // 若不判断就会把选中描边覆盖回主题边框色（用户反馈"多选框还是以前的灰色"）
             if (IsKeySelected(border))
             {
-                border.BorderBrush = MultiSelectBrush;
-                border.BorderThickness = new Thickness(2);
+                if (!ReferenceEquals(border.BorderBrush, MultiSelectBrush)) border.BorderBrush = MultiSelectBrush;
+                var bt = border.BorderThickness;
+                if (bt.Left != 2.0 || bt.Top != 2.0 || bt.Right != 2.0 || bt.Bottom != 2.0)
+                    border.BorderThickness = SelectedBorderThickness;
             }
             else
             {
-                border.BorderBrush = BorderB();
+                var bb = BorderB();
+                if (!ReferenceEquals(border.BorderBrush, bb)) border.BorderBrush = bb;
             }
             var tb = border.Child as TextBlock;
-            if (tb != null) tb.Foreground = down ? PressFgB() : KeyFgB();
+            if (tb != null)
+            {
+                var fg = down ? PressFgB() : KeyFgB();
+                if (!ReferenceEquals(tb.Foreground, fg)) tb.Foreground = fg;
+            }
         }
 
         // 移动落位/丢捕获时恢复按键样式：普通键走 SetKey(false)；鼠标垫恢复其专属半透明背景（避免被默认键样式覆盖）
@@ -932,7 +955,7 @@ namespace KeyDisplay
             if (snap.Seq != _lastSeq)
             {
                 _lastSeq = snap.Seq;
-                StatusText.Text = "";
+                if (!string.IsNullOrEmpty(StatusText.Text)) StatusText.Text = "";   // 0.9.6 性能：幂等写入
 
                 for (int i = 0; i < KeyNames.Length; i++)
                 {
@@ -1027,9 +1050,15 @@ namespace KeyDisplay
             }
             Canvas.SetLeft(MouseDot, _smoothX);
             Canvas.SetTop(MouseDot, _smoothY);
-            MouseDot.Visibility = Visibility.Visible;
+            if (MouseDot.Visibility != Visibility.Visible) MouseDot.Visibility = Visibility.Visible;
             // 0.9.5：鼠标光标按键映射 —— 命中的键按下时，光标改用"鼠标点按下"色
-            try { MouseDot.Fill = IsDotKeyDown(_dotKeyOn ? _dotKeyVk : 0) ? DotPressedB() : DotB(); } catch { }
+            // 0.9.6 性能：颜色只在真正变化时写入（幂等写入），未按光标按键时不再每帧写 DP
+            try
+            {
+                var fill = IsDotKeyDown(_dotKeyOn ? _dotKeyVk : 0) ? DotPressedB() : DotB();
+                if (!ReferenceEquals(MouseDot.Fill, fill)) MouseDot.Fill = fill;
+            }
+            catch { }
         }
 
         // 鼠标垫尺寸跟随屏幕纵横比：随帧下发的 vs_w/vs_h 就是鼠标坐标的映射基准，
@@ -1585,7 +1614,10 @@ namespace KeyDisplay
             ApplyTheme();
             ApplyKeyOpacity();
             ApplySettingsColors();
-            DiagLog("settings reloaded from store: theme=" + _theme + " size=" + _keyFontSize + " weight=" + _keyFontWeightLevel);
+            // 0.9.6：日志里带上新增设置的实际取值，便于确认"关闭重开后是否恢复"
+            DiagLog("settings reloaded from store: theme=" + _theme + " size=" + _keyFontSize + " weight=" + _keyFontWeightLevel
+                    + " keyScale=" + _keyScaleUser + " dotSize=" + _dotSize + " mouseSpeed=" + _mouseSpeed
+                    + " dotKey=" + (_dotKeyOn ? _dotKeyVk : 0) + " transparent=" + _panelTransparent + " opacity=" + _keyOpacity);
         }
 
         private static double ParseDoubleOr(object o, double def)
