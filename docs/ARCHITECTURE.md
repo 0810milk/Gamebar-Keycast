@@ -24,7 +24,11 @@ KeyDisplayCompanion（Python，桌面进程）           KeyDisplay.Widget（UWP
 - **小组件**：仅在 Game Bar 显示时存活；打开即尝试连接管道，连不上时
   每 2 秒重试，并触发一次协议启动。
 
-## 快照协议（68 字节，小端，v3）
+## 快照协议（76 字节，小端，v4；握手后 92 字节带手柄尾块）
+
+> **v4（0.9.5 起）**：在 v3 末尾追加 8 字节输入时间戳（perf_counter_ns = QPC 纳秒，供小组件算延迟），帧长 68 → 76。
+> **手柄尾块（1.2 起）**：**加法式扩展、默认不发** —— 客户端连接后发 `CMD|PROTO|92` 握手，服务端才把该连接切到 92 字节
+> （前 76 字节逐字节不变 + 16 字节手柄状态：连接掩码/活跃槽/按钮/双扳机/双摇杆/电量/SubType）。版本号刻意保持 4，老小组件不受影响。
 
 > 0.4.0 起协议升 v3：为支持「自定义控件」的任意按键反色，在 v2 基础上
 > 追加 32 字节的 256 位虚拟键（VK）位图，快照由 36 → 68 字节。
@@ -55,7 +59,7 @@ KeyDisplayCompanion（Python，桌面进程）           KeyDisplay.Widget（UWP
   用 `GetSystemMetrics`（SM_*VIRTUALSCREEN）采集后随帧下发，
   小组件据此把坐标映射到 80×80 鼠标垫（UWP 沙箱内不允许 P/Invoke
   `user32!GetSystemMetrics`，故由桌面侧传入）。
-- 字节布局 `struct.calcsize('<4sBHBiiiiiiI32s') == 68`。
+- 字节布局 `struct.calcsize('<4sBHBiiiiiiI32sQ') == 76`；手柄尾块 `calcsize('<BBHBBhhhhBB') == 16`（偏移 76..92）。`n- 逐字节回归测试见 `KeyDisplay.Companion/test_units.py::GamepadTailTests`。
 
 Python 侧序列化：`KeyDisplay.Companion\state.py`；
 C# 侧解析：`KeyDisplay.Widget\InputStateReader.cs`。

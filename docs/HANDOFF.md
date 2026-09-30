@@ -1,8 +1,6 @@
-# 交接文档（给下一个 Agent / 新维护者）—— 完整版
+# 交接文档（给新维护者）—— 完整版
 
 > 本文件是**唯一权威交接入口**。请从头读到尾再动代码。
-> 配套：`docs/AGENT-PROCESS.md`（**多 Agent 协作流程，权威，每轮任务必读**）、
-> `docs/INHERIT.md`（**Agent 继承协议 v2.0：主 Agent 卡顿/断联时的接班 4 步核对 + 项目快照 + 思维链 + 防空转纪律**）、
 > `docs/ARCHITECTURE.md`（架构细节）、`docs/BUILD.md`、`docs/INSTALL.md`、
 > `docs/ISSUE-PINNED-CHROME.md`（全部历史问题的调查与修复记录，1–25 节）、`VERSION.md`（版本登记）。
 > **当前最新交接事项：0.5.3（4 个功能开发完成，未发布）**——
@@ -10,44 +8,9 @@
 > ② 三色主题轮转（黑→白→粉，P()/语义画刷架构，pink=黑字白底）；
 > ③ 按键透明度滑条（10~100%，锁定开=设定值/锁定关=强制100%，KeyOpacity_ 持久化）；
 > ④ 主题颜色子菜单（「自定义」按钮 → 8 槽位调色：hex 输入/方形 HSV 调色盘/色相条/透明度条/16 常用色 4×4；Custom_×8 持久化，改槽位时 8 值整体固化 + 主题切 custom；预设联动显示）。
-> 任务书：`docs/TASK-0.5.3-about.md` / `TASK-0.5.3-theme.md` / `TASK-0.5.3-themecolor.md`。
 > **用户已拍板：暂不发布**，继续攒新功能，下次与后续功能一起打包发布。
-> ⚠️ **工作区有未提交改动**（0.5.3 的 Widget1.xaml/.cs、csproj、Avatar.jpg、3 个任务书），属正常暂存。
 > **GitHub 核对（2026-08-18 维护）：** 9 个 Release，Latest=0.5.2-beta，安装包 SHA256 与本地构建完全一致（资产无问题）；0.5.3 功能从未发布，故 GitHub 下载的 0.5.2 不含新功能属预期。
 > **⚠️ 0.5.2-beta 安装包事故（2026-08-18 已修复并替换资产）：** 用户反馈 GitHub 下载的 0.5.2-beta 装出老版本（0.4.1）。深挖三重根因：① dist\KeyDisplay.Install 残留 1.1.0.0 msix 被 `*.msix` 通配符打进 Setup.exe，install-msix.ps1 按字母序取第一个装成旧版；② install-msix.ps1 为 UTF-8 无 BOM+中文，提权 PS 5.1 按 ANSI 读乱码导致语法崩坏，**脚本从未成功执行**；③ 0.5.2 msix 签名损坏（0x80073D02 装不上）。已修复：脚本转 BOM + 多 msix 报错、重签 msix、清 dist、重建 Setup.exe（SHA256 eda89d15…）并替换 GitHub 资产。教训已记 INHERIT §4.4 发布核对清单。
-
----
-
-## 0. 给下一个 Agent 的启动提示词（可直接复制）
-
-```
-你是这个项目的接管 Agent。项目：Windows Game Bar 键盘鼠标状态显示小组件
-（Python 伴生进程采集输入 → 命名管道 → UWP C# 小组件渲染）。
-
-开始前必读（按顺序）：
-1. docs/HANDOFF.md（本文件，完整交接：架构/流程/易踩坑/发布规则；第 14 节是最近一次任务的专项交接）
-2. docs/ISSUE-PINNED-CHROME.md（全部历史 bug 与修复记录，重点第 9~25 节）
-3. VERSION.md（版本登记与发布规则；含"进行中任务"小节）
-4. docs/ARCHITECTURE.md + docs/BUILD.md + docs/INSTALL.md
-
-接手第一步（重要）：
-- 先 `git status` 看未提交改动。当前有 5 个文件：Widget1.xaml.cs 的光标悬停功能（临时 DiagLog 已清理，
-  且已修 4 个问题：同键内模式去重、CaptureLost 光标兜底、过期注释、无用参数），
-  以及 README/VERSION/HANDOFF/ISSUE 文档改动，由「0.3.1 收尾任务」统一处理
-  （清理临时日志 → 真人验证光标 → 提交 → 发布），详见第 14 节（若该节已完成则无此条）。
-- 确认 widget 布局锁定状态（Settings → 锁开关；当前测试态为解锁）。
-
-工作纪律：
-- 与用户用中文交流；用户是独立开发者，习惯小步迭代。
-- **每轮任务走 `docs/AGENT-PROCESS.md` 闭环**：需求 → 验收标准确认 → 拆解派发 → 集成自检 →
-  构建 + 弹测试窗口 → 用户验收；测试窗口验收是强制环节，不得跳过。
-- 任何功能/修复改动后：跑 KeyDisplay.Companion 单测 → 重建两端 →
-  签名重装 → 验证 → 递增版本号（VERSION.md + README + setup.iss 三处同步）→
-  重建 Setup.exe → 刷新桌面备份 → 复制到 release/<版本>/ → git commit（源码+安装包成对）。
-- 发现问题先看两份日志再动手：diag.txt（widget）和 pipe-debug.log（伴生进程）。
-- 禁止用 Bash 直接写源码文件或 git add 源码路径（会被 Mimosa 安全钩子拦截），
-  一律用 Write/Edit 工具改文件；提交用 git commit -am。
-```
 
 ---
 
@@ -126,7 +89,7 @@ KeyDisplay.Widget（UWP C#，Game Bar 沙箱）
 
 ---
 
-## 5. 本机环境（关键事实，Agent 可直接使用）
+## 5. 本机环境（关键事实）
 
 - 工作目录：`C:\恐龙\项目\Game Bar 按键显示组件`；**git 仅本地备份，无远程**。
 - 已安装：`KeyDisplay.Widget 1.0.0.0 x64`，PFN=`KeyDisplay.Widget_hdjf4fqmxxv8g`，
@@ -337,7 +300,7 @@ cd KeyDisplay.Companion; python -m unittest test_units -v   # 当前 21 项
 
 - 全程中文交流；独立开发者，习惯**小步迭代 + 每轮要明确结论**。
 - 发布=源码+安装包成对；桌面保留最新 Setup.exe 备份；版本三处同步。
-- 用户会反复做 Agent 接管——**每次工作结束把变更写入 docs/ISSUE-PINNED-CHROME.md**
+- 每次工作结束请把变更写入 docs/ISSUE-PINNED-CHROME.md**
   （新增小节）和/或 VERSION.md，保持交接文档不过时。
 - 有方案分歧时给推荐 + 权衡，不罗列；能自主做的小事直接做。
 
