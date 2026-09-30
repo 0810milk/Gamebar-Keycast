@@ -16,9 +16,11 @@ import unittest
 
 from state import (InputState, SNAPSHOT_SIZE, KEY_ORDER, MOUSE_ORDER,
                    MAGIC, VERSION, parse_snapshot)
+import gamepad
 import hooks
 import pipe_server
 import presets
+import state
 
 
 class SnapshotTests(unittest.TestCase):
@@ -518,6 +520,74 @@ class PipeCommandTests(unittest.TestCase):
         # 二进制 KDSP 等异常数据一律忽略
         self.assertEqual(pipe_server._parse_cmd(b"KDSP" + bytes(64)), (None, None))
         self.assertEqual(pipe_server._parse_cmd(b"\x00\x01\x02\xff"), (None, None))
+
+
+class GamepadTailTests(unittest.TestCase):
+    """1.2 手柄尾块（协议加法式扩展）—— 逐字节锁定布局。
+
+    背景：0.9.5 曾因 v4 字段顺序写错（时间戳与 VK 位图颠倒）导致"滚轮疯狂连点"，
+    所以这里把 76 字节前缀 + 16 字节尾块的关键偏移钉死，防止再犯。
+    """
+
+    def test_v5_frame_is_v4_prefix_plus_16_bytes(self):
+        st = state.InputState()
+        self.assertEqual(len(st.serialize()), state.SNAPSHOT_SIZE)             # 默认仍发 v4 = 76
+        self.assertEqual(len(st.serialize(v5=True)), state.SNAPSHOT_SIZE_V5)   # 握手后 92
+        self.assertEqual(struct.calcsize(state._FMT_V5_TAIL), 16)
+        self.assertEqual(state.SNAPSHOT_SIZE + 16, state.SNAPSHOT_SIZE_V5)
+        # 版本号必须保持 4：老小组件按长度/版本分支解析，改成 5 可能被判为不兼容
+        self.assertEqual(state.VERSION, 4)
+        self.assertEqual(st.serialize(v5=True)[4:5], b"\x04")
+
+    def test_v5_prefix_matches_v4_layout(self):
+        st = state.InputState()
+        st.set_vk(0x41, True)
+        st.set_mouse("L", True)
+        st.set_key("Q", True)
+        v5 = st.serialize(v5=True)
+        self.assertEqual(v5[:4], state.MAGIC)
+        self.assertEqual(v5[5:7], struct.pack("<H", st.keys))
+        self.assertEqual(v5[7:8], struct.pack("<B", st.mouse))
+        self.assertEqual(v5[36:68][8:9], b"\x02")   # VK 0x41 → 位图 byte8 bit1（位图在 [36:68]）
+        self.assertEqual(len(v5), 92)               # 时间戳仍在 [68:76]
+
+    def test_gamepad_tail_roundtrip(self):
+        st = state.InputState()
+        st.set_gamepad((0b0011, 0, 0x1400, 128, 255, 32767, -32768, 100, -100, 3, 1))
+        buf = bytearray(state.SNAPSHOT_SIZE_V5)
+        st.serialize_into(buf, v5=True)
+        tail = struct.unpack_from(state._FMT_V5_TAIL, buf, state.SNAPSHOT_SIZE)
+        self.assertEqual(tail, (3, 0, 0x1400, 128, 255, 32767, -32768, 100, -100, 3, 1))
+        self.assertEqual(buf[76], 3)                              # 连接掩码
+        self.assertEqual(buf[78:80], struct.pack("<H", 0x1400))   # A + Guide
+        self.assertEqual(buf[80], 128)                            # LT
+        self.assertEqual(buf[90], 3)                              # 电量
+        self.assertEqual(buf[91], 1)                              # SubType
+
+    def test_parse_snapshot_exposes_gamepad_only_for_v5(self):
+        st = state.InputState()
+        v4 = state.parse_snapshot(st.serialize())
+        self.assertIsNone(v4["gamepad"])                       # 76 字节帧没有手柄块
+        st.set_gamepad((1, 0, 0x1000, 0, 0, 0, 0, 0, 0, 0xFF, 1))
+        v5 = state.parse_snapshot(st.serialize(v5=True))
+        self.assertEqual(v5["gamepad"][2], 0x1000)
+        self.assertEqual(v4["keys"], v5["keys"])               # 键鼠部分不受影响
+
+    def test_set_gamepad_rejects_bad_tuple(self):
+        st = state.InputState()
+        with self.assertRaises(ValueError):
+            st.set_gamepad((1, 2, 3))
+        st.set_gamepad(None)                                   # None = 不更新，不抛
+
+    def test_stick_deadzone_circular_clamp(self):
+        """斜角必须按幅值钳制，否则点会戳出圆环外（XInput 摇杆是方框钳制）。"""
+        self.assertEqual(gamepad.apply_stick_deadzone(0, 0, 7849), (0.0, 0.0))
+        x, y = gamepad.apply_stick_deadzone(32767, 32767, 7849)
+        self.assertAlmostEqual((x * x + y * y) ** 0.5, 1.0, places=3)   # 幅值=1，正好贴环
+        x, y = gamepad.apply_stick_deadzone(32767, 0, 7849)
+        self.assertAlmostEqual(x, 1.0, places=3)
+        self.assertAlmostEqual(y, 0.0, places=3)
+        self.assertEqual(gamepad.apply_stick_deadzone(100, -100, 7849), (0.0, 0.0))
 
 
 if __name__ == "__main__":

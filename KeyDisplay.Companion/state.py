@@ -12,9 +12,14 @@
     [24:28] vs_w       = int32，虚拟屏幕宽度
     [28:32] vs_h       = int32，虚拟屏幕高度
     [32:36] seq        = uint32，自增序号
-    [36:44] ts_ns      = uint64，输入时间戳（perf_counter_ns = QPC 纳秒，供小组件算延迟）
-    [44:76] extra      = 32 字节 = 256 位，按虚拟键码 VK 直接索引：
+    [36:68] extra      = 32 字节 = 256 位，按虚拟键码 VK 直接索引：
                          位 = (extra[vk>>3] >> (vk&7)) & 1；1=按下，0=松开
+    [68:76] ts_ns      = uint64，输入时间戳（perf_counter_ns = QPC 纳秒，供小组件算延迟）
+    [76:92] gamepad    = 16 字节手柄尾块（**默认不发**，客户端发 `CMD|PROTO|92` 握手后才带）
+
+    注意：`[36:68]` 是 VK 位图、`[68:76]` 才是时间戳（与 `_FMT_V4` 的字段顺序一致）。
+    早期本文档曾把两者写成 [36:44]/[44:76]，属于错误描述 —— 0.9.5 那次"滚轮疯狂连点"
+    就是字段顺序错位导致的，所以这里明确写死，改协议前请先看 test_units.GamepadTailTests。
 
 v3（68 字节，无时间戳）仍可被 parse_snapshot 解析（ts_ns 回退 0）；v2 不兼容被拒绝。
 
@@ -30,6 +35,28 @@ VERSION = 4
 SNAPSHOT_SIZE = 76
 SNAPSHOT_SIZE_V3 = 68
 
+# ---- 0.9.6/1.2：手柄块（加法式扩展，**默认不发**） -----------------------------
+# 兼容策略：帧长默认仍是 76 字节（老小组件逐字节不受影响）。只有客户端在连接后发送
+# `CMD|PROTO|92` 握手，服务端才把该连接切到 92 字节（= 前 76 字节完全相同 + 16 字节尾块）。
+# 之所以不动 VERSION（保持 4）：老小组件是按长度/版本分支解析的，若把 ver 改成 5，
+# 老客户端可能直接判定为不兼容而显示"未连接"。
+SNAPSHOT_SIZE_V5 = 92
+_FMT_V5_TAIL = "<BBHBBhhhhBB"      # connected, active, buttons, lt, rt, lx, ly, rx, ry, battery, subtype
+"""
+尾块布局（偏移 76..92，16 字节）：
+    [76]    connected  uint8  bit0..3 = XInput 槽 0..3 已连接
+    [77]    active     uint8  活跃槽（最后真的产生输入的那个），0xFF = 无
+    [78:80] buttons    uint16 XINPUT_GAMEPAD_* 掩码（含未公开的 Guide=0x0400）
+    [80]    lt         uint8  左扳机 0~255
+    [81]    rt         uint8  右扳机 0~255
+    [82:84] lx         int16  左摇杆 X  -32768~32767（原始值，死区由渲染侧处理）
+    [84:86] ly         int16  左摇杆 Y  （注意 XInput 的 Y 轴向上为正）
+    [86:88] rx         int16  右摇杆 X
+    [88:90] ry         int16  右摇杆 Y
+    [90]    battery    uint8  0=空 1=低 2=中 3=满，0xFF=未知
+    [91]    subtype    uint8  XInput SubType（1=手柄），0xFF=未知
+"""
+
 KEY_ORDER = ["Q", "W", "E", "R", "A", "S", "D", "F",
              "Shift", "Ctrl", "Alt", "Space"]
 MOUSE_ORDER = ["L", "R", "M", "X1", "X2"]
@@ -43,7 +70,7 @@ _FMT_V3 = "<4sBHBiiiiiiI32s"      # 时间戳追加在末尾 [68:76]。
 
 class InputState:
     __slots__ = ("keys", "mouse", "mx", "my", "vx", "vy", "vw", "vh", "seq",
-                 "extra")
+                 "extra", "gp")
 
     def __init__(self):
         self.keys = 0
@@ -56,6 +83,16 @@ class InputState:
         self.vh = 1080
         self.seq = 0
         self.extra = bytearray(32)
+        # 手柄尾块：默认"无手柄"（0xFF 全 0 且 active=0xFF）
+        self.gp = (0, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF)
+
+    def set_gamepad(self, snapshot_tuple):
+        """写入手柄状态（参数即 gamepad.GamepadSnapshot.as_tuple() 的 11 个值）。"""
+        if snapshot_tuple is None:
+            return
+        if len(snapshot_tuple) != 11:
+            raise ValueError("手柄状态必须是 11 元组")
+        self.gp = tuple(snapshot_tuple)
 
     def set_key(self, name, down):
         bit = 1 << KEY_ORDER.index(name)
@@ -81,22 +118,29 @@ class InputState:
         else:
             self.extra[byte_idx] &= 0xFF ^ bit
 
-    def serialize(self):
-        return struct.pack(_FMT_V4, MAGIC, VERSION, self.keys,
-                           self.mouse, self.mx, self.my,
-                           self.vx, self.vy, self.vw, self.vh, self.seq,
-                           bytes(self.extra), time.perf_counter_ns())
+    def serialize(self, v5=False):
+        """v5=True 时返回 92 字节（前 76 字节与 v4 逐字节相同 + 16 字节手柄尾块）。"""
+        out = struct.pack(_FMT_V4, MAGIC, VERSION, self.keys,
+                          self.mouse, self.mx, self.my,
+                          self.vx, self.vy, self.vw, self.vh, self.seq,
+                          bytes(self.extra), time.perf_counter_ns())
+        if v5:
+            out += struct.pack(_FMT_V5_TAIL, *self.gp)
+        return out
 
-    def serialize_into(self, buf):
+    def serialize_into(self, buf, v5=False):
         """0.8.4 性能：原地写入复用缓冲（避免每帧 bytes 分配与拷贝），返回同一缓冲。
 
         240Hz 下每帧一次分配看似便宜，但叠加 GIL 与 GC 压力会影响推送时间的均匀性
         （表现为光标/按键反馈的偶发延迟尖峰）。
+        0.9.6：buf 需 ≥ 76（v4）或 ≥ 92（v5）字节；v5=True 时追加 16 字节手柄尾块。
         """
         struct.pack_into(_FMT_V4, buf, 0, MAGIC, VERSION, self.keys,
                          self.mouse, self.mx, self.my,
                          self.vx, self.vy, self.vw, self.vh, self.seq,
                          bytes(self.extra), time.perf_counter_ns())
+        if v5:
+            struct.pack_into(_FMT_V5_TAIL, buf, SNAPSHOT_SIZE, *self.gp)
         return buf
 
 
@@ -111,9 +155,16 @@ def parse_snapshot(data):
     if bytes(data[:4]) != MAGIC:
         return None
     ver = data[4]
+    gamepad = None
     if ver == 4:
         if len(data) < SNAPSHOT_SIZE:
             return None
+        if len(data) >= SNAPSHOT_SIZE_V5:
+            # 加法式尾块：92 字节帧比 76 字节帧多出手柄状态；76 字节帧 gamepad 保持 None
+            try:
+                gamepad = struct.unpack_from(_FMT_V5_TAIL, data, SNAPSHOT_SIZE)
+            except struct.error:
+                gamepad = None
         data = data[:SNAPSHOT_SIZE]
         (magic, ver, keys, mouse, mx, my, vx, vy, vw, vh, seq,
          extra, ts_ns) = struct.unpack(_FMT_V4, data)
@@ -128,4 +179,4 @@ def parse_snapshot(data):
         return None
     return {"keys": keys, "mouse": mouse, "mx": mx, "my": my,
             "vx": vx, "vy": vy, "vw": vw, "vh": vh, "seq": seq,
-            "ts_ns": ts_ns, "extra": extra}
+            "ts_ns": ts_ns, "extra": extra, "gamepad": gamepad}
