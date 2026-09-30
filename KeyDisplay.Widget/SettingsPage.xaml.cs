@@ -289,10 +289,11 @@ namespace KeyDisplay
 
             foreach (var t in new TextBlock[] { PageDesc, ThemeCardDesc, ColorCardDesc, FontCardDesc, PresetCardDesc,
                                                 AboutVerText, AboutDesc, AboutRepo, AuthorDescText,
-                                                AddKeyHint, AboutTech, AdvSwitchDesc, AdvSpeedDesc })
+                                                AddKeyHint, AboutTech, AdvSwitchDesc, AdvSpeedDesc,
+                                                GpCardDesc, GpStyleHint, GpDeadzoneHint, GpBrandHint })
             { t.Foreground = B(_pal.Subtle); }
 
-            foreach (var card in new Border[] { ThemeCard, AdvSwitchCard, ColorCard, FontCard, LayoutCard, PresetCard, AboutCard })
+            foreach (var card in new Border[] { ThemeCard, AdvSwitchCard, ColorCard, FontCard, LayoutCard, PresetCard, AboutCard, GpCard })
             {
                 card.Background = B(_pal.Card);
                 card.BorderBrush = B(_pal.Border);
@@ -414,6 +415,17 @@ namespace KeyDisplay
             _dotKeyOn = !(v["MouseDotKeyOn_"] != null && v["MouseDotKeyOn_"].ToString() == "0") && _dotKeyVk != 0;
             _panelBgTransparent = !(v["PanelTransparent_"] != null && v["PanelTransparent_"].ToString() == "0");
             _locked = !(v["LayoutLocked"] is bool lb && !lb);
+
+            // 手柄显示（布局页最后一块，7 个键与主小组件约定）：
+            // 读法与上面完全一致 —— 缺省 / 类型不对 / 越界一律回默认值（ReadDouble 负责数值，ReadChoice 负责字符串白名单）
+            _gpMode = (int)ReadDouble(v["GamepadMode_"], 1, 0, 2);
+            _gpSlot = (int)ReadDouble(v["GamepadSlot_"], -1, -1, 3);
+            _gpStyle = ReadChoice(v["GamepadStyle_"], "xbox", GpStyleKeys);
+            _gpParts = (int)ReadDouble(v["GamepadParts_"], GpPartsAll, 0, GpPartsAll);
+            _gpTrigger = ReadChoice(v["GamepadTrigger_"], "bar", GpTriggerKeys);
+            _gpDeadzone = (int)ReadDouble(v["GamepadDeadzone_"], 24, GpDeadzoneMin, GpDeadzoneMax);
+            _gpBrand = (int)ReadDouble(v["GamepadBrand_"], 0, 0, 1);
+            ApplyGamepadToControls();
         }
 
         private static double ReadDouble(object o, double def, double min, double max)
@@ -1072,6 +1084,230 @@ namespace KeyDisplay
                 LockBtn.Content = _locked ? "开" : "关";
             }
             catch { }
+        }
+
+        // ===================== 手柄显示（布局页最后一块）=====================
+        // 与主小组件约定的 7 个键，类型 / 取值 / 默认值必须逐位一致（小组件侧负责绘制与配色）：
+        //   GamepadMode_     int     0=关闭 / 1=自动 / 2=始终显示          默认 1
+        //   GamepadSlot_     int     -1=自动 / 0..3=P1..P4                默认 -1
+        //   GamepadStyle_    string  "xbox" / "ps" / "switch"             默认 "xbox"
+        //   GamepadParts_    int     位掩码 bit0 左摇杆 … bit8 电量        默认 0x1FF（全开）
+        //   GamepadTrigger_  string  "bar" / "value" / "highlight"         默认 "bar"
+        //   GamepadDeadzone_ int     0..40（百分比）                       默认 24
+        //   GamepadBrand_    int     0/1                                   默认 0
+        // 本页不写任何颜色键：勾选项只描述"显示什么"，配色一律由小组件侧处理。
+
+        private const int GpPartsAll = 0x1FF;   // 9 个部件全开（默认值）
+        private const int GpDeadzoneMin = 0;
+        private const int GpDeadzoneMax = 40;
+
+        private static readonly string[] GpStyleKeys = { "xbox", "ps", "switch" };
+        private static readonly string[] GpTriggerKeys = { "bar", "value", "highlight" };
+
+        private bool _gpLoading;                // 回填控件期间抑制保存（见 ApplyGamepadToControls）
+        private int _gpMode = 1;
+        private int _gpSlot = -1;
+        private string _gpStyle = "xbox";
+        private int _gpParts = GpPartsAll;
+        private string _gpTrigger = "bar";
+        private int _gpDeadzone = 24;
+        private int _gpBrand;                   // 0=跟随主题 / 1=品牌色
+
+        // 字符串键的容错读取：类型不是字符串、缺省、不在白名单内，一律回默认值
+        private static string ReadChoice(object o, string def, string[] allowed)
+        {
+            string s = o as string;
+            if (string.IsNullOrEmpty(s)) return def;
+            s = s.Trim().ToLowerInvariant();
+            foreach (var a in allowed) if (s == a) return a;
+            return def;
+        }
+
+        // 9 个部件复选框 → 位掩码（bit0 左摇杆 / bit1 右摇杆 / bit2 十字键 / bit3 ABXY /
+        // bit4 肩键 / bit5 扳机 / bit6 View·Menu / bit7 Guide / bit8 电量）
+        private int GamepadPartsFromControls()
+        {
+            int m = 0;
+            if (GpPartsLs != null && GpPartsLs.IsChecked == true) m |= 1 << 0;
+            if (GpPartsRs != null && GpPartsRs.IsChecked == true) m |= 1 << 1;
+            if (GpPartsDpad != null && GpPartsDpad.IsChecked == true) m |= 1 << 2;
+            if (GpPartsAbxy != null && GpPartsAbxy.IsChecked == true) m |= 1 << 3;
+            if (GpPartsShoulder != null && GpPartsShoulder.IsChecked == true) m |= 1 << 4;
+            if (GpPartsTrigger != null && GpPartsTrigger.IsChecked == true) m |= 1 << 5;
+            if (GpPartsViewMenu != null && GpPartsViewMenu.IsChecked == true) m |= 1 << 6;
+            if (GpPartsGuide != null && GpPartsGuide.IsChecked == true) m |= 1 << 7;
+            if (GpPartsBattery != null && GpPartsBattery.IsChecked == true) m |= 1 << 8;
+            return m & GpPartsAll;
+        }
+
+        private static void SetPartCheck(CheckBox box, int mask, int bit)
+        {
+            try { if (box != null) box.IsChecked = (mask & (1 << bit)) != 0; } catch { }
+        }
+
+        // 位掩码 → 9 个部件复选框
+        private void GamepadPartsToControls(int mask)
+        {
+            SetPartCheck(GpPartsLs, mask, 0);
+            SetPartCheck(GpPartsRs, mask, 1);
+            SetPartCheck(GpPartsDpad, mask, 2);
+            SetPartCheck(GpPartsAbxy, mask, 3);
+            SetPartCheck(GpPartsShoulder, mask, 4);
+            SetPartCheck(GpPartsTrigger, mask, 5);
+            SetPartCheck(GpPartsViewMenu, mask, 6);
+            SetPartCheck(GpPartsGuide, mask, 7);
+            SetPartCheck(GpPartsBattery, mask, 8);
+        }
+
+        // 把 _gp* 字段回填到控件。回填会触发 ValueChanged / Toggled（Toggled 用程序赋值也会触发），
+        // 所以这段时间置 _gpLoading=true：否则 9 个部件复选框会被逐个回填并写入"半成品"掩码。
+        // _loaded 在首次加载完成前为 false，两者一起用（Store_Changed 触发的二次 LoadFromSettings
+        // 里 _loaded 已经是 true，只靠它挡不住）。单选 / 复选框用的是只在用户点击时才触发的 Click，
+        // 程序赋值不会开火，这里再加一层同样的保险。
+        private void ApplyGamepadToControls()
+        {
+            _gpLoading = true;
+            try
+            {
+                if (GpModeOff != null) GpModeOff.IsChecked = _gpMode == 0;
+                if (GpModeAuto != null) GpModeAuto.IsChecked = _gpMode == 1;
+                if (GpModeOn != null) GpModeOn.IsChecked = _gpMode == 2;
+
+                if (GpSlotAuto != null) GpSlotAuto.IsChecked = _gpSlot < 0;
+                if (GpSlotP1 != null) GpSlotP1.IsChecked = _gpSlot == 0;
+                if (GpSlotP2 != null) GpSlotP2.IsChecked = _gpSlot == 1;
+                if (GpSlotP3 != null) GpSlotP3.IsChecked = _gpSlot == 2;
+                if (GpSlotP4 != null) GpSlotP4.IsChecked = _gpSlot == 3;
+
+                if (GpStyleXbox != null) GpStyleXbox.IsChecked = _gpStyle == "xbox";
+                if (GpStylePs != null) GpStylePs.IsChecked = _gpStyle == "ps";
+                if (GpStyleSwitch != null) GpStyleSwitch.IsChecked = _gpStyle == "switch";
+
+                GamepadPartsToControls(_gpParts);
+
+                if (GpTrigBar != null) GpTrigBar.IsChecked = _gpTrigger == "bar";
+                if (GpTrigValue != null) GpTrigValue.IsChecked = _gpTrigger == "value";
+                if (GpTrigHighlight != null) GpTrigHighlight.IsChecked = _gpTrigger == "highlight";
+
+                if (GpDeadzoneSlider != null) GpDeadzoneSlider.Value = _gpDeadzone;
+                GpDeadzoneValSet(_gpDeadzone);
+
+                if (GpBrandToggle != null) GpBrandToggle.IsOn = _gpBrand != 0;
+            }
+            catch (Exception ex) { Diag("gamepad apply fail: " + ex.Message); }
+            finally { _gpLoading = false; }
+        }
+
+        private void GpDeadzoneValSet(int v)
+        {
+            try { if (GpDeadzoneVal != null) GpDeadzoneVal.Text = v + "%"; } catch { }
+        }
+
+        // 手柄控件当前是否允许写盘：首次加载期间 _loaded 还是 false，回填期间 _gpLoading 为 true
+        private bool GpReady()
+        {
+            return _loaded && !_gpLoading;
+        }
+
+        // 1. 显示方式 → GamepadMode_（0=关闭 / 1=自动 / 2=始终显示）
+        private void GpMode_Click(object sender, RoutedEventArgs e)
+        {
+            if (!GpReady()) return;
+            try
+            {
+                int m = (GpModeOff != null && GpModeOff.IsChecked == true) ? 0
+                      : ((GpModeAuto != null && GpModeAuto.IsChecked == true) ? 1 : 2);
+                _gpMode = m;
+                Save("GamepadMode_", m);
+            }
+            catch (Exception ex) { Diag("gamepad mode fail: " + ex.Message); }
+        }
+
+        // 2. 手柄选择 → GamepadSlot_（-1=自动 / 0..3=P1..P4）
+        private void GpSlot_Click(object sender, RoutedEventArgs e)
+        {
+            if (!GpReady()) return;
+            try
+            {
+                int slot = -1;
+                if (GpSlotP1 != null && GpSlotP1.IsChecked == true) slot = 0;
+                else if (GpSlotP2 != null && GpSlotP2.IsChecked == true) slot = 1;
+                else if (GpSlotP3 != null && GpSlotP3.IsChecked == true) slot = 2;
+                else if (GpSlotP4 != null && GpSlotP4.IsChecked == true) slot = 3;
+                _gpSlot = slot;
+                Save("GamepadSlot_", slot);
+            }
+            catch (Exception ex) { Diag("gamepad slot fail: " + ex.Message); }
+        }
+
+        // 3. 键位风格 → GamepadStyle_（"xbox" / "ps" / "switch"，只换按键上印的字）
+        private void GpStyle_Click(object sender, RoutedEventArgs e)
+        {
+            if (!GpReady()) return;
+            try
+            {
+                string st = (GpStylePs != null && GpStylePs.IsChecked == true) ? "ps"
+                          : ((GpStyleSwitch != null && GpStyleSwitch.IsChecked == true) ? "switch" : "xbox");
+                _gpStyle = st;
+                Save("GamepadStyle_", st);
+            }
+            catch (Exception ex) { Diag("gamepad style fail: " + ex.Message); }
+        }
+
+        // 4. 显示部件 → GamepadParts_（任意一个勾选变化都重算整个位掩码再写盘）
+        private void GpParts_Click(object sender, RoutedEventArgs e)
+        {
+            if (!GpReady()) return;
+            try
+            {
+                int m = GamepadPartsFromControls();
+                _gpParts = m;
+                Save("GamepadParts_", m);
+            }
+            catch (Exception ex) { Diag("gamepad parts fail: " + ex.Message); }
+        }
+
+        // 5. 扳机显示 → GamepadTrigger_（"bar" / "value" / "highlight"）
+        private void GpTrigger_Click(object sender, RoutedEventArgs e)
+        {
+            if (!GpReady()) return;
+            try
+            {
+                string tr = (GpTrigValue != null && GpTrigValue.IsChecked == true) ? "value"
+                          : ((GpTrigHighlight != null && GpTrigHighlight.IsChecked == true) ? "highlight" : "bar");
+                _gpTrigger = tr;
+                Save("GamepadTrigger_", tr);
+            }
+            catch (Exception ex) { Diag("gamepad trigger fail: " + ex.Message); }
+        }
+
+        // 6. 摇杆死区 → GamepadDeadzone_（0..40，与读取侧同样的钳制范围）
+        private void GpDeadzone_Changed(object sender, Windows.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+        {
+            if (!GpReady()) return;
+            try
+            {
+                int d = (int)Math.Round(e.NewValue);
+                if (d < GpDeadzoneMin) d = GpDeadzoneMin;
+                if (d > GpDeadzoneMax) d = GpDeadzoneMax;
+                _gpDeadzone = d;
+                GpDeadzoneValSet(d);
+                Save("GamepadDeadzone_", d);
+            }
+            catch (Exception ex) { Diag("gamepad deadzone fail: " + ex.Message); }
+        }
+
+        // 7. ABXY 品牌色 → GamepadBrand_（0=跟随主题 / 1=品牌色）
+        private void GpBrand_Toggled(object sender, RoutedEventArgs e)
+        {
+            if (!GpReady()) return;
+            try
+            {
+                int b = (GpBrandToggle != null && GpBrandToggle.IsOn) ? 1 : 0;
+                _gpBrand = b;
+                Save("GamepadBrand_", b);
+            }
+            catch (Exception ex) { Diag("gamepad brand fail: " + ex.Message); }
         }
 
         // ===================== 0.9.5：添加按键（87 配列键盘，代码生成）=====================

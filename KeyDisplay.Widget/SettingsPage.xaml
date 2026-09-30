@@ -335,6 +335,104 @@
                                 </ScrollViewer>
                             </StackPanel>
                         </Border>
+
+                        <!-- 0.9.5：手柄显示（布局页的最后一块）。键名/类型/默认值与主小组件约定，逐项如下：
+                             GamepadMode_  0=关闭 / 1=自动 / 2=始终显示（默认 1）
+                             GamepadSlot_  -1=自动 / 0..3=P1..P4（默认 -1）
+                             GamepadStyle_ xbox / ps / switch（默认 xbox）
+                             GamepadParts_ 位掩码 bit0 左摇杆 … bit8 电量（默认 0x1FF 全开）
+                             GamepadTrigger_ bar / value / highlight（默认 bar）
+                             GamepadDeadzone_ 0..40（%，默认 24）
+                             GamepadBrand_ 0/1（默认 0）　配色一律由主小组件侧处理，这里不涉及任何颜色设置 -->
+                        <StackPanel x:Name="SecGamepad" Margin="0,18,0,0">
+                            <Border x:Name="GpCard" CornerRadius="8" BorderThickness="1" Padding="16">
+                                <StackPanel>
+                                    <TextBlock x:Name="GpCardTitle" Text="手柄显示" FontSize="15" FontWeight="SemiBold"/>
+                                    <TextBlock x:Name="GpCardDesc" Text="把手柄状态叠加到按键显示面板上：摇杆、十字键、ABXY、肩键与扳机、View·Menu、Guide 与电量。" FontSize="12" Opacity="0.7" Margin="0,4,0,0" TextWrapping="Wrap"/>
+
+                                    <!-- 1. 显示方式 -->
+                                    <TextBlock x:Name="GpModeLbl" Text="显示方式" FontSize="13" Margin="0,14,0,0"/>
+                                    <RadioButton x:Name="GpModeOff" GroupName="GpMode" Content="关闭" Click="GpMode_Click" Margin="0,8,0,0"/>
+                                    <RadioButton x:Name="GpModeAuto" GroupName="GpMode" Content="自动（检测到手柄才显示）" Click="GpMode_Click" Margin="0,4,0,0"/>
+                                    <RadioButton x:Name="GpModeOn" GroupName="GpMode" Content="始终显示" Click="GpMode_Click" Margin="0,4,0,0"/>
+
+                                    <!-- 2. 手柄选择 -->
+                                    <TextBlock x:Name="GpSlotLbl" Text="手柄选择" FontSize="13" Margin="0,14,0,0"/>
+                                    <!-- 5 个单选项放在同一个父容器（Grid）里：GroupName 的互斥只在同一父容器内最保险，
+                                         不把它们拆到内层 StackPanel，避免出现"两个同时被选中" -->
+                                    <Grid Margin="0,8,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+                                        <RadioButton x:Name="GpSlotAuto" Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" GroupName="GpSlot" Content="自动（跟随最后操作的手柄）" Click="GpSlot_Click" Margin="0,0,0,4"/>
+                                        <RadioButton x:Name="GpSlotP1" Grid.Row="1" Grid.Column="0" GroupName="GpSlot" Content="P1" Click="GpSlot_Click" Margin="0,0,22,4"/>
+                                        <RadioButton x:Name="GpSlotP2" Grid.Row="1" Grid.Column="1" GroupName="GpSlot" Content="P2" Click="GpSlot_Click" Margin="0,0,0,4"/>
+                                        <RadioButton x:Name="GpSlotP3" Grid.Row="2" Grid.Column="0" GroupName="GpSlot" Content="P3" Click="GpSlot_Click" Margin="0,0,22,0"/>
+                                        <RadioButton x:Name="GpSlotP4" Grid.Row="2" Grid.Column="1" GroupName="GpSlot" Content="P4" Click="GpSlot_Click"/>
+                                    </Grid>
+
+                                    <!-- 3. 键位风格 -->
+                                    <TextBlock x:Name="GpStyleLbl" Text="键位风格" FontSize="13" Margin="0,14,0,0"/>
+                                    <RadioButton x:Name="GpStyleXbox" GroupName="GpStyle" Content="Xbox" Click="GpStyle_Click" Margin="0,8,0,0"/>
+                                    <RadioButton x:Name="GpStylePs" GroupName="GpStyle" Content="PlayStation" Click="GpStyle_Click" Margin="0,4,0,0"/>
+                                    <RadioButton x:Name="GpStyleSwitch" GroupName="GpStyle" Content="Switch" Click="GpStyle_Click" Margin="0,4,0,0"/>
+                                    <TextBlock x:Name="GpStyleHint" Text="只切换按键上印的字，物理位置不变。" FontSize="12" Opacity="0.7" Margin="0,6,0,0" TextWrapping="Wrap"/>
+
+                                    <!-- 4. 显示部件（9 个复选框 ↔ GamepadParts_ 的 9 个 bit，勾选即重算整数值） -->
+                                    <TextBlock x:Name="GpPartsLbl" Text="显示部件" FontSize="13" Margin="0,14,0,0"/>
+                                    <Grid Margin="0,6,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+                                        <CheckBox x:Name="GpPartsLs" Grid.Row="0" Grid.Column="0" Content="左摇杆" Click="GpParts_Click" Margin="0,2,8,2"/>
+                                        <CheckBox x:Name="GpPartsRs" Grid.Row="0" Grid.Column="1" Content="右摇杆" Click="GpParts_Click" Margin="8,2,0,2"/>
+                                        <CheckBox x:Name="GpPartsDpad" Grid.Row="1" Grid.Column="0" Content="十字键" Click="GpParts_Click" Margin="0,2,8,2"/>
+                                        <CheckBox x:Name="GpPartsAbxy" Grid.Row="1" Grid.Column="1" Content="ABXY" Click="GpParts_Click" Margin="8,2,0,2"/>
+                                        <CheckBox x:Name="GpPartsShoulder" Grid.Row="2" Grid.Column="0" Content="肩键" Click="GpParts_Click" Margin="0,2,8,2"/>
+                                        <CheckBox x:Name="GpPartsTrigger" Grid.Row="2" Grid.Column="1" Content="扳机" Click="GpParts_Click" Margin="8,2,0,2"/>
+                                        <CheckBox x:Name="GpPartsViewMenu" Grid.Row="3" Grid.Column="0" Content="View·Menu" Click="GpParts_Click" Margin="0,2,8,2"/>
+                                        <CheckBox x:Name="GpPartsGuide" Grid.Row="3" Grid.Column="1" Content="Guide" Click="GpParts_Click" Margin="8,2,0,2"/>
+                                        <CheckBox x:Name="GpPartsBattery" Grid.Row="4" Grid.Column="0" Content="电量" Click="GpParts_Click" Margin="0,2,8,2"/>
+                                    </Grid>
+
+                                    <!-- 5. 扳机显示 -->
+                                    <TextBlock x:Name="GpTriggerLbl" Text="扳机显示" FontSize="13" Margin="0,14,0,0"/>
+                                    <RadioButton x:Name="GpTrigBar" GroupName="GpTrig" Content="进度条" Click="GpTrigger_Click" Margin="0,8,0,0"/>
+                                    <RadioButton x:Name="GpTrigValue" GroupName="GpTrig" Content="百分比" Click="GpTrigger_Click" Margin="0,4,0,0"/>
+                                    <RadioButton x:Name="GpTrigHighlight" GroupName="GpTrig" Content="仅高亮" Click="GpTrigger_Click" Margin="0,4,0,0"/>
+
+                                    <!-- 6. 摇杆死区 -->
+                                    <TextBlock x:Name="GpDeadzoneLbl" Text="摇杆死区" FontSize="13" Margin="0,14,0,0"/>
+                                    <Grid Margin="0,6,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Slider x:Name="GpDeadzoneSlider" Grid.Column="0" Minimum="0" Maximum="40" StepFrequency="1" ValueChanged="GpDeadzone_Changed"/>
+                                        <TextBlock x:Name="GpDeadzoneVal" Grid.Column="1" Text="24%" FontSize="13" Margin="12,0,0,0" VerticalAlignment="Center" MinWidth="38"/>
+                                    </Grid>
+                                    <TextBlock x:Name="GpDeadzoneHint" Text="摇杆推动量小于该百分比时按「回中」处理（0 = 不设死区，避免摇杆轻微漂移被当成操作）。" FontSize="12" Opacity="0.7" Margin="0,2,0,0" TextWrapping="Wrap"/>
+
+                                    <!-- 7. ABXY 品牌色 -->
+                                    <Grid Margin="0,12,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock x:Name="GpBrandLbl" Grid.Column="0" Text="ABXY 品牌色" FontSize="13" VerticalAlignment="Center"/>
+                                        <ToggleSwitch x:Name="GpBrandToggle" Grid.Column="1" OnContent="开" OffContent="关" Toggled="GpBrand_Toggled"/>
+                                    </Grid>
+                                    <TextBlock x:Name="GpBrandHint" Text="关时跟随主题配色；开时用 A/B/X/Y 各自的官方颜色。" FontSize="12" Opacity="0.7" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
                     </StackPanel>
 
                     <!-- 预设 -->

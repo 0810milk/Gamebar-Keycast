@@ -114,7 +114,20 @@ def main():
     if hook_error:
         raise hook_error[0]
 
+    # 1.2：XInput 手柄轮询（只读、120Hz）。DLL 不可用/没有手柄时内部空转，
+    # 绝不影响键鼠采集；手柄状态由泵线程按需注入快照（仅对握手要 92 字节的客户端）。
+    gamepad_poller = None
+    try:
+        import gamepad as _gpmod
+        gamepad_poller = _gpmod.open_poller(hz=120.0)
+        print("[gamepad] xinput available=%s" % gamepad_poller.available,
+              file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001
+        print("[gamepad] init failed: %s" % exc, file=sys.stderr)
+
     server = PipeServer(state, stop, pfn, fps=options.effective_push_hz())
+    if gamepad_poller is not None:
+        server.attach_gamepad(gamepad_poller)
     server_thread = threading.Thread(target=server.run, daemon=True)
     server_thread.start()
 
@@ -128,6 +141,8 @@ def main():
         pass
     finally:
         stop.set()
+        if gamepad_poller is not None:
+            gamepad_poller.stop()
         metrics.apply_low_latency(False)  # 退出时恢复计时器精度/普通优先级
 
     server_thread.join(timeout=2)

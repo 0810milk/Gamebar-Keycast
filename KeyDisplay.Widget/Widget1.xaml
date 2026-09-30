@@ -107,6 +107,70 @@
                     <!-- 自定义按键区：由"自定义控件"菜单从 87 配列布局添加的按键（动态创建、按名去重、持久化恢复；
                          Canvas 内相对 (0,224) 定位，实际位置 = (224 行) + 位置 transform） -->
                     <Canvas x:Name="CustomKeysPanel" Canvas.Left="0" Canvas.Top="224" Visibility="Collapsed"/>
+                    <!-- ===== 手柄组（1.2）=====
+                         几何/字形/配色全部照 tools\pad_preview.py 的 PadPanel：原点 = 本 Canvas 左上角，
+                         单位 = 设计单位，整组约 168×104，摆在默认键位与鼠标垫都不占用的空位 (208,160)。
+                         放在 KeyLayer 内 → 自动继承键区的整体缩放（FitLayoutToWindow，含「整体按键大小」滑条）。
+                         默认 Collapsed：GamepadMode_=1（自动）且未检测到已连接手柄时整组不显示，
+                         现有键鼠界面一个像素都不变；显隐与按下态由 Widget1.xaml.cs 的 ApplyGamepadState 每帧决定。
+                         圆角/描边与既有按键一致（角上的半径按预览：肩键/View/Menu 用 6，十字键 3，扳机条 4）。 -->
+                    <Canvas x:Name="GamepadPanel" Visibility="Collapsed" Canvas.Left="208" Canvas.Top="160">
+                        <!-- 电量角标：文字中心 (84,14)（与预览同锚点），按等级显示「电量 低/中/满」 -->
+                        <TextBlock x:Name="GpBattery" Text="" FontSize="9" TextAlignment="Center" Width="100"
+                                   Canvas.Left="34" Canvas.Top="8"/>
+                        <!-- 肩键 LB/RB（26×14）：字随风格变（Xbox LB/RB、PS L1/R1、Switch L/R） -->
+                        <Border x:Name="GpLB" Width="26" Height="14" CornerRadius="6" BorderThickness="1" Canvas.Left="24" Canvas.Top="8">
+                            <TextBlock x:Name="GpLBText" Style="{StaticResource KeyText}" FontSize="9" Text="LB"/>
+                        </Border>
+                        <Border x:Name="GpRB" Width="26" Height="14" CornerRadius="6" BorderThickness="1" Canvas.Left="118" Canvas.Top="8">
+                            <TextBlock x:Name="GpRBText" Style="{StaticResource KeyText}" FontSize="9" Text="RB"/>
+                        </Border>
+                        <!-- 扳机 LT/RT（12×30 竖向圆角条）：外框 + 内部填充矩形 GpLTFill/GpRTFill（从底向上长）；
+                             文字在条的正上方居中（与预览同锚点），value 模式下追加百分比 -->
+                        <Border x:Name="GpLT" Width="12" Height="30" CornerRadius="4" BorderThickness="1" Canvas.Left="6" Canvas.Top="2">
+                            <Rectangle x:Name="GpLTFill" Height="0" HorizontalAlignment="Stretch" VerticalAlignment="Bottom"/>
+                        </Border>
+                        <Border x:Name="GpRT" Width="12" Height="30" CornerRadius="4" BorderThickness="1" Canvas.Left="150" Canvas.Top="2">
+                            <Rectangle x:Name="GpRTFill" Height="0" HorizontalAlignment="Stretch" VerticalAlignment="Bottom"/>
+                        </Border>
+                        <TextBlock x:Name="GpLTText" Text="LT" FontSize="8" TextAlignment="Center" Width="46" Canvas.Left="-11" Canvas.Top="-9"/>
+                        <TextBlock x:Name="GpRTText" Text="RT" FontSize="8" TextAlignment="Center" Width="46" Canvas.Left="133" Canvas.Top="-9"/>
+                        <!-- ABXY 菱形：物理位置固定（下/右/左/上，中心 (126,48) 偏移 ±13，φ18），只换圆心内的字 -->
+                        <Border x:Name="GpFaceTop" Width="18" Height="18" CornerRadius="9" BorderThickness="1" Canvas.Left="117" Canvas.Top="26">
+                            <TextBlock x:Name="GpFaceTopText" Style="{StaticResource KeyText}" FontSize="10" Text="Y"/>
+                        </Border>
+                        <Border x:Name="GpFaceLeft" Width="18" Height="18" CornerRadius="9" BorderThickness="1" Canvas.Left="104" Canvas.Top="39">
+                            <TextBlock x:Name="GpFaceLeftText" Style="{StaticResource KeyText}" FontSize="10" Text="X"/>
+                        </Border>
+                        <Border x:Name="GpFaceRight" Width="18" Height="18" CornerRadius="9" BorderThickness="1" Canvas.Left="130" Canvas.Top="39">
+                            <TextBlock x:Name="GpFaceRightText" Style="{StaticResource KeyText}" FontSize="10" Text="B"/>
+                        </Border>
+                        <Border x:Name="GpFaceBottom" Width="18" Height="18" CornerRadius="9" BorderThickness="1" Canvas.Left="117" Canvas.Top="52">
+                            <TextBlock x:Name="GpFaceBottomText" Style="{StaticResource KeyText}" FontSize="10" Text="A"/>
+                        </Border>
+                        <!-- 十字键（12×12 圆角块，中心 (34,84) 偏移 ±13） -->
+                        <Border x:Name="GpDpadUp" Width="12" Height="12" CornerRadius="3" BorderThickness="1" Canvas.Left="28" Canvas.Top="65"/>
+                        <Border x:Name="GpDpadDown" Width="12" Height="12" CornerRadius="3" BorderThickness="1" Canvas.Left="28" Canvas.Top="91"/>
+                        <Border x:Name="GpDpadLeft" Width="12" Height="12" CornerRadius="3" BorderThickness="1" Canvas.Left="15" Canvas.Top="78"/>
+                        <Border x:Name="GpDpadRight" Width="12" Height="12" CornerRadius="3" BorderThickness="1" Canvas.Left="41" Canvas.Top="78"/>
+                        <!-- 左摇杆（环 φ30 中心 (34,44) + 点 φ10）与 L3 标签（环外侧，避免压到十字键） -->
+                        <Ellipse x:Name="GpLsRing" Width="30" Height="30" StrokeThickness="1" Canvas.Left="19" Canvas.Top="29"/>
+                        <Ellipse x:Name="GpLsDot" Width="10" Height="10" Canvas.Left="29" Canvas.Top="39"/>
+                        <TextBlock x:Name="GpLsHint" Text="L3" FontSize="8" TextAlignment="Center" Width="16" Canvas.Left="-4" Canvas.Top="39"/>
+                        <!-- 右摇杆（环 φ30 中心 (126,88) + 点 φ10）与 R3 标签 -->
+                        <Ellipse x:Name="GpRsRing" Width="30" Height="30" StrokeThickness="1" Canvas.Left="111" Canvas.Top="73"/>
+                        <Ellipse x:Name="GpRsDot" Width="10" Height="10" Canvas.Left="121" Canvas.Top="83"/>
+                        <TextBlock x:Name="GpRsHint" Text="R3" FontSize="8" TextAlignment="Center" Width="16" Canvas.Left="150" Canvas.Top="83"/>
+                        <!-- View / Menu（18×13 圆角块，宽度 18 是给十字键右侧留间隙） -->
+                        <Border x:Name="GpView" Width="18" Height="13" CornerRadius="6" BorderThickness="1" Canvas.Left="56" Canvas.Top="78">
+                            <TextBlock x:Name="GpViewText" Style="{StaticResource KeyText}" FontSize="7" Text="View"/>
+                        </Border>
+                        <Border x:Name="GpMenu" Width="18" Height="13" CornerRadius="6" BorderThickness="1" Canvas.Left="78" Canvas.Top="78">
+                            <TextBlock x:Name="GpMenuText" Style="{StaticResource KeyText}" FontSize="7" Text="Menu"/>
+                        </Border>
+                        <!-- Guide（φ22 圆环，中心 (84,56)）：按下时圆环换按下底色 -->
+                        <Ellipse x:Name="GpGuide" Width="22" Height="22" StrokeThickness="1" Canvas.Left="73" Canvas.Top="45"/>
+                    </Canvas>
                 </Canvas>
                 <TextBlock x:Name="StatusText" Text="" HorizontalAlignment="Right" VerticalAlignment="Top" FontSize="10" Opacity="0.6"/>
                 <!-- 按键右键菜单覆盖层：右键按键弹出（删除/复制/修改显示名）；点遮罩关闭 -->

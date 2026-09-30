@@ -839,6 +839,8 @@ namespace KeyDisplay
             }
 
             ApplySettingsColors();
+            // 1.2：手柄组跟随主题/风格重刷（字形 + 静息态配色 + 部件显隐；按下态由每帧 ApplyGamepadState 覆盖）
+            ApplyGamepadSettings();
 
             ApplicationData.Current.LocalSettings.Values["Theme"] = _theme;
         }
@@ -950,6 +952,15 @@ namespace KeyDisplay
                     StatusText.Text = "\u672a\u8fde\u63a5"; // 未连接
                 }
                 _hasSmoothTarget = false;
+                // 1.2：数据断流（伴生进程未运行/管道断开）时手柄组按"未连接"处理：自动模式下折叠，
+                // 避免整组停在最后一帧的假状态；始终显示模式保留静息态。键鼠原有逻辑一字未改。
+                if (_gpMode != 2)
+                {
+                    GpSetVisible(GamepadPanel, false);
+                    _gpPanelShown = false;
+                    _gpStickInit = false;
+                    _gpStickAnim = false;
+                }
                 return;
             }
             if (snap.Seq != _lastSeq)
@@ -1023,7 +1034,13 @@ namespace KeyDisplay
                             + " tgt=" + (int)tx + "," + (int)ty
                             + " sm=" + (int)_smoothX + "," + (int)_smoothY);
                 }
+
+                // 1.2：手柄组状态映射（与键鼠共用同一份快照；未连接/未握手时整组不显示）
+                ApplyGamepadState(snap);
             }
+
+            // 1.2：手柄摇杆点平滑追赶（独立于鼠标点；静止到位后零开销）
+            UpdateGamepadSticks();
 
             // 平滑追赶（BongoCat 同款指数插值，帧率无关；静止到位后零开销）
             if (!_hasSmoothTarget) return;
@@ -1616,6 +1633,10 @@ namespace KeyDisplay
             FitLayoutToWindow();   // 整体大小变化后立即重算键区缩放
             _panelTransparent = !(v["PanelTransparent_"] != null && v["PanelTransparent_"].ToString() == "0");
             DiagLog("panel transparent = " + _panelTransparent);
+            // 1.2：手柄按键显示的 7 个设置（键名/类型/默认值见下面 ApplyGamepadSettings 前的契约注释）：
+            // 冷启动与设置窗口 SignalDataChanged 都走这里；默认 = 自动模式 + 无手柄 → 整组不显示。
+            ReloadGamepadSettings();
+            ApplyGamepadSettings();
             try
             {
                 _layoutLocked = (v["LayoutLocked"] is bool lb) ? lb : true;
@@ -3233,6 +3254,498 @@ namespace KeyDisplay
             }
         }
 
+
+        // ===================== 手柄按键显示（1.2）=====================
+        // 数据来源：伴生进程在连接握手 CMD|PROTO|92 之后，把 16 字节手柄尾块追加到快照末尾
+        // （见 KeyDisplay.Companion/state.py 的 _FMT_V5_TAIL 与 gamepad.py）；本类只做"状态 → 颜色/位置"的映射。
+        // 几何、字形与配色全部照 tools\pad_preview.py 的 PadPanel（_build/apply_theme/update_state），
+        // 元素本体在 Widget1.xaml 的 GamepadPanel 里（在 KeyLayer 内 → 自动继承键区整体缩放、主题与透明度）。
+        //
+        // 设置键契约（与设置窗口同事约定：键名/类型/取值/默认值完全一致，不可单方面改动）：
+        //   GamepadMode_     int     0=关闭 1=自动（检测到已连接手柄才显示） 2=始终显示     默认 1
+        //   GamepadSlot_     int     -1=自动跟随活跃手柄 0..3=固定 P1..P4                  默认 -1
+        //   GamepadStyle_    string  "xbox"/"ps"/"switch"（物理位置固定，只换印在按键上的字） 默认 "xbox"
+        //   GamepadParts_    int     位掩码 bit0 左摇杆 … bit8 电量                        默认 0x1FF（全开）
+        //   GamepadTrigger_  string  "bar"/"value"/"highlight"                            默认 "bar"
+        //   GamepadDeadzone_ int     0..40（百分比）                                       默认 24
+        //   GamepadBrand_    int     0/1（ABXY 是否用品牌色）                              默认 0
+        // 说明：尾块只带伴生进程选定的那一个手柄的明细（活跃槽优先），协议层没有逐槽明细，
+        // 因此 GamepadSlot_ 在这里只用于判定"固定槽是否已连接"：该槽未连接时按无手柄处理，
+        // 已连接时显示的仍是尾块下发的那一份数据。
+        private int _gpMode = 1;
+        private int _gpSlot = -1;
+        private string _gpStyle = "xbox";
+        private int _gpParts = 0x1FF;
+        private string _gpTrigger = "bar";
+        private int _gpDeadzone = 24;
+        private int _gpBrand;
+
+        // XINPUT_GAMEPAD_* 掩码（与 KeyDisplay.Companion/gamepad.py 的常量逐位一致；0x0400 Guide 为未公开位）
+        private const uint GP_DPAD_UP = 0x0001;
+        private const uint GP_DPAD_DOWN = 0x0002;
+        private const uint GP_DPAD_LEFT = 0x0004;
+        private const uint GP_DPAD_RIGHT = 0x0008;
+        private const uint GP_START = 0x0010;
+        private const uint GP_BACK = 0x0020;
+        private const uint GP_LEFT_THUMB = 0x0040;
+        private const uint GP_RIGHT_THUMB = 0x0080;
+        private const uint GP_LEFT_SHOULDER = 0x0100;
+        private const uint GP_RIGHT_SHOULDER = 0x0200;
+        private const uint GP_GUIDE = 0x0400;
+        private const uint GP_A = 0x1000;
+        private const uint GP_B = 0x2000;
+        private const uint GP_X = 0x4000;
+        private const uint GP_Y = 0x8000;
+
+        // GamepadParts_ 位掩码（bit0 左摇杆 … bit8 电量）
+        private const int GP_PART_LS = 1 << 0;
+        private const int GP_PART_RS = 1 << 1;
+        private const int GP_PART_DPAD = 1 << 2;
+        private const int GP_PART_FACE = 1 << 3;
+        private const int GP_PART_SHOULDER = 1 << 4;
+        private const int GP_PART_TRIGGER = 1 << 5;
+        private const int GP_PART_MENU = 1 << 6;
+        private const int GP_PART_GUIDE = 1 << 7;
+        private const int GP_PART_BATTERY = 1 << 8;
+
+        // 几何常量（与 Widget1.xaml 里 GamepadPanel 各元素的 Canvas.Left/Top 同源，数值取自 tools\pad_preview.py）
+        private const double GpTriggerInnerH = 28.0;   // 扳机条内可用高度 = 条高 30 − 上下各 1 的边框
+        private const double GpStickRingR = 15.0;      // 摇杆环半径（φ30）
+        private const double GpStickDotR = 5.0;        // 摇杆点半径（φ10）
+        private const double GpStickTravel = GpStickRingR - GpStickDotR;   // 点圆心的可移动半径
+        private const double GpLsCenterX = 34.0, GpLsCenterY = 44.0;       // 左摇杆环心
+        private const double GpRsCenterX = 126.0, GpRsCenterY = 88.0;      // 右摇杆环心
+        private const int GpTriggerHighlightThreshold = 30;   // 与 gamepad.py 的 TRIGGER_THRESHOLD 一致
+
+        // 摇杆点平滑（与鼠标点同一套指数插值：alpha = 1-0.75^(dt/16.67)，帧率无关）。
+        // Tx/Ty = 本帧目标（归一化 -1..1，Y 向上为正），Sx/Sy = 当前平滑值；
+        // 到位后 _gpStickAnim=false → UpdateGamepadSticks 直接返回（静止时零开销）。
+        private double _gpLsTx, _gpLsTy, _gpLsSx, _gpLsSy;
+        private double _gpRsTx, _gpRsTy, _gpRsSx, _gpRsSy;
+        private bool _gpStickInit;      // 摇杆点是否已就位（整组重新显示时置 false → 直接就位，不从旧位置飞过来）
+        private bool _gpStickAnim;      // 是否有摇杆正在平滑追赶
+        private long _gpLastTicks = -1;
+        private bool _gpPanelShown;     // 上一帧整组是否显示（用于检测"重新显示"）
+
+        // 品牌色（GamepadBrand_=1 时 ABXY 未按下的文字用品牌色；默认关，跟随主题色）
+        private readonly SolidColorBrush _gpBrandA = new SolidColorBrush(Color.FromArgb(0xFF, 0x10, 0x7C, 0x10));   // 绿
+        private readonly SolidColorBrush _gpBrandB = new SolidColorBrush(Color.FromArgb(0xFF, 0xD8, 0x3B, 0x01));   // 红
+        private readonly SolidColorBrush _gpBrandX = new SolidColorBrush(Color.FromArgb(0xFF, 0x00, 0x78, 0xD7));   // 蓝
+        private readonly SolidColorBrush _gpBrandY = new SolidColorBrush(Color.FromArgb(0xFF, 0xFF, 0xB9, 0x00));   // 黄
+
+        // 从 LocalSettings 读 7 个手柄设置进字段（越界/非法值一律回落到契约里的默认值）。
+        // 由 ReloadSettingsFromStore（冷启动 + 设置窗口 SignalDataChanged）调用，应用在 ApplyGamepadSettings。
+        private void ReloadGamepadSettings()
+        {
+            try
+            {
+                var v = ApplicationData.Current.LocalSettings.Values;
+                _gpMode = (int)ParseDoubleOr(v["GamepadMode_"], 1);
+                if (_gpMode < 0 || _gpMode > 2) _gpMode = 1;
+                _gpSlot = (int)ParseDoubleOr(v["GamepadSlot_"], -1);
+                if (_gpSlot < -1 || _gpSlot > 3) _gpSlot = -1;
+                string style = (v["GamepadStyle_"] as string ?? "").Trim().ToLowerInvariant();
+                _gpStyle = (style == "ps" || style == "switch") ? style : "xbox";
+                _gpParts = (int)ParseDoubleOr(v["GamepadParts_"], 0x1FF) & 0x1FF;   // 只有 9 个部件位有效
+                string trig = (v["GamepadTrigger_"] as string ?? "").Trim().ToLowerInvariant();
+                _gpTrigger = (trig == "value" || trig == "highlight") ? trig : "bar";
+                _gpDeadzone = (int)ParseDoubleOr(v["GamepadDeadzone_"], 24);
+                if (_gpDeadzone < 0) _gpDeadzone = 0;
+                if (_gpDeadzone > 40) _gpDeadzone = 40;
+                _gpBrand = (int)ParseDoubleOr(v["GamepadBrand_"], 0) != 0 ? 1 : 0;
+            }
+            catch (Exception ex) { DiagLog("gamepad settings read fail: " + ex.Message); }
+        }
+
+        // 应用手柄设置：字形（风格）→ 静息态配色（主题）→ 部件显隐 → 整组可见性。
+        // ApplyTheme 也会调用（主题/风格变化后立即重刷，与 ApplySettingsColors 同一时机）。
+        private void ApplyGamepadSettings()
+        {
+            try
+            {
+                ApplyGamepadLabels();
+                ApplyGamepadColors();
+                ApplyGamepadParts();
+                // 整组可见性：关闭 → 立即折叠；始终显示 → 立即显示（没有快照时显示静息态）；
+                // 自动 → 完全交给每帧的 ApplyGamepadState（检测到已连接手柄才显示，默认行为与改动前一致）。
+                if (_gpMode == 0)
+                {
+                    GpSetVisible(GamepadPanel, false);
+                    _gpPanelShown = false;
+                    _gpStickInit = false;
+                    _gpStickAnim = false;
+                }
+                else if (_gpMode == 2)
+                {
+                    GpSetVisible(GamepadPanel, true);
+                }
+            }
+            catch (Exception ex) { DiagLog("gamepad settings apply fail: " + ex.Message); }
+        }
+
+        // 风格 → 字形（物理位置固定，只换印在按键上的字）：
+        // 肩键 LB/RB → L1/R1 → L/R；扳机 LT/RT → L2/R2 → ZL/ZR；
+        // 面位 下/右/左/上 = Xbox A/B/X/Y → PS ✕/○/□/△ → Switch B/A/Y/X。
+        private void ApplyGamepadLabels()
+        {
+            try
+            {
+                bool ps = _gpStyle == "ps", sw = _gpStyle == "switch";
+                GpSetText(GpLBText, ps ? "L1" : sw ? "L" : "LB");
+                GpSetText(GpRBText, ps ? "R1" : sw ? "R" : "RB");
+                GpSetText(GpLTText, GpTriggerName(true));
+                GpSetText(GpRTText, GpTriggerName(false));
+                GpSetText(GpFaceBottomText, ps ? "\u2715" : sw ? "B" : "A");   // ✕ / B / A
+                GpSetText(GpFaceRightText, ps ? "\u25CB" : sw ? "A" : "B");    // ○ / A / B
+                GpSetText(GpFaceLeftText, ps ? "\u25A1" : sw ? "Y" : "X");     // □ / Y / X
+                GpSetText(GpFaceTopText, ps ? "\u25B3" : sw ? "X" : "Y");      // △ / X / Y
+            }
+            catch (Exception ex) { DiagLog("gamepad labels fail: " + ex.Message); }
+        }
+
+        // 扳机标签（三种风格）：LT/RT、L2/R2、ZL/ZR（与 TextBlock 内百分比文字拼接使用）
+        private string GpTriggerName(bool left)
+        {
+            bool ps = _gpStyle == "ps", sw = _gpStyle == "switch";
+            return left ? (ps ? "L2" : sw ? "ZL" : "LT") : (ps ? "R2" : sw ? "ZR" : "RT");
+        }
+
+        // 手柄元素的静息态配色（主题/风格变化后调用）。按下态由每帧 ApplyGamepadState 覆盖；
+        // 配色只用现有语义画刷方法（KeyBgB/BorderB/KeyFgB/DotB/PressBgB/PressFgB/AccentB），不新增主题色常量。
+        private void ApplyGamepadColors()
+        {
+            try
+            {
+                SetKey(GpLB, false);
+                SetKey(GpRB, false);
+                SetKey(GpView, false);
+                SetKey(GpMenu, false);
+                SetKey(GpFaceBottom, false);   // 品牌色由 ApplyGamepadState 在未按下时叠加
+                SetKey(GpFaceRight, false);
+                SetKey(GpFaceLeft, false);
+                SetKey(GpFaceTop, false);
+                SetKey(GpDpadUp, false);
+                SetKey(GpDpadDown, false);
+                SetKey(GpDpadLeft, false);
+                SetKey(GpDpadRight, false);
+
+                var bd = BorderB();
+                if (!ReferenceEquals(GpLsRing.Stroke, bd)) GpLsRing.Stroke = bd;
+                if (!ReferenceEquals(GpRsRing.Stroke, bd)) GpRsRing.Stroke = bd;
+                var dot = DotB();
+                if (!ReferenceEquals(GpLsDot.Fill, dot)) GpLsDot.Fill = dot;
+                if (!ReferenceEquals(GpRsDot.Fill, dot)) GpRsDot.Fill = dot;
+                var bg = KeyBgB();
+                if (!ReferenceEquals(GpGuide.Fill, bg)) GpGuide.Fill = bg;
+                if (!ReferenceEquals(GpGuide.Stroke, bd)) GpGuide.Stroke = bd;
+                var fg = KeyFgB();
+                if (!ReferenceEquals(GpLsHint.Foreground, fg)) GpLsHint.Foreground = fg;
+                if (!ReferenceEquals(GpRsHint.Foreground, fg)) GpRsHint.Foreground = fg;
+                if (!ReferenceEquals(GpBattery.Foreground, fg)) GpBattery.Foreground = fg;
+
+                // 扳机条回到静息态（值 0 = 空填充 + 主题字色）
+                GpApplyTrigger(GpLT, GpLTFill, GpLTText, 0, GpTriggerName(true));
+                GpApplyTrigger(GpRT, GpRTFill, GpRTText, 0, GpTriggerName(false));
+            }
+            catch (Exception ex) { DiagLog("gamepad colors fail: " + ex.Message); }
+        }
+
+        // 部件显隐：按 GamepadParts_ 位掩码逐组折叠/显示（只切 Visibility，不动位置/尺寸/颜色）
+        private void ApplyGamepadParts()
+        {
+            try
+            {
+                bool ls = (_gpParts & GP_PART_LS) != 0;
+                bool rs = (_gpParts & GP_PART_RS) != 0;
+                bool dpad = (_gpParts & GP_PART_DPAD) != 0;
+                bool face = (_gpParts & GP_PART_FACE) != 0;
+                bool shoulder = (_gpParts & GP_PART_SHOULDER) != 0;
+                bool trigger = (_gpParts & GP_PART_TRIGGER) != 0;
+                bool menu = (_gpParts & GP_PART_MENU) != 0;
+
+                GpSetVisible(GpLsRing, ls);
+                GpSetVisible(GpLsDot, ls);
+                GpSetVisible(GpLsHint, ls);
+                GpSetVisible(GpRsRing, rs);
+                GpSetVisible(GpRsDot, rs);
+                GpSetVisible(GpRsHint, rs);
+                GpSetVisible(GpDpadUp, dpad);
+                GpSetVisible(GpDpadDown, dpad);
+                GpSetVisible(GpDpadLeft, dpad);
+                GpSetVisible(GpDpadRight, dpad);
+                GpSetVisible(GpFaceBottom, face);
+                GpSetVisible(GpFaceRight, face);
+                GpSetVisible(GpFaceLeft, face);
+                GpSetVisible(GpFaceTop, face);
+                GpSetVisible(GpLB, shoulder);
+                GpSetVisible(GpRB, shoulder);
+                GpSetVisible(GpLT, trigger);
+                GpSetVisible(GpLTFill, trigger);
+                GpSetVisible(GpLTText, trigger);
+                GpSetVisible(GpRT, trigger);
+                GpSetVisible(GpRTFill, trigger);
+                GpSetVisible(GpRTText, trigger);
+                GpSetVisible(GpView, menu);
+                GpSetVisible(GpMenu, menu);
+                GpSetVisible(GpGuide, (_gpParts & GP_PART_GUIDE) != 0);
+                GpSetVisible(GpBattery, (_gpParts & GP_PART_BATTERY) != 0);
+            }
+            catch (Exception ex) { DiagLog("gamepad parts fail: " + ex.Message); }
+        }
+
+        // 每帧：把一份新快照映射到界面（只在 snap.Seq 变化时由 OnRendering 调用）。
+        // 整组是否显示由 GamepadMode_ 决定；未连接 / 该部件被设置关闭 → 对应元素 Collapsed。
+        // 全部包在 try/catch 内：手柄侧的任何异常只记 DiagLog，绝不影响键鼠渲染。
+        private void ApplyGamepadState(InputSnapshot snap)
+        {
+            try
+            {
+                int conn = snap != null ? snap.GamepadConnected : 0;
+                bool hasTail = snap != null && snap.HasGamepad;   // 只有握手过 92 字节帧的伴生进程才带手柄尾块
+                bool show = snap != null && (_gpMode == 2 || (_gpMode == 1 && hasTail && conn != 0));
+                // 固定槽位（0..3）：该槽未连接时按"无手柄"处理（见上面的协议说明）
+                if (_gpSlot >= 0 && _gpSlot <= 3 && (conn & (1 << _gpSlot)) == 0) show = false;
+                if (_gpMode == 0) show = false;
+                if (!show)
+                {
+                    GpSetVisible(GamepadPanel, false);
+                    _gpPanelShown = false;
+                    _gpStickInit = false;
+                    _gpStickAnim = false;
+                    return;
+                }
+                GpSetVisible(GamepadPanel, true);
+                if (!_gpPanelShown) _gpStickInit = false;   // 重新显示：摇杆点直接就位
+                _gpPanelShown = true;
+
+                uint btn = snap.GamepadButtons;
+
+                // ---- 肩键 / View / Menu / Guide ----
+                SetKey(GpLB, (btn & GP_LEFT_SHOULDER) != 0);
+                SetKey(GpRB, (btn & GP_RIGHT_SHOULDER) != 0);
+                SetKey(GpView, (btn & GP_BACK) != 0);
+                SetKey(GpMenu, (btn & GP_START) != 0);
+                GpSetGuide((btn & GP_GUIDE) != 0);
+
+                // ---- 十字键 ----
+                SetKey(GpDpadUp, (btn & GP_DPAD_UP) != 0);
+                SetKey(GpDpadDown, (btn & GP_DPAD_DOWN) != 0);
+                SetKey(GpDpadLeft, (btn & GP_DPAD_LEFT) != 0);
+                SetKey(GpDpadRight, (btn & GP_DPAD_RIGHT) != 0);
+
+                // ---- ABXY（物理位置固定，只看对应的掩码位）----
+                GpSetFaceKey(GpFaceBottom, (btn & GP_A) != 0);
+                GpSetFaceKey(GpFaceRight, (btn & GP_B) != 0);
+                GpSetFaceKey(GpFaceLeft, (btn & GP_X) != 0);
+                GpSetFaceKey(GpFaceTop, (btn & GP_Y) != 0);
+
+                // ---- 扳机（0~255；bar / value / highlight 三选一）----
+                GpApplyTrigger(GpLT, GpLTFill, GpLTText, snap.GamepadLT, GpTriggerName(true));
+                GpApplyTrigger(GpRT, GpRTFill, GpRTText, snap.GamepadRT, GpTriggerName(false));
+
+                // ---- 摇杆：死区 + 径向钳制 → 归一化目标（点圆心 = 环心 + (nx, -ny) × 可移动半径）----
+                double lnx, lny, rnx, rny;
+                GpStickNormalize(snap.GamepadLX, snap.GamepadLY, _gpDeadzone, out lnx, out lny);
+                GpStickNormalize(snap.GamepadRX, snap.GamepadRY, _gpDeadzone, out rnx, out rny);
+                _gpLsTx = lnx;
+                _gpLsTy = lny;
+                _gpRsTx = rnx;
+                _gpRsTy = rny;
+
+                var ringStroke = BorderB();
+                if (!ReferenceEquals(GpLsRing.Stroke, ringStroke)) GpLsRing.Stroke = ringStroke;
+                if (!ReferenceEquals(GpRsRing.Stroke, ringStroke)) GpRsRing.Stroke = ringStroke;
+                // L3/R3 按下时用"鼠标点按下色"（与鼠标点按下的处理一致）
+                var lDot = (btn & GP_LEFT_THUMB) != 0 ? DotPressedB() : DotB();
+                if (!ReferenceEquals(GpLsDot.Fill, lDot)) GpLsDot.Fill = lDot;
+                var rDot = (btn & GP_RIGHT_THUMB) != 0 ? DotPressedB() : DotB();
+                if (!ReferenceEquals(GpRsDot.Fill, rDot)) GpRsDot.Fill = rDot;
+
+                if (!_gpStickInit)
+                {
+                    // 首次显示 / 重新显示：直接就位（与鼠标点首帧直接就位同理，避免点从旧位置飞过来）
+                    _gpLsSx = _gpLsTx;
+                    _gpLsSy = _gpLsTy;
+                    _gpRsSx = _gpRsTx;
+                    _gpRsSy = _gpRsTy;
+                    _gpStickInit = true;
+                    GpPlaceDot(GpLsDot, GpLsCenterX, GpLsCenterY, _gpLsSx, _gpLsSy);
+                    GpPlaceDot(GpRsDot, GpRsCenterX, GpRsCenterY, _gpRsSx, _gpRsSy);
+                    _gpStickAnim = false;
+                }
+                else
+                {
+                    if (!_gpStickAnim) _gpLastTicks = -1;   // 新一段移动：首帧用默认帧间隔（与鼠标点一致）
+                    _gpStickAnim = true;                    // 交给 UpdateGamepadSticks 平滑追赶，到位后自动置 false
+                }
+
+                // ---- 电量角标（0/1/2/3 → 空/低/中/满；0xFF 或未知 → 空）----
+                int lv = snap.GamepadBattery;
+                GpSetText(GpBattery, lv == 1 ? "\u7535\u91cf \u4f4e"
+                    : lv == 2 ? "\u7535\u91cf \u4e2d"
+                    : lv == 3 ? "\u7535\u91cf \u6ee1" : "");
+            }
+            catch (Exception ex) { DiagLog("gamepad state fail: " + ex.Message); }
+        }
+
+        // 扳机条：按显示方式设置填充与文字（值 0~255）。
+        //   bar       → 填充高度 = 条内高 × 值/255，填充色 AccentB()
+        //   value     → 同 bar，另在文字上追加百分比
+        //   highlight → 不填充，值 > 30（同 gamepad.py 的 TRIGGER_THRESHOLD）时整条用按下底/按下字
+        // 全部走"值未变不写依赖属性"的幂等写入（本方法在渲染循环里每帧被调用）。
+        private void GpApplyTrigger(Border bar, Rectangle fill, TextBlock label, int value, string name)
+        {
+            if (value < 0) value = 0;
+            if (value > 255) value = 255;
+            bool highlight = _gpTrigger == "highlight";
+            bool lit = value > GpTriggerHighlightThreshold;
+
+            var bd = BorderB();
+            if (!ReferenceEquals(bar.BorderBrush, bd)) bar.BorderBrush = bd;
+            var bg = highlight && lit ? PressBgB() : KeyBgB();
+            if (!ReferenceEquals(bar.Background, bg)) bar.Background = bg;
+
+            if (highlight)
+            {
+                GpSetHeight(fill, 0.0);   // 仅高亮：不填充（整条换色）
+            }
+            else
+            {
+                var accent = AccentB();
+                if (!ReferenceEquals(fill.Fill, accent)) fill.Fill = accent;
+                GpSetHeight(fill, GpTriggerInnerH * (value / 255.0));
+            }
+
+            var fg = highlight ? (lit ? PressFgB() : KeyFgB()) : (lit ? AccentB() : KeyFgB());
+            if (!ReferenceEquals(label.Foreground, fg)) label.Foreground = fg;
+            GpSetText(label, _gpTrigger == "value" ? name + " " + (int)(value / 2.55) + "%" : name);
+        }
+
+        // Guide（φ22 圆环）：按下时圆环用按下底色填充（与预览一致）
+        private void GpSetGuide(bool down)
+        {
+            var bg = down ? PressBgB() : KeyBgB();
+            if (!ReferenceEquals(GpGuide.Fill, bg)) GpGuide.Fill = bg;
+            var bd = BorderB();
+            if (!ReferenceEquals(GpGuide.Stroke, bd)) GpGuide.Stroke = bd;
+        }
+
+        // 面位按键：与 SetKey 同样的"底/字对调"，品牌色开启时再给未按下态的文字叠品牌色
+        private void GpSetFaceKey(Border b, bool down)
+        {
+            SetKey(b, down);
+            if (_gpBrand == 0 || down) return;
+            var tb = b.Child as TextBlock;
+            if (tb == null) return;
+            var brand = GpBrandBrush(tb.Text);
+            if (brand == null) return;
+            if (!ReferenceEquals(tb.Foreground, brand)) tb.Foreground = brand;
+        }
+
+        // 品牌色按"印在按键上的字"取（与 pad_preview.py 的 BRAND 表一致）：
+        // PS/Switch 风格下没有 A/B/X/Y（或字母位置与 Xbox 不同）时返回 null → 保持主题字色
+        private SolidColorBrush GpBrandBrush(string label)
+        {
+            switch (label)
+            {
+                case "A": return _gpBrandA;
+                case "B": return _gpBrandB;
+                case "X": return _gpBrandX;
+                case "Y": return _gpBrandY;
+            }
+            return null;
+        }
+
+        // 死区 + 径向钳制（与 KeyDisplay.Companion/gamepad.py 的 apply_stick_deadzone 同一算法）：
+        // 1) 幅值 ≤ 死区（deadzonePercent/100 × 32767）→ 归零；否则把"死区 → 满量程"重新线性映射到 0..1
+        //    （点从死区边界开始动，不会有跳变）；
+        // 2) 幅值 > 1 时整体缩放，保证斜角方向刚好贴住圆环内缘
+        //    （XInput 摇杆是方框钳制，斜角能到 ±32767，直接按 x/32767 画点会戳出环外）。
+        private static void GpStickNormalize(int x, int y, int deadzonePercent, out double nx, out double ny)
+        {
+            nx = 0.0;
+            ny = 0.0;
+            double dz = deadzonePercent / 100.0;
+            if (dz < 0.0) dz = 0.0;
+            if (dz > 0.99) dz = 0.99;
+            double mag = Math.Sqrt((double)x * x + (double)y * y);
+            if (mag <= 0.0) return;
+            double norm = mag / 32767.0;
+            if (norm <= dz) return;
+            double scaled = (norm - dz) / (1.0 - dz);
+            if (scaled > 1.0) scaled = 1.0;
+            double k = scaled / norm;
+            nx = x * k / 32767.0;
+            ny = y * k / 32767.0;
+        }
+
+        // 摇杆点圆心 = 环心 + (nx, -ny) × 可移动半径（协议 Y 轴向上为正，画布 Y 向下）
+        private static void GpPlaceDot(Ellipse dot, double cx, double cy, double nx, double ny)
+        {
+            double left = cx + nx * GpStickTravel - GpStickDotR;
+            double top = cy - ny * GpStickTravel - GpStickDotR;
+            double curL = Canvas.GetLeft(dot);
+            if (double.IsNaN(curL) || Math.Abs(curL - left) > 0.01) Canvas.SetLeft(dot, left);
+            double curT = Canvas.GetTop(dot);
+            if (double.IsNaN(curT) || Math.Abs(curT - top) > 0.01) Canvas.SetTop(dot, top);
+        }
+
+        // 摇杆点平滑追赶（与鼠标点同一套指数插值；到位即吸附停止 → 静止时零开销）
+        private void UpdateGamepadSticks()
+        {
+            if (!_gpStickAnim) return;
+            long now = _frameClock.ElapsedTicks;
+            double dtMs = _gpLastTicks < 0
+                ? 16.7
+                : (now - _gpLastTicks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            _gpLastTicks = now;
+            double alpha = 1.0 - Math.Pow(CursorDampingDecay, dtMs / (1000.0 / 60.0));
+            bool busy = GpStepStick(GpLsDot, GpLsCenterX, GpLsCenterY, ref _gpLsSx, ref _gpLsSy, _gpLsTx, _gpLsTy, alpha);
+            busy |= GpStepStick(GpRsDot, GpRsCenterX, GpRsCenterY, ref _gpRsSx, ref _gpRsSy, _gpRsTx, _gpRsTy, alpha);
+            _gpStickAnim = busy;
+        }
+
+        private bool GpStepStick(Ellipse dot, double cx, double cy,
+                                 ref double sx, ref double sy, double tx, double ty, double alpha)
+        {
+            double dx = tx - sx, dy = ty - sy;
+            bool moving = dx * dx + dy * dy >= 0.0001;   // 距目标 ≥0.01：继续追赶
+            if (moving)
+            {
+                sx += dx * alpha;
+                sy += dy * alpha;
+            }
+            else
+            {
+                sx = tx;
+                sy = ty;
+            }
+            GpPlaceDot(dot, cx, cy, sx, sy);
+            return moving;
+        }
+
+        // 幂等显隐（值未变不写依赖属性）
+        private static void GpSetVisible(UIElement el, bool visible)
+        {
+            if (el == null) return;
+            var want = visible ? Visibility.Visible : Visibility.Collapsed;
+            if (el.Visibility != want) el.Visibility = want;
+        }
+
+        // 幂等文字（值未变不写依赖属性）
+        private static void GpSetText(TextBlock tb, string text)
+        {
+            if (tb == null) return;
+            if (tb.Text != text) tb.Text = text;
+        }
+
+        // 幂等高度（值未变不写依赖属性；NaN 视为需要写入）
+        private static void GpSetHeight(FrameworkElement el, double h)
+        {
+            if (el == null) return;
+            double cur = el.Height;
+            if (double.IsNaN(cur) || Math.Abs(cur - h) > 0.01) el.Height = h;
+        }
 
         private static void DiagLog(string msg)
         {

@@ -19,7 +19,7 @@ import metrics
 import options
 import presets
 from hooks import reconcile, sync_mouse_position, raw_stats, expire_wheel
-from state import SNAPSHOT_SIZE, VERSION
+from state import SNAPSHOT_SIZE, SNAPSHOT_SIZE_V5, VERSION
 
 
 PIPE_NAME = r"\\.\pipe\KeyDisplayState"
@@ -122,7 +122,7 @@ def _make_pipe(sec_attr):
 def _parse_cmd(raw):
     """解析客户端 CMD 帧 → (命令名, payload) 或 (None, None)。
 
-    支持 GET_PRESETS / PUT_PRESETS / GET_STATS / SET_OPT / OPEN_URL。
+    支持 GET_PRESETS / PUT_PRESETS / GET_STATS / SET_OPT / OPEN_URL / PROTO。
     非 "CMD|" 前缀内容（二进制 KDSP 等异常数据）一律返回 (None, None) 表示忽略。
     """
     try:
@@ -142,6 +142,10 @@ def _parse_cmd(raw):
         return ("SET_OPT", rest[len("SET_OPT|"):])
     if rest.startswith("OPEN_URL|"):
         return ("OPEN_URL", rest[len("OPEN_URL|"):])
+    # 1.2：帧长协商 —— "CMD|PROTO|92" 表示该客户端要带 16 字节手柄尾块的 92 字节帧，
+    # "CMD|PROTO|76" 回到 v4 帧。默认（不握手）仍是 76 字节，老小组件不受影响。
+    if rest in ("PROTO|92", "PROTO|76"):
+        return ("PROTO", rest[len("PROTO|"):])
     return (None, None)
 
 
@@ -156,6 +160,13 @@ class PipeServer:
         self._connected = False
         # 实测推送帧率（由泵线程每 0.5s 更新，供 GET_STATS 读取）
         self._push_fps = 0.0
+        # 1.2：手柄 —— poller 由 companion.py 注入；_v5_handles 记录已握手要 92 字节帧的客户端
+        self._gamepad = None
+        self._v5_handles = set()
+
+    def attach_gamepad(self, poller):
+        """注入 XInput 手柄轮询器（None = 不发送手柄尾块）。"""
+        self._gamepad = poller
 
     @property
     def connected(self):
@@ -235,6 +246,7 @@ class PipeServer:
         frames = 0
         frame_idx = 0
         _ser_buf = ctypes.create_string_buffer(SNAPSHOT_SIZE)   # 0.8.4：复用序列化缓冲
+        _ser_buf_v5 = ctypes.create_string_buffer(SNAPSHOT_SIZE_V5)   # 1.2：握手后带手柄尾块
         summary_at = time.monotonic()
         last_raw = 0
         last_skip = 0
@@ -254,13 +266,22 @@ class PipeServer:
             sync_mouse_position(self._state)
             # 滚轮瞬时点亮自动熄灭（0x07/0x08 位）
             expire_wheel()
+            # 1.2：注入手柄状态（只有握手要 92 字节的客户端需要，未握手时零额外开销）
+            want_v5 = handle in self._v5_handles
+            if want_v5 and self._gamepad is not None:
+                self._state.set_gamepad(self._gamepad.snapshot())
             # 0.8.4 性能：复用序列化缓冲（原每帧 create_string_buffer 分配）
-            _ser_buf = self._state.serialize_into(_ser_buf)
+            if want_v5:
+                _ser_buf_v5 = self._state.serialize_into(_ser_buf_v5, v5=True)
+                _frame_buf, _frame_len = _ser_buf_v5, SNAPSHOT_SIZE_V5
+            else:
+                _ser_buf = self._state.serialize_into(_ser_buf)
+                _frame_buf, _frame_len = _ser_buf, SNAPSHOT_SIZE
             # 0.8.3：seq 32 位回绕（240Hz 连续约 207 天后 struct.pack('I') 溢出抛错 → 永久瘫痪）
             self._state.seq = (self._state.seq + 1) & 0xFFFFFFFF
             written = wt.DWORD()
             with wlock:
-                if not kernel32.WriteFile(handle, _ser_buf, SNAPSHOT_SIZE,
+                if not kernel32.WriteFile(handle, _frame_buf, _frame_len,
                                           ctypes.byref(written), None):
                     debuglog.log("[pipe] write failed err=%d"
                                  % ctypes.get_last_error())
@@ -348,7 +369,14 @@ class PipeServer:
         if kind is None:
             return  # 未知 CMD / 非文本内容 → 忽略
         try:
-            if kind == "GET_PRESETS":
+            if kind == "PROTO":
+                # 1.2：切换该连接的帧长（92 = 带手柄尾块；其它值回到 76）
+                if payload == "92":
+                    self._v5_handles.add(handle)
+                else:
+                    self._v5_handles.discard(handle)
+                self._send_reply(handle, "RESP|OK", wlock)
+            elif kind == "GET_PRESETS":
                 obj = presets.load()
                 self._send_reply(handle, "RESP|DATA|" + json.dumps(
                     obj, ensure_ascii=False), wlock)

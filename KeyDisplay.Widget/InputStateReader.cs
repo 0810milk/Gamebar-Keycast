@@ -27,6 +27,28 @@ namespace KeyDisplay
         public byte[] ExtraKeys;   // 协议 v3：32 字节 = 256 位 VK 位图，按虚拟键码直接索引；
                                    // v2 旧快照为 null（自定义键降级为仅显示）
         public ulong TimestampNs;  // 协议 v4：伴生进程采样时刻的 QPC 纳秒时间戳（0 = 旧伴生进程，无此信息）
+
+        // ===== 1.2 手柄尾块（**加法式扩展**：只有帧长 ≥92 才有，76 字节帧时 HasGamepad 保持 false）=====
+        // 尾块布局 = KeyDisplay.Companion/state.py 的 _FMT_V5_TAIL = "<BBHBBhhhhBB"（小端，偏移 76..92）：
+        //   [76] connected uint8  bit0..3 = XInput 槽 0..3 已连接（0 = 没接任何手柄）
+        //   [77] active    uint8  活跃槽（最后真的产生输入的那个），0xFF = 无
+        //   [78] buttons   uint16 XINPUT_GAMEPAD_* 掩码（含未公开的 Guide=0x0400）
+        //   [80]/[81]      uint8  左/右扳机 0~255
+        //   [82..90]       int16  左 X/Y、右 X/Y 原始值 -32768~32767（死区由渲染侧按用户设置处理，Y 轴向上为正）
+        //   [90] battery   uint8  0=空 1=低 2=中 3=满，0xFF=未知
+        //   [91] subtype   uint8  XInput SubType（1=手柄），0xFF=未知
+        public int GamepadConnected;      // 已连接槽位掩码（bit0..3）
+        public int GamepadActive;         // 活跃槽（0xFF = 无）
+        public uint GamepadButtons;       // XINPUT_GAMEPAD_* 掩码
+        public int GamepadLT;             // 左扳机 0~255
+        public int GamepadRT;             // 右扳机 0~255
+        public int GamepadLX;             // 左摇杆 X（-32768~32767）
+        public int GamepadLY;             // 左摇杆 Y（-32768~32767，向上为正）
+        public int GamepadRX;             // 右摇杆 X
+        public int GamepadRY;             // 右摇杆 Y
+        public int GamepadBattery;        // 电量等级（0xFF = 未知）
+        public int GamepadStyleSubtype;   // XInput SubType（0xFF = 未知）
+        public bool HasGamepad;           // 本帧是否带手柄尾块（帧长 ≥92 才为 true）
     }
 
     /// <summary>
@@ -188,6 +210,10 @@ namespace KeyDisplay
                     {
                         _stream = stream;
                         _connected = true;
+                        // 1.2：连接建立后立刻做帧长协商（声明"本客户端要 92 字节帧"）。
+                        // 放在读循环之前：这条命令只写不读，应答 RESP|OK 由下面的读循环按既有 RESP 分支消费；
+                        // 失败（旧版伴生进程不认这条命令 / 写失败）只记 DiagLog，本连接继续按 76 字节帧工作。
+                        await SendProtoHandshakeAsync(stream).ConfigureAwait(false);
                         var buf = new byte[MsgBufSize];
                         try
                         {
@@ -259,6 +285,32 @@ namespace KeyDisplay
             }
         }
 
+        /// <summary>
+        /// 1.2：连接建立后向伴生进程声明本客户端要 92 字节帧（= 前 76 字节与 v4 逐字节相同 + 16 字节手柄尾块）。
+        /// 帧格式与 RequestPresetAsync 完全一致（消息模式管道下一次 WriteAsync = 一条完整 CMD 消息）；
+        /// 伴生进程用它自己的 _v5_handles 按句柄记录，所以每次重连都要重新握手（本方法在每次连接建立后调用）。
+        /// 旧版伴生进程把这条命令当未知 CMD 静默忽略（既不应答也不报错），此时本连接保持 76 字节帧，
+        /// 键鼠功能完全不受影响；写失败同样只记日志后继续。
+        /// 应答 RESP|OK 由读循环按既有 RESP| 分支消费，本 reader 实例不发起预设请求，不会造成应答错配
+        /// （设置窗口用的是它自己的 reader 实例与独立连接）。
+        /// </summary>
+        private async Task SendProtoHandshakeAsync(FileStream stream)
+        {
+            try
+            {
+                // 注意：帧尾**不能**带换行——伴生进程按整条消息文本精确匹配 "CMD|PROTO|92"，
+                // 多一个 '\n' 就被当成未知命令。
+                var bytes = Encoding.UTF8.GetBytes("CMD|PROTO|92");
+                await stream.WriteAsync(bytes, 0, bytes.Length).ConfigureAwait(false);
+                Log("proto handshake sent: CMD|PROTO|92");
+            }
+            catch (Exception ex)
+            {
+                // 握手失败：继续按 76 字节帧工作（手柄组不显示），键鼠功能不受影响
+                Log("proto handshake failed (keep 76B frames): " + ex.Message);
+            }
+        }
+
         private static void Log(string msg)
         {
             try
@@ -298,6 +350,31 @@ namespace KeyDisplay
             if (len >= 76)
             {
                 snap.TimestampNs = BitConverter.ToUInt64(b, 68);
+            }
+            // 1.2 手柄尾块（偏移 76..92，16 字节小端）：只有本连接握手过 CMD|PROTO|92 的伴生进程才追加；
+            // 76 字节帧时 HasGamepad 保持 false（手柄组不显示，键鼠渲染完全不受影响）。
+            // 整段在 try/catch 内：尾块异常只记 DiagLog，绝不影响键鼠解析。
+            if (len >= 92)
+            {
+                try
+                {
+                    snap.GamepadConnected = b[76];
+                    snap.GamepadActive = b[77];
+                    snap.GamepadButtons = (uint)(b[78] | (b[79] << 8));   // uint16 小端
+                    snap.GamepadLT = b[80];
+                    snap.GamepadRT = b[81];
+                    snap.GamepadLX = BitConverter.ToInt16(b, 82);   // i16 有符号
+                    snap.GamepadLY = BitConverter.ToInt16(b, 84);
+                    snap.GamepadRX = BitConverter.ToInt16(b, 86);
+                    snap.GamepadRY = BitConverter.ToInt16(b, 88);
+                    snap.GamepadBattery = b[90];
+                    snap.GamepadStyleSubtype = b[91];
+                    snap.HasGamepad = true;
+                }
+                catch (Exception ex)
+                {
+                    Log("gamepad tail parse fail: " + ex.Message);
+                }
             }
             return snap;
         }
