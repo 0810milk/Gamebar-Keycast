@@ -406,7 +406,7 @@ cd KeyDisplay.Companion; python -m unittest test_units -v   # 当前 21 项
 
 ### 14.8 自动化验证脚本（临时，可复用）
 
-在 `C:\Users\恐龙milk\AppData\Local\Temp\opencode\`：
+在 `%TEMP%\`：
 - `curinfo.ps1`：SetCursorPos 定位 + SendInput 相对移动（dx=0 点击合成不在此）→ `GetCursorInfo` 读全局光标。
 - `pixcheck2.ps1`：纯 P/Invoke `GetPixel` 采样屏幕像素（验证 hover 边框高亮是否触发）。
 - 关键坐标（独立窗口下）：内容区物理 (424,145) 1800×1350；Q 键右缘逻辑 (352,138)、Q 中心逻辑 (326,138)、
