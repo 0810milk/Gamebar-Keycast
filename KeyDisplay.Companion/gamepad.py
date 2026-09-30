@@ -287,10 +287,15 @@ class GamepadPoller(threading.Thread):
                 continue
             mask |= 1 << i
             if state.dwPacketNumber != self._packets[i]:
+                first_seen = self._packets[i] == 0        # 0 = 上一次该槽还是空的（刚接上）
                 self._packets[i] = state.dwPacketNumber
+                if first_seen:
+                    # 刚接上就读取 SubType（原来只在产生输入时才读，静止时一直是未知）
+                    self._caps_at = now
+                    self._read_caps(i)
                 if has_real_input(state.Gamepad):
                     self._active = i
-                    if now - self._caps_at > 2.0:
+                    if not first_seen and now - self._caps_at > 2.0:
                         self._caps_at = now
                         self._read_caps(i)
 
@@ -340,7 +345,13 @@ class GamepadPoller(threading.Thread):
             return BATTERY_LEVEL_UNKNOWN
         if self._lib.XInputGetBatteryInformation(
                 slot, BATTERY_DEVTYPE_GAMEPAD, ctypes.byref(batt)) == 0:
-            return int(batt.BatteryLevel)
+            # 蓝牙连接的手柄不经 XInput 上报电量：BatteryType=0（未连接/不支持）时
+            # BatteryLevel 往往是 0，照原样返回会被界面显示成"电量 空"（实测本机蓝牙
+            # 手柄就是 0，属于误导）。只信任 低/中/满 三档，其余一律按"未知"处理。
+            level = int(batt.BatteryLevel)
+            if int(batt.BatteryType) == 0 or level < BATTERY_LEVEL_LOW:
+                return BATTERY_LEVEL_UNKNOWN
+            return level
         return BATTERY_LEVEL_UNKNOWN
 
 
