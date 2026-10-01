@@ -9,13 +9,14 @@ namespace KeyDisplay
     //   · keyviz(9.7k★) / BongoCat(23.7k★) / input-overlay(4.2k★) / gamepadviewer 都不画任何内部细节，
     //     机身只留极低不透明度的细轮廓（input-overlay xbox 握把实测 alpha≈12%）；
     //   · 对比全部由"底板几乎看不见 vs 按键 100% 平涂"提供，不靠阴影/渐变/发光。
-    // 因此底板 = 一条 1px 描边 + 12% 填充的圆角矩形，内部一律不画。
+    // 我们的按键是暗底，所以底板必须"压暗"而不是"提亮"：填充 = 黑 @12%（input-overlay 机身实测值），
+    // 描边 = 边框色 @35% 1px。
     // 底板顶边 y=26 在肩键/扳机（y=8~22）之下 —— 肩键与扳机 100% 位于底板之外。
     public sealed partial class Widget1
     {
-        private const double GpFrameX = 4, GpFrameY = 26, GpFrameW = 168, GpFrameH = 74, GpFrameR = 14;
+        private const double GpFrameX = 4, GpFrameY = 26, GpFrameW = 168, GpFrameH = 81, GpFrameR = 14;
         private const double GpFrameFillOpacity = 0.12;
-        private const double GpFrameStrokeOpacity = 0.30;
+        private const double GpFrameStrokeOpacity = 0.35;
 
         private void GpOutlineBuild(string tpl)
         {
@@ -30,7 +31,7 @@ namespace KeyDisplay
                     Height = GpFrameH,
                     RadiusX = GpFrameR,
                     RadiusY = GpFrameR,
-                    Fill = GpDim(PanelB(), GpFrameFillOpacity),
+                    Fill = GpDim(new SolidColorBrush(Windows.UI.Colors.Black), GpFrameFillOpacity),
                     Stroke = GpDim(BorderB(), GpFrameStrokeOpacity),
                     StrokeThickness = 1,
                     IsHitTestVisible = false
