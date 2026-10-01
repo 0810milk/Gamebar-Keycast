@@ -89,6 +89,7 @@ namespace KeyDisplay
             {
                 try { ApplicationData.Current.DataChanged -= Store_Changed; _storeHooked = false; } catch { }
                 StopAdvPolling();
+                StopAdvRateTimer();
             };
         }
 
@@ -426,6 +427,9 @@ namespace KeyDisplay
             _gpDeadzone = (int)ReadDouble(v["GamepadDeadzone_"], 24, GpDeadzoneMin, GpDeadzoneMax);
             _gpBrand = (int)ReadDouble(v["GamepadBrand_"], 0, 0, 1);
             ApplyGamepadToControls();
+
+            // 回报率（参数页三个滑条，键盘 / 鼠标 / 手柄各自独立）：30..480Hz，缺省 240 / 240 / 120
+            ApplyAdvRateToControls();
         }
 
         private static double ReadDouble(object o, double def, double min, double max)
@@ -2287,14 +2291,13 @@ namespace KeyDisplay
                 bool mouseAccel = GetBool(o, "mouseAccel", false);
                 bool lowLat = GetBool(o, "lowLatency", true);
                 bool follow = GetBool(o, "followRefresh", false);
-                int pushHz = (int)GetNum(o, "pushHz");
 
-                // 0.9.5：只保留开关状态回显（用户要求去掉回报率/刷新率/延迟等实测展示）
+                // 0.9.5：只保留开关状态回显（用户要求去掉回报率/刷新率/延迟等实测展示）；
+                // 回报率已改为三个滑条、直接下发给原生接收器，这里不再回显 pushHz（那是 Python 伴生进程的旧值）
                 AdvSetStatus("已连接伴生进程（协议 v" + proto + "）");
                 AdvAccelBtn.Content = mouseAccel ? "开" : "关";   // 读不到时按「关」显示，用户可直接点开
                 AdvLowLatBtn.Content = lowLat ? "开" : "关";
                 AdvFollowBtn.Content = follow ? "开" : "关";
-                ApplyAdvHzStyles(pushHz);
                 AdvSetStatus("");
             }
             catch (Exception ex) { AdvSetStatus("取数据异常：" + ex.Message); }
@@ -2316,33 +2319,178 @@ namespace KeyDisplay
             try { if (tb != null) tb.Text = s; } catch { }
         }
 
-        // 推送频率按钮组的选中态（用强调色）
-        private Button AdvHzBtnOf(int hz)
+        // ===================== 0.9.5：回报率滑条（键盘 / 鼠标 / 手柄各自独立）=====================
+        // 原来是一组固定档位按钮（60/120/144/165/240/360/480），现在改成三个连续滑条：
+        //   ① 值存本地设置 AdvHzKeyboard_ / AdvHzMouse_ / AdvHzGamepad_（int，30..480，步进 10）；
+        //   ② 变更后整组下发（三个值每次都发）给原生接收器 KeyDisplayInput.exe：
+        //      CMD|RATE|kb=<键盘>;mouse=<鼠标>;gp=<手柄>，例如 CMD|RATE|kb=240;mouse=240;gp=120；
+        //   ③ 输入采集已由该接收器负责，推送节奏是它按这条命令决定的（旧 SET_OPT/pushHz 只影响 Python 伴生进程）。
+        // 接收器不在跑（老版本安装）时命令会超时或返回 ERR —— 设置照样保存成功、界面不报错，
+        // 最多在状态行提一句，不回滚滑条。
+
+        private const int AdvRateMin = 30;
+        private const int AdvRateMax = 480;
+        private const int AdvRateStep = 10;
+        private const int AdvRateKbDefault = 240;
+        private const int AdvRateMouseDefault = 240;
+        private const int AdvRateGpDefault = 120;
+        private const int AdvRateThrottleMs = 200;   // 距上次下发 ≥200ms 才再发
+        private const int AdvRateSettleMs = 300;     // 停止拖动 300ms 后必发一次最终值
+
+        private bool _advRateLoading;                 // 回填控件期间抑制写盘 / 下发（用法同 _gpLoading）
+        private Windows.UI.Xaml.DispatcherTimer _advRateTimer;   // 停止拖动后的兜底下发
+        private int _advRateLastSentTick = unchecked(Environment.TickCount - AdvRateThrottleMs);   // 首次变更立即下发
+
+        // 钳制 + 吸附到步进网格（30 + 10k）：历史值若落在两档之间，也能落到滑条刻度上
+        private static int SnapAdvRate(int hz)
         {
-            switch (hz)
-            {
-                case 60: return AdvHz60; case 120: return AdvHz120; case 144: return AdvHz144;
-                case 165: return AdvHz165; case 240: return AdvHz240; case 360: return AdvHz360;
-                default: return AdvHz480;   // 480（以及其它值都会落到这里）
-            }
+            if (hz < AdvRateMin) hz = AdvRateMin;
+            if (hz > AdvRateMax) hz = AdvRateMax;
+            int k = (int)Math.Round((hz - AdvRateMin) / (double)AdvRateStep);
+            int snapped = AdvRateMin + k * AdvRateStep;
+            if (snapped < AdvRateMin) snapped = AdvRateMin;
+            if (snapped > AdvRateMax) snapped = AdvRateMax;
+            return snapped;
         }
 
-        private void ApplyAdvHzStyles(int current)
+        private static void AdvRateValSet(TextBlock tb, int hz)
+        {
+            try { if (tb != null) tb.Text = hz + " Hz"; } catch { }
+        }
+
+        // 从滑条读当前值（画面上是什么就发什么），控件还没建好时回默认值
+        private int AdvRateOf(Slider s, int def)
+        {
+            try { if (s != null) return SnapAdvRate((int)Math.Round(s.Value)); } catch { }
+            return def;
+        }
+
+        // 读三个键回填滑条：缺省 / 类型不对 / 越界一律回默认值并钳制到 30..480。
+        // 回填会触发 ValueChanged（程序赋值也会触发），所以这段时间置 _advRateLoading=true：
+        // 与 _loaded 一起挡（Store_Changed 触发的二次 LoadFromSettings 里 _loaded 已经是 true，只靠它挡不住）。
+        private void ApplyAdvRateToControls()
+        {
+            _advRateLoading = true;
+            try
+            {
+                var v = ApplicationData.Current.LocalSettings.Values;
+                int kb = SnapAdvRate((int)ReadDouble(v["AdvHzKeyboard_"], AdvRateKbDefault, AdvRateMin, AdvRateMax));
+                int ms = SnapAdvRate((int)ReadDouble(v["AdvHzMouse_"], AdvRateMouseDefault, AdvRateMin, AdvRateMax));
+                int gp = SnapAdvRate((int)ReadDouble(v["AdvHzGamepad_"], AdvRateGpDefault, AdvRateMin, AdvRateMax));
+
+                if (AdvRateKbSlider != null) AdvRateKbSlider.Value = kb;
+                if (AdvRateMouseSlider != null) AdvRateMouseSlider.Value = ms;
+                if (AdvRateGpSlider != null) AdvRateGpSlider.Value = gp;
+                AdvRateValSet(AdvRateKbVal, kb);
+                AdvRateValSet(AdvRateMouseVal, ms);
+                AdvRateValSet(AdvRateGpVal, gp);
+            }
+            catch (Exception ex) { Diag("adv rate apply fail: " + ex.Message); }
+            finally { _advRateLoading = false; }
+        }
+
+        // 三个滑条共用的变化处理：更新数值文本 → 写本地设置 → 节流下发整组回报率。
+        // 三个滑条互相独立，不联动（各自只改自己那个键）。
+        private void AdvRate_Changed(Slider s, TextBlock valTb, string key, double newValue)
         {
             try
             {
-                int[] all = { 60, 120, 144, 165, 240, 360, 480 };
-                foreach (int hz in all)
+                if (_advRateLoading) return;         // 回填期间不下发（文本已在回填里设好）
+                if (s == null || valTb == null) return;
+                int hz = SnapAdvRate((int)Math.Round(newValue));
+                AdvRateValSet(valTb, hz);
+                if (!_loaded) return;                // 首次加载完成前不写盘（沿用同文件既有写法）
+                Save(key, hz);
+                AdvRateScheduleSend();
+            }
+            catch (Exception ex) { Diag("adv rate change fail: " + ex.Message); }
+        }
+
+        private void AdvRateKb_Changed(object sender, Windows.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+        {
+            AdvRate_Changed(AdvRateKbSlider, AdvRateKbVal, "AdvHzKeyboard_", e.NewValue);
+        }
+
+        private void AdvRateMouse_Changed(object sender, Windows.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+        {
+            AdvRate_Changed(AdvRateMouseSlider, AdvRateMouseVal, "AdvHzMouse_", e.NewValue);
+        }
+
+        private void AdvRateGp_Changed(object sender, Windows.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+        {
+            AdvRate_Changed(AdvRateGpSlider, AdvRateGpVal, "AdvHzGamepad_", e.NewValue);
+        }
+
+        // 节流：距上次下发 ≥200ms 直接发；否则启动 300ms 定时器，停止拖动后必发一次最终值
+        private void AdvRateScheduleSend()
+        {
+            try
+            {
+                if (_advRateTimer == null)
                 {
-                    var b = AdvHzBtnOf(hz);
-                    if (b == null) continue;
-                    bool sel = hz == current;
-                    b.Background = sel ? B(_pal.Accent) : B(_pal.Card2);
-                    b.BorderBrush = sel ? B(_pal.Accent) : B(_pal.Border);
-                    b.Foreground = sel ? B(_pal.AccentFg) : B(_pal.Text);
+                    _advRateTimer = new Windows.UI.Xaml.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(AdvRateSettleMs) };
+                    _advRateTimer.Tick += (s, e) => { StopAdvRateTimer(); _ = SendAdvRateAsync(); };
+                }
+                int now = Environment.TickCount;
+                int elapsed = unchecked(now - _advRateLastSentTick);   // TickCount 回绕时会变负，按「该发」处理
+                if (elapsed >= AdvRateThrottleMs || elapsed < 0)
+                {
+                    _advRateLastSentTick = now;
+                    StopAdvRateTimer();
+                    _ = SendAdvRateAsync();
+                }
+                else
+                {
+                    _advRateTimer.Stop();   // 重新计时：只认最后一次拖动
+                    _advRateTimer.Start();
                 }
             }
-            catch { }
+            catch (Exception ex) { Diag("adv rate schedule fail: " + ex.Message); }
+        }
+
+        private void StopAdvRateTimer()
+        {
+            try { if (_advRateTimer != null) _advRateTimer.Stop(); } catch { }
+        }
+
+        // 下发整组回报率：CMD|RATE|kb=…;mouse=…;gp=…（三个值每次都发）。
+        // 走与 SET_OPT 完全相同的管道请求（InputStateReader.RequestPresetAsync，同一根 KeyDisplayState 管道），
+        // 应答同为 RESP|OK / RESP|ERR|…（读取器已剥掉 RESP| 前缀，这里拿到的是 OK / ERR|…）。
+        // 超时或 ERR 都不影响本地设置，也不弹错。
+        private async System.Threading.Tasks.Task SendAdvRateAsync()
+        {
+            try
+            {
+                int kb = AdvRateOf(AdvRateKbSlider, AdvRateKbDefault);
+                int ms = AdvRateOf(AdvRateMouseSlider, AdvRateMouseDefault);
+                int gp = AdvRateOf(AdvRateGpSlider, AdvRateGpDefault);
+                string payload = "kb=" + kb + ";mouse=" + ms + ";gp=" + gp;
+
+                EnsureAdvReaderHooked();
+                if (_reader == null || !_reader.Connected)
+                {
+                    AdvSetStatus("已保存回报率（键盘 " + kb + "Hz / 鼠标 " + ms + "Hz / 手柄 " + gp +
+                                 "Hz）；未连接原生接收器 KeyDisplayInput.exe，暂未下发");
+                    Diag("adv rate saved but not sent: " + payload);
+                    return;
+                }
+
+                string resp = await _reader.RequestPresetAsync("RATE", payload, 1200);
+                if (resp == null)
+                {
+                    AdvSetStatus("已保存回报率（键盘 " + kb + "Hz / 鼠标 " + ms + "Hz / 手柄 " + gp + "Hz）；下发超时，暂未生效");
+                    Diag("adv rate send timeout: " + payload);
+                    return;
+                }
+                if (!resp.StartsWith("OK"))
+                {
+                    AdvSetStatus("已保存回报率；接收器未接受这条命令：" + resp);
+                    Diag("adv rate send rejected: " + payload + " -> " + resp);
+                    return;
+                }
+                AdvSetStatus("已应用回报率：键盘 " + kb + "Hz / 鼠标 " + ms + "Hz / 手柄 " + gp + "Hz");
+            }
+            catch (Exception ex) { Diag("adv rate send fail: " + ex.Message); }
         }
 
         // 写开关：SET_OPT（伴生进程会立即生效并持久化到 %LOCALAPPDATA%\KeyDisplay\options.json）
@@ -2361,14 +2509,6 @@ namespace KeyDisplay
                 await AdvRefreshStatsAsync();
             }
             catch (Exception ex) { AdvSetStatus("修改异常：" + ex.Message); }
-        }
-
-        private void AdvHz_Click(object sender, RoutedEventArgs e)
-        {
-            var b = sender as Button; if (b == null) return;
-            string tag = b.Tag as string;
-            if (string.IsNullOrEmpty(tag)) return;
-            _ = SendAdvOptAsync("{\"pushHz\":" + tag + "}", b);
         }
 
         private void AdvFollow_Click(object sender, RoutedEventArgs e)

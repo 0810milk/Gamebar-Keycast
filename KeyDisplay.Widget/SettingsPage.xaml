@@ -85,21 +85,40 @@
                                 <TextBlock x:Name="AdvSwitchDesc" Text="只影响本工具自身（以及系统的「提高指针精确度」），不会改动任何游戏设置。" FontSize="12" Opacity="0.7" Margin="0,4,0,0" TextWrapping="Wrap"/>
 
                                 <TextBlock x:Name="AdvPushLbl" Text="推送频率（状态刷新上限）" FontSize="13" Margin="0,14,0,0"/>
-                                <Grid Margin="0,6,0,0">
+                                <!-- 0.9.5：回报率由固定档位按钮改为三个独立滑条（键盘 / 鼠标 / 手柄），
+                                     30~480Hz、步进 10。值存本地设置（AdvHzKeyboard_ / AdvHzMouse_ / AdvHzGamepad_），
+                                     变更后整组下发给原生接收器 KeyDisplayInput.exe：CMD|RATE|kb=…;mouse=…;gp=… -->
+                                <TextBlock x:Name="AdvRateKbTitle" Text="键盘" FontSize="13" Margin="0,8,0,0"/>
+                                <Grid Margin="0,4,0,0">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
-                                    </Grid.RowDefinitions>
-                                    <Button x:Name="AdvHz60" Grid.Row="0" Grid.Column="0" Height="30" Margin="0,0,3,0" FontSize="12" MinWidth="0" HorizontalAlignment="Stretch" Content="60" Tag="60" Click="AdvHz_Click"/>
-                                    <Button x:Name="AdvHz120" Grid.Row="0" Grid.Column="1" Height="30" Margin="3,0,3,0" FontSize="12" MinWidth="0" HorizontalAlignment="Stretch" Content="120" Tag="120" Click="AdvHz_Click"/>
-                                    <Button x:Name="AdvHz144" Grid.Row="0" Grid.Column="2" Height="30" Margin="3,0,3,0" FontSize="12" MinWidth="0" HorizontalAlignment="Stretch" Content="144" Tag="144" Click="AdvHz_Click"/>
-                                    <Button x:Name="AdvHz165" Grid.Row="0" Grid.Column="3" Height="30" Margin="3,0,0,0" FontSize="12" MinWidth="0" HorizontalAlignment="Stretch" Content="165" Tag="165" Click="AdvHz_Click"/>
-                                    <Button x:Name="AdvHz240" Grid.Row="1" Grid.Column="0" Height="30" Margin="0,6,3,0" FontSize="12" MinWidth="0" HorizontalAlignment="Stretch" Content="240" Tag="240" Click="AdvHz_Click"/>
-                                    <Button x:Name="AdvHz360" Grid.Row="1" Grid.Column="1" Height="30" Margin="3,6,3,0" FontSize="12" MinWidth="0" HorizontalAlignment="Stretch" Content="360" Tag="360" Click="AdvHz_Click"/>
-                                    <Button x:Name="AdvHz480" Grid.Row="1" Grid.Column="2" Height="30" Margin="3,6,3,0" FontSize="12" MinWidth="0" HorizontalAlignment="Stretch" Content="480" Tag="480" Click="AdvHz_Click"/>
+                                    <Slider x:Name="AdvRateKbSlider" Grid.Column="0" Minimum="30" Maximum="480" StepFrequency="10" ValueChanged="AdvRateKb_Changed"/>
+                                    <TextBlock x:Name="AdvRateKbVal" Grid.Column="1" Text="240 Hz" FontSize="13" Margin="12,0,0,0" VerticalAlignment="Center" MinWidth="64"/>
                                 </Grid>
+
+                                <TextBlock x:Name="AdvRateMouseTitle" Text="鼠标" FontSize="13" Margin="0,12,0,0"/>
+                                <Grid Margin="0,4,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Slider x:Name="AdvRateMouseSlider" Grid.Column="0" Minimum="30" Maximum="480" StepFrequency="10" ValueChanged="AdvRateMouse_Changed"/>
+                                    <TextBlock x:Name="AdvRateMouseVal" Grid.Column="1" Text="240 Hz" FontSize="13" Margin="12,0,0,0" VerticalAlignment="Center" MinWidth="64"/>
+                                </Grid>
+                                <TextBlock x:Name="AdvRateMouseHint" Text="越高越跟手，代价是 CPU；240Hz 以上收益有限。" FontSize="12" Opacity="0.7" Margin="0,4,0,0" TextWrapping="Wrap"/>
+
+                                <TextBlock x:Name="AdvRateGpTitle" Text="手柄" FontSize="13" Margin="0,12,0,0"/>
+                                <Grid Margin="0,4,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Slider x:Name="AdvRateGpSlider" Grid.Column="0" Minimum="30" Maximum="480" StepFrequency="10" ValueChanged="AdvRateGp_Changed"/>
+                                    <TextBlock x:Name="AdvRateGpVal" Grid.Column="1" Text="120 Hz" FontSize="13" Margin="12,0,0,0" VerticalAlignment="Center" MinWidth="64"/>
+                                </Grid>
+                                <TextBlock x:Name="AdvRateGpHint" Text="手柄实际受设备报文率限制（有线约 125Hz、蓝牙 60~125Hz），调高只减少采样延迟。" FontSize="12" Opacity="0.7" Margin="0,4,0,0" TextWrapping="Wrap"/>
 
                                 <Grid Margin="0,12,0,0">
                                     <Grid.ColumnDefinitions>
