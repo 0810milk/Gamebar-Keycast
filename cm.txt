@@ -1,13 +1,10 @@
-1.2.3（本地测试版）：设置窗口四项调整 + 安装包去掉节日后缀
+安装器：彻底去掉"需要重启"（1.2.4）
 
-- 参数页删除「鼠标加速」：它会改系统级「提高指针精确度」（SPI_SETMOUSE），与按键显示无关；
-  XAML 整行、事件处理器、回显行与相关局部变量全部移除（grep 无残留）。低延迟保留。
-- 「无害开关」卡片改名为「频率调整」（卡片标题 + 参数页副标题 + 分区注释），卡片内容未动。
-- 「预设」页并入「主题」页：PresetCard 整卡搬进 SecTheme（x:Name 与事件绑定逐字不变），
-  删除导航项 NavPreset、页面容器 SecPreset、ShowSection 分支与 ApplyNavSelection 数组项；
-  顺手修掉指向已删页面的一句提示文案。
-- 导航与页面标题「主题」改为「通用」（内部标识符 Tag/x:Name/ShowSection("theme") 未动）。
-- 清掉一句已与事实不符的说明（其中提到刚删除的系统指针精确度）。
-- installer/setup.iss：去掉「中秋版本」后缀（AppVerName / 窗口标题 / 欢迎语 / 完成语），
-  完成语里的「中秋快乐」一并移除；VERSION.md、README.md 当前版本行同步去后缀。
-- UWP 包 2.2.2.0。
+三个来源全部修掉：
+- CloseApplications=yes → no：Inno 不再去探测/关闭占用文件的应用，也不因此要求重启；
+- [Files] 去掉 restartreplace：该标志的语义就是"现在换不了就等重启后再替换"，是重启提示的直接来源；
+- PrepareToInstall 里补上 KeyDisplayInput.exe：新的原生输入接收器以最高权限常驻，
+  之前没被杀掉，一直占着 Program Files 里的 KeyDisplayInput.exe，导致替换失败并退化为重启替换；
+- 另加 RestartIfNeededByRun=no（[Run] 里的程序返回"需重启"码时也不弹重启）。
+
+进程在文件复制之前就被结束（PrepareToInstall 早于复制），因此现在是一次干净的覆盖安装。

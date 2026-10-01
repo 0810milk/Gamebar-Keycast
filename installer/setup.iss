@@ -47,10 +47,11 @@ ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayName={#MyAppName}
 UninstallDisplayIcon={app}\{#MyAppExeName},0
 ; 关键：安装/卸载时如检测到应用文件被占用，先尝试关闭应用，而非直接要求重启
-CloseApplications=yes
+CloseApplications=no
 RestartApplications=no
 ; 首次可完成后再重启确认，不强制
 AlwaysRestart=no
+RestartIfNeededByRun=no
 
 ; ---- 中文界面（零外部依赖：覆盖内置英文文案）----
 [Messages]
@@ -81,8 +82,8 @@ ClickNextToContinue=单击"下一步"继续安装。
 ClickInstall=单击"安装"开始安装。
 
 [Files]
-Source: "..\KeyDisplay.Companion\dist\KeyDisplayCompanion.exe"; DestDir: "{app}"; Flags: ignoreversion restartreplace
-Source: "..\KeyDisplay.Input\KeyDisplayInput.exe"; DestDir: "{app}"; Flags: ignoreversion restartreplace
+Source: "..\KeyDisplay.Companion\dist\KeyDisplayCompanion.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\KeyDisplay.Input\KeyDisplayInput.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\cert\KeyDisplay.cer"; DestDir: "{app}\cert"; Flags: ignoreversion
 Source: "..\dist\KeyDisplay.Install\*.msix"; DestDir: "{app}\appx"; Flags: ignoreversion
 Source: "install-msix.ps1"; DestDir: "{app}"; Flags: ignoreversion
@@ -122,6 +123,7 @@ end;
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   { 安装前：结束可能占用文件的伴生进程与 widget 进程，避免重启 }
+  KillProcessByName('KeyDisplayInput.exe');   { 0.2：原生输入接收器（以最高权限常驻）}
   KillProcessByName('KeyDisplayCompanion.exe');
   KillProcessByName('KeyDisplay.Widget.exe');
   KillProcessByName('GameBar.exe');
