@@ -152,7 +152,7 @@ Filename: "schtasks.exe"; Parameters: "/Create /F /TN ""KeyDisplayCompanionWatch
 Filename: "{app}\{#MyAppExeName}"; Flags: runhidden nowait; StatusMsg: "正在启动数据采集服务..."
 
 ; 输入采集：先停掉旧版伴生进程（它占着同名管道），再注册登录任务（最高权限）并启动
-Filename: "powershell.exe"; Parameters: "-NoProfile -Command ""Stop-Process -Name KeyDisplayCompanion -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 600"""; Flags: runhidden waituntilterminated
+Filename: "powershell.exe"; Parameters: "-NoProfile -Command ""Stop-Process -Name KeyDisplayCompanion,KeyDisplayInput -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800"""; Flags: runhidden waituntilterminated
 Filename: "schtasks.exe"; Parameters: "/Create /F /TN ""KeyDisplayInput"" /SC ONLOGON /RL HIGHEST /TR ""{app}\KeyDisplayInput.exe"""; Flags: runhidden
 Filename: "schtasks.exe"; Parameters: "/Run /TN ""KeyDisplayInput"""; Flags: runhidden
 Filename: "{app}\KeyDisplayInput.exe"; Flags: runhidden nowait
