@@ -421,10 +421,14 @@ internal static class Program
     // ---------------- 手柄 ----------------
     private static int _gpActive = 0xFF;
     private static byte _gpBattery = 0xFF, _gpSubtype = 0xFF;
+    private static long _gpPolls;
+    private static ushort _gpLatchMask;      // 40ms 内见过的按钮（最小保持，防止点按看不见）
+    private static int _gpLatchUntil;
     private static readonly uint[] _gpPackets = new uint[4];
 
     private static void PollGamepad()
     {
+        _gpPolls++;
         byte connected = 0; int active = -1;
         for (uint i = 0; i < 4; i++)
         {
@@ -460,7 +464,11 @@ internal static class Program
                 XINPUT_STATE st;
                 if (XInputGetState((uint)chosen, out st) == 0)
                 {
-                    ushort b = st.Gamepad.wButtons;
+                    ushort raw = st.Gamepad.wButtons;
+                    // 40ms 最小保持：窗口内把见过的按钮并集保留，窗口结束后归零重来
+                    if (NowMs() >= _gpLatchUntil) { _gpLatchMask = 0; _gpLatchUntil = NowMs() + 40; }
+                    _gpLatchMask |= raw;
+                    ushort b = (NowMs() < _gpLatchUntil) ? (ushort)(raw | _gpLatchMask) : raw;
                     Gamepad[2] = (byte)(b & 0xFF); Gamepad[3] = (byte)(b >> 8);
                     Gamepad[4] = st.Gamepad.bLeftTrigger; Gamepad[5] = st.Gamepad.bRightTrigger;
                     WriteShort(Gamepad, 6, st.Gamepad.sThumbLX);
@@ -678,7 +686,8 @@ internal static class Program
             bool elevated = IsElevated();
             Reply(c, "RESP|OK|KeyDisplayInput " + Version + "|elevated=" + (elevated ? "1" : "0")
                 + "|rawkeys=" + Interlocked.Read(ref _rawKeyEvents)
-                + "|rawmouse=" + Interlocked.Read(ref _rawMouseEvents));
+                + "|rawmouse=" + Interlocked.Read(ref _rawMouseEvents)
+                + "|gppolls=" + Interlocked.Read(ref _gpPolls));
             return;
         }
         // 其余命令（GET_PRESETS / PUT_PRESETS / GET_STATS / SET_OPT / OPEN_URL …）
@@ -773,7 +782,10 @@ internal static class Program
                     if (w > 0) _vsW = w;
                     if (h > 0) _vsH = h;
                 }
-                if (tick % 2 == 0) PollGamepad();
+                // 手柄：每 tick 都轮询（240Hz）。XInput 读一次约 1~3µs，4 槽位也就 ~10µs，
+                // 相对 4ms 的 tick 可忽略；真正上限是手柄自身的报文率（有线 ~125Hz、蓝牙 60~125Hz），
+                // 高频轮询只是把"拿到新报文"的延迟压到最小。
+                PollGamepad();
                 lock (StateLock) { _seq = (_seq + 1) & 0xFFFFFFFF; }
             }
             Thread.Sleep(1);   // 不再空转烧 CPU（timeBeginPeriod(1) 已保证 1ms 精度）
