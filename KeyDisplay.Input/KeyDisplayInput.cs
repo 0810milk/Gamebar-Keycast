@@ -45,7 +45,7 @@ internal static class Program
     private static readonly object StateLock = new object();
     private static readonly byte[] ExtraKeys = new byte[32];          // 256 位 VK 位图（权威）
     private static readonly bool[] Down = new bool[VK_COUNT];         // 事件源按下状态
-    private static readonly int[] LatchUntil = new int[VK_COUNT];     // 锁存到期（Environment.TickCount）
+    private static readonly int[] LatchUntil = new int[VK_COUNT];     // 锁存到期（NowMs()）
     private static readonly bool[] PollDown = new bool[VK_COUNT];     // 轮询源按下状态
     private static int _pollCursor;
     private static ushort _keysMask;                                  // 12 内置键掩码
@@ -59,6 +59,11 @@ internal static class Program
 
     // 统计（只用于日志/自报，不参与健康判定）
     private static long _rawKeyEvents, _rawMouseEvents, _frames;
+
+    // 高精度单调毫秒。NowMs() 分辨率是系统计时器节拍（默认 15.6ms），
+    // 用它做节拍会把推送压到 ~64Hz、锁存也不准 —— 这是"鼠标一顿一顿"的真正原因。
+    private static readonly Stopwatch Clock = Stopwatch.StartNew();
+    private static int NowMs() { return unchecked((int)Clock.ElapsedMilliseconds); }
 
     private static IntPtr _hwnd = IntPtr.Zero;
     private static readonly WndProcDelegate WndProcRef = WndProc;     // 防 GC
@@ -219,7 +224,7 @@ internal static class Program
     private static void ApplyKey(int vk, bool isDown, bool fromEvent)
     {
         if (vk < 0 || vk >= VK_COUNT) return;
-        int now = Environment.TickCount;
+        int now = NowMs();
         lock (StateLock)
         {
             if (fromEvent)
@@ -246,7 +251,7 @@ internal static class Program
         for (int i = 0; i < BuiltinVks.Length; i++)
         {
             int vk = BuiltinVks[i];
-            int now = Environment.TickCount;
+            int now = NowMs();
             bool down;
             lock (StateLock) { down = Down[vk] || PollDown[vk] || (LatchUntil[vk] - now) > 0; }
             if (vk == 0x10) down = down || IsAnyDown(0xA0, 0xA1);        // 左右 Shift
@@ -259,7 +264,7 @@ internal static class Program
 
     private static bool IsAnyDown(int a, int b)
     {
-        int now = Environment.TickCount;
+        int now = NowMs();
         lock (StateLock)
         {
             return Down[a] || PollDown[a] || (LatchUntil[a] - now) > 0
@@ -269,7 +274,7 @@ internal static class Program
 
     private static void SetMouseBit(int bit, bool down)
     {
-        int now = Environment.TickCount;
+        int now = NowMs();
         lock (StateLock)
         {
             if (down)
@@ -290,7 +295,7 @@ internal static class Program
 
     private static void ExpireMouseLatch()
     {
-        int now = Environment.TickCount;
+        int now = NowMs();
         lock (StateLock)
         {
             for (int bit = 0; bit < 6; bit++)
@@ -350,7 +355,7 @@ internal static class Program
                     // 合成 VK：0x07 滚轮上 / 0x08 滚轮下（与现有协议一致），带锁存
                     short delta = (short)ms.usButtonData;
                     int vk = delta > 0 ? 0x07 : 0x08;
-                    int now = Environment.TickCount;
+                    int now = NowMs();
                     lock (StateLock)
                     {
                         Down[vk] = true; LatchUntil[vk] = now + WheelLatchMs;
@@ -382,7 +387,7 @@ internal static class Program
         _pollCursor = (start + PollSweepPerTick) & 0xFF;
 
         // 滚轮锁存到期后清位（轮询不管滚轮）
-        int now = Environment.TickCount;
+        int now = NowMs();
         lock (StateLock)
         {
             for (int vk = 0x07; vk <= 0x08; vk++)
@@ -405,7 +410,7 @@ internal static class Program
 
     private static void ApplyMousePoll(int bit, bool down)
     {
-        int now = Environment.TickCount;
+        int now = NowMs();
         lock (StateLock)
         {
             if (down) _mouseMask |= (byte)(1 << bit);
@@ -636,7 +641,7 @@ internal static class Program
                 else break;
             }
             // 2) 到点就发一帧
-            long now = Environment.TickCount;
+            long now = NowMs();
             if (now >= next)
             {
                 next = now + interval;
@@ -752,7 +757,7 @@ internal static class Program
         int tick = 0;
         while (!_shutdown)
         {
-            long now = Environment.TickCount;
+            long now = NowMs();
             if (now >= next)
             {
                 next = now + interval;
