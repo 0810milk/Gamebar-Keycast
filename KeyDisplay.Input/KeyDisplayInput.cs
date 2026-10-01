@@ -38,7 +38,12 @@ internal static class Program
     internal static string AclFamilyName = "KeyDisplay.Widget_hdjf4fqmxxv8g";
     internal static int LatchMs = 60;
     internal static int WheelLatchMs = 150;
-    internal static int PollSweepPerTick = 64;     // 每 tick 轮询 64 个 VK → 4 tick 扫完 256
+    internal static int PollSweepPerTick = 64;
+    // 0.3：键盘/鼠标/手柄三个采样率分开（Hz），推送帧率取三者最大值。
+    // 注意：Raw Input 事件本身永远是即时的，频率只影响"冗余轮询"的密度。
+    internal static int RateKb = 240, RateMouse = 240, RateGp = 120;
+    private static long _kbPollAt, _mousePollAt, _gpPollAt;
+    private static string OptionsPath;     // 每 tick 轮询 64 个 VK → 4 tick 扫完 256
     internal static string LogPath;
 
     // ---------------- 全局状态 ----------------
@@ -631,7 +636,6 @@ internal static class Program
     {
         uint mode = PIPE_READMODE_MESSAGE;
         SetNamedPipeHandleState(c.Handle, ref mode, IntPtr.Zero, IntPtr.Zero);
-        int interval = Math.Max(1, 1000 / Math.Max(1, PushHz));
         long next = 0;
         byte[] cmd = new byte[1024];
         while (!_shutdown && c.Alive)
@@ -652,7 +656,7 @@ internal static class Program
             long now = NowMs();
             if (now >= next)
             {
-                next = now + interval;
+                next = now + Math.Max(1, 1000 / Math.Max(1, Math.Max(RateKb, Math.Max(RateMouse, RateGp))));
                 byte[] frame = BuildFrame(c.FrameLen == 92);
                 uint written;
                 if (!WriteFile(c.Handle, frame, (uint)frame.Length, out written, IntPtr.Zero))
@@ -681,6 +685,13 @@ internal static class Program
         string rest = text.Substring(4);
         if (rest == "PROTO|92") { c.FrameLen = 92; Reply(c, "RESP|OK"); return; }
         if (rest == "PROTO|76") { c.FrameLen = 76; Reply(c, "RESP|OK"); return; }
+        if (rest.StartsWith("RATE|", StringComparison.Ordinal))
+        {
+            ParseRates(rest.Substring(5));
+            SaveOptions();
+            Reply(c, "RESP|OK");
+            return;
+        }
         if (rest == "VERSION")
         {
             bool elevated = IsElevated();
@@ -759,9 +770,53 @@ internal static class Program
     private static volatile bool _shutdown;
 
     // ---------------- 主流程 ----------------
+    private static void ParseRates(string payload)
+    {
+        foreach (string part in payload.Split(';'))
+        {
+            int eq = part.IndexOf('=');
+            if (eq <= 0) continue;
+            string k = part.Substring(0, eq).Trim().ToLowerInvariant();
+            int v;
+            if (!int.TryParse(part.Substring(eq + 1).Trim(), out v)) continue;
+            if (v < 30) v = 30;
+            if (v > 480) v = 480;
+            if (k == "kb" || k == "keyboard") RateKb = v;
+            else if (k == "mouse" || k == "ms") RateMouse = v;
+            else if (k == "gp" || k == "gamepad") RateGp = v;
+        }
+        Log("采样率: kb=" + RateKb + " mouse=" + RateMouse + " gp=" + RateGp);
+    }
+
+    private static void LoadOptions()
+    {
+        try
+        {
+            if (!File.Exists(OptionsPath)) return;
+            foreach (string line in File.ReadAllLines(OptionsPath))
+            {
+                string s = line.Trim();
+                if (s.Length == 0 || s.StartsWith("#", StringComparison.Ordinal)) continue;
+                ParseRates(s.Replace(' ', ';'));
+            }
+            Log("已载入采样率: kb=" + RateKb + " mouse=" + RateMouse + " gp=" + RateGp);
+        }
+        catch (Exception ex) { Log("载入配置失败: " + ex.Message); }
+    }
+
+    private static void SaveOptions()
+    {
+        try
+        {
+            File.WriteAllText(OptionsPath,
+                "kb=" + RateKb + Environment.NewLine + "mouse=" + RateMouse + Environment.NewLine + "gp=" + RateGp + Environment.NewLine,
+                Encoding.UTF8);
+        }
+        catch (Exception ex) { Log("保存配置失败: " + ex.Message); }
+    }
+
     private static void FrameLoop()
     {
-        int interval = Math.Max(1, 1000 / Math.Max(1, PushHz));
         long next = 0;
         int tick = 0;
         while (!_shutdown)
@@ -769,14 +824,18 @@ internal static class Program
             long now = NowMs();
             if (now >= next)
             {
-                next = now + interval;
+                next = now + Math.Max(1, 1000 / Math.Max(1, Math.Max(RateKb, Math.Max(RateMouse, RateGp))));
                 tick++;
-                PollSweep();
+                if (now - _kbPollAt >= Math.Max(1, 1000 / Math.Max(1, RateKb))) { _kbPollAt = now; PollSweep(); }
                 {
                     // 0.2：鼠标坐标每个 tick 都读真值（240Hz）。原来写成每 8 个 tick 读一次 = 30Hz，
                     // 鼠标点会明显一顿一顿 —— 这是"鼠标移动卡顿"的直接原因。GetCursorPos 极便宜，240Hz 无压力。
                     POINT p;
-                    if (GetCursorPos(out p)) { _mouseX = p.X; _mouseY = p.Y; }
+                    if (now - _mousePollAt >= Math.Max(1, 1000 / Math.Max(1, RateMouse)))
+                    {
+                        _mousePollAt = now;
+                        if (GetCursorPos(out p)) { _mouseX = p.X; _mouseY = p.Y; }
+                    }
                     _vsX = GetSystemMetrics(76); _vsY = GetSystemMetrics(77);
                     int w = GetSystemMetrics(78), h = GetSystemMetrics(79);
                     if (w > 0) _vsW = w;
@@ -785,7 +844,7 @@ internal static class Program
                 // 手柄：每 tick 都轮询（240Hz）。XInput 读一次约 1~3µs，4 槽位也就 ~10µs，
                 // 相对 4ms 的 tick 可忽略；真正上限是手柄自身的报文率（有线 ~125Hz、蓝牙 60~125Hz），
                 // 高频轮询只是把"拿到新报文"的延迟压到最小。
-                PollGamepad();
+                if (now - _gpPollAt >= Math.Max(1, 1000 / Math.Max(1, RateGp))) { _gpPollAt = now; PollGamepad(); }
                 lock (StateLock) { _seq = (_seq + 1) & 0xFFFFFFFF; }
             }
             Thread.Sleep(1);   // 不再空转烧 CPU（timeBeginPeriod(1) 已保证 1ms 精度）
@@ -808,6 +867,7 @@ internal static class Program
         string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "KeyDisplay");
         try { Directory.CreateDirectory(dir); } catch { }
         LogPath = Path.Combine(dir, "input.log");
+        OptionsPath = Path.Combine(dir, "input-options.ini");   // 采样率持久化
         try { if (File.Exists(LogPath) && new FileInfo(LogPath).Length > 1024 * 1024) File.Delete(LogPath); } catch { }
 
         // 单实例
@@ -819,6 +879,7 @@ internal static class Program
         }
 
         AppDomain.CurrentDomain.UnhandledException += (s, e) => Log("未处理异常: " + e.ExceptionObject);
+        LoadOptions();
         Log("启动: version=" + Version + " pipe=" + PipeName + " hz=" + PushHz
             + " elevated=" + (IsElevated() ? "1" : "0") + " latch=" + LatchMs + "ms");
 
