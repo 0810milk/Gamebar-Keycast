@@ -3660,6 +3660,9 @@ namespace KeyDisplay
                 GpSetText(GpBattery, lv == 1 ? "\u7535\u91cf \u4f4e"
                     : lv == 2 ? "\u7535\u91cf \u4e2d"
                     : lv == 3 ? "\u7535\u91cf \u6ee1" : "");
+
+                // 1.4：模板的按下高亮（与部件共用同一份快照；内部自带 try/catch，不影响键鼠渲染）
+                GpPaintTemplate(snap);
             }
             catch (Exception ex) { DiagLog("gamepad state fail: " + ex.Message); }
         }
@@ -4479,10 +4482,13 @@ namespace KeyDisplay
             catch { return null; }
         }
 
-        // ===================== 1.4：组合模式的手柄轮廓模板（纯描边背景）=====================
+        // ===================== 1.4：组合模式的手柄轮廓模板（实心机身 + 按键底座）=====================
         // 画在 GamepadTemplatePanel 里（GamepadPanel 的第一个子元素 → 位于所有部件之下），坐标与组合模式
-        // 部件同一套设计单位 → 按键正好落在模板上对应的位置。只用 BorderB() 描边、透明填充，不新增颜色常量。
-        // custom 布局不画任何模板（整块 Collapsed）；模板与 GamepadParts_ 部件位掩码无关（那是部件的显隐）。
+        // 部件同一套设计单位 → 按键正好落在模板上对应的位置。配色只用既有语义画刷（KeyBgB / BorderB /
+        // KeyFgB / AccentB）并用 Opacity 分层次，不新增颜色常量；custom 布局整块 Collapsed（不建也不画）。
+        // 机身轮廓 = 机身圆角矩形 + 左右两个握把圆，顺时针采样成一条闭合多边形（填充与描边各一条，
+        // 避免多形状叠加在半透明填充下产生接缝与叠色），底部中央自然形成"八字内凹"缺口。
+        // 层次：机身（暗）→ 井/环（细外环 + 内部实心圆）→ 按键底座（KeyBgB，按下用 AccentB 高亮）→ 部件。
         private void ApplyGamepadTemplate()
         {
             try
@@ -4500,16 +4506,7 @@ namespace KeyDisplay
                     BuildGamepadTemplate(tpl);
                     _gpTemplateStyle = tpl;
                 }
-                // 配色随主题刷新（值未变不写依赖属性）
-                var bd = BorderB();
-                for (int i = 0; i < GamepadTemplatePanel.Children.Count; i++)
-                {
-                    var sh = GamepadTemplatePanel.Children[i] as Shape;
-                    if (sh == null) continue;
-                    if (!ReferenceEquals(sh.Stroke, bd)) sh.Stroke = bd;
-                    if (!ReferenceEquals(sh.Fill, _transparent)) sh.Fill = _transparent;
-                    if (Math.Abs(sh.StrokeThickness - 1.0) > 0.001) sh.StrokeThickness = 1.0;
-                }
+                GpPaintTemplate(_latest);   // 配色 + 按下高亮（幂等写，随主题/快照刷新）
             }
             catch (Exception ex) { DiagLog("gamepad template fail: " + ex.Message); }
         }
@@ -4520,139 +4517,282 @@ namespace KeyDisplay
             return (_gpStyle == "ps" || _gpStyle == "switch") ? _gpStyle : "xbox";
         }
 
-        // 建立模板轮廓（只在风格变化时重建一次；元素全部纯描边）
+        // 建立模板（只在风格变化时重建一次；元素全部 IsHitTestVisible=false，父 Canvas 再兜一层）
         private void BuildGamepadTemplate(string tpl)
         {
             var cv = GamepadTemplatePanel;
             if (cv == null) return;
             cv.Children.Clear();
+            _gptNodes.Clear();
             bool ps = tpl == "ps", sw = tpl == "switch";
-            // ---- 机身 + 左右握把（只需近似：一眼能看出是手柄，不做写实）----
+            // ---- 机身 + 左右握把：实心填充 + 2px 描边（Xbox 较宽 / PS 较窄长 / Switch 偏方）----
+            if (ps) AddTplSilhouette(cv, 15, 2, 153, 96, 28, 48, 80, 32);
+            else if (sw) AddTplSilhouette(cv, 14, 4, 154, 94, 30, 46, 80, 30);
+            else AddTplSilhouette(cv, 8, 4, 160, 92, 30, 50, 80, 34);
+            // ---- 顶部：LT/RT 竖向胶囊（机身外上方，框住 12×30 扳机条；按扳机值点亮）----
+            AddTplRect(cv, 3, -1, 18, 36, 9, GpTplBase, 0, 1);       // LT / L2 / ZL
+            AddTplRect(cv, 147, -1, 18, 36, 9, GpTplBase, 0, 2);     // RT / R2 / ZR
+            // ---- 其下各一个小胶囊（框住 26×14 肩键；文字由部件自己印）----
+            AddTplRect(cv, 21, 5, 32, 20, 10, GpTplBase, GP_LEFT_SHOULDER, 0);
+            AddTplRect(cv, 115, 5, 32, 20, 10, GpTplBase, GP_RIGHT_SHOULDER, 0);
+            // ---- 左摇杆 / 十字键底盘 / 右摇杆：细外环 + 内部实心圆（两层灰）----
+            AddTplWell(cv, 34, 44, true);    // 左摇杆
+            AddTplWell(cv, 34, 84, false);   // 十字键底盘（只有细外环，十字画在环里）
+            AddTplWell(cv, 126, 88, true);   // 右摇杆
+            // ---- 十字键：Xbox 一体十字 / PlayStation 四向分离小方块 / Switch 四个圆点 ----
             if (ps)
             {
-                AddTplRound(cv, 14, 4, 140, 96, 34);        // PlayStation：机身较窄长
-                AddTplEllipse(cv, 28, 80, 24, 30);
-                AddTplEllipse(cv, 140, 80, 24, 30);
+                AddTplRect(cv, 27, 63, 14, 14, 4, GpTplBase, GP_DPAD_UP, 0);
+                AddTplRect(cv, 27, 90, 14, 14, 4, GpTplBase, GP_DPAD_DOWN, 0);
+                AddTplRect(cv, 13, 76, 14, 14, 4, GpTplBase, GP_DPAD_LEFT, 0);
+                AddTplRect(cv, 40, 76, 14, 14, 4, GpTplBase, GP_DPAD_RIGHT, 0);
             }
             else if (sw)
             {
-                AddTplRound(cv, 10, 6, 148, 88, 26);        // Switch：机身偏方
-                AddTplEllipse(cv, 24, 78, 22, 28);
-                AddTplEllipse(cv, 144, 78, 22, 28);
+                AddTplOval(cv, 34, 71, 8, 8, GpTplBase, GP_DPAD_UP, 0);
+                AddTplOval(cv, 34, 97, 8, 8, GpTplBase, GP_DPAD_DOWN, 0);
+                AddTplOval(cv, 21, 84, 8, 8, GpTplBase, GP_DPAD_LEFT, 0);
+                AddTplOval(cv, 47, 84, 8, 8, GpTplBase, GP_DPAD_RIGHT, 0);
             }
             else
             {
-                AddTplRound(cv, 4, 4, 164, 92, 28);         // Xbox：机身较宽
-                AddTplEllipse(cv, 26, 78, 26, 30);
-                AddTplEllipse(cv, 142, 78, 26, 30);
+                // 一体十字 = 两个细长矩形叠加，四端正好贴住底盘外环
+                AddTplRect(cv, 27, 64, 14, 40, 5, GpTplBase, GP_DPAD_UP | GP_DPAD_DOWN, 0);
+                AddTplRect(cv, 14, 77, 40, 14, 5, GpTplBase, GP_DPAD_LEFT | GP_DPAD_RIGHT, 0);
             }
-            // ---- 顶部：肩键 / 扳机的小方块轮廓（与 LB/RB、LT/RT 部件同位）----
-            AddTplRound(cv, 22, 6, 30, 18, ps ? 6 : 5);     // LB / L1 / L
-            AddTplRound(cv, 116, 6, 30, 18, ps ? 6 : 5);    // RB / R1 / R
-            AddTplRound(cv, 4, 0, 16, 34, ps ? 8 : 5);      // LT / L2 / ZL 竖条
-            AddTplRound(cv, 148, 0, 16, 34, ps ? 8 : 5);    // RT / R2 / ZR 竖条
-            // ---- 两个摇杆圆环（与 LS/RS 同心，环半径略大于部件环 → 把按键圈在里面）----
-            AddTplEllipse(cv, 34, 44, 18, 18);              // 左摇杆
-            AddTplEllipse(cv, 126, 88, 18, 18);             // 右摇杆
-            // ---- 十字键：Xbox 一体十字 / PlayStation 四个小方块 / Switch 四个圆点 ----
-            if (ps)
-            {
-                // 四个小方块（各自框住一个方向键，块与块只在内角轻触，不互相压线）
-                AddTplRound(cv, 27, 63, 14, 14, 4);
-                AddTplRound(cv, 27, 90, 14, 14, 4);
-                AddTplRound(cv, 13, 76, 14, 14, 4);
-                AddTplRound(cv, 40, 76, 14, 14, 4);
-            }
-            else if (sw)
-            {
-                AddTplEllipse(cv, 34, 71, 7, 7);
-                AddTplEllipse(cv, 34, 97, 7, 7);
-                AddTplEllipse(cv, 21, 84, 7, 7);
-                AddTplEllipse(cv, 47, 84, 7, 7);
-            }
-            else
-            {
-                AddTplRound(cv, 26, 63, 16, 40, 4);         // 十字：竖
-                AddTplRound(cv, 14, 75, 40, 16, 4);         // 十字：横
-            }
-            // ---- ABXY：Xbox 菱形 / PlayStation、Switch 四个圆 ----
-            if (ps || sw)
-            {
-                AddTplEllipse(cv, 126, 35, 12, 12);
-                AddTplEllipse(cv, 113, 48, 12, 12);
-                AddTplEllipse(cv, 139, 48, 12, 12);
-                AddTplEllipse(cv, 126, 61, 12, 12);
-            }
-            else
-            {
-                AddTplDiamond(cv, 126, 48, 26, 26);
-            }
-            // ---- View / Menu / Guide ----
-            AddTplRound(cv, 54, 76, 22, 17, 5);
-            AddTplRound(cv, 76, 76, 22, 17, 5);
-            AddTplEllipse(cv, 84, 56, 13, 13);
+            // ---- ABXY：大暗圆作底 + 四个小圆（菱形排布：Y 上 / X 左 / B 右 / A 下；文字由部件印）----
+            AddTplOval(cv, 126, 48, 24, 24, GpTplWellInner, 0, 0);
+            AddTplOval(cv, 126, 35, 11, 11, GpTplBase, GP_Y, 0);
+            AddTplOval(cv, 113, 48, 11, 11, GpTplBase, GP_X, 0);
+            AddTplOval(cv, 139, 48, 11, 11, GpTplBase, GP_B, 0);
+            AddTplOval(cv, 126, 61, 11, 11, GpTplBase, GP_A, 0);
+            // ---- Guide：圆环 + 内部实心圆 ----
+            AddTplOval(cv, 84, 56, 13, 13, GpTplWellRing, 0, 0);
+            AddTplOval(cv, 84, 56, 10, 10, GpTplWellInner, 0, 0);
+            // ---- 中央一排三个小图形：View（两个小方块）、上传箭头、Menu（三条横线）----
+            AddTplRect(cv, 64, 70, 5, 5, 1, GpTplMarkFill, GP_BACK, 0);
+            AddTplRect(cv, 71, 70, 5, 5, 1, GpTplMarkFill, GP_BACK, 0);
+            AddTplLineShape(cv, 79, 77, 84, 70, GpTplMarkLine, 0);
+            AddTplLineShape(cv, 84, 70, 89, 77, GpTplMarkLine, 0);
+            AddTplLineShape(cv, 84, 71, 84, 77, GpTplMarkLine, 0);
+            AddTplLineShape(cv, 93, 71, 103, 71, GpTplMarkLine, GP_START);
+            AddTplLineShape(cv, 93, 74, 103, 74, GpTplMarkLine, GP_START);
+            AddTplLineShape(cv, 93, 77, 103, 77, GpTplMarkLine, GP_START);
+            // ---- PlayStation 专属：中央触摸板 ----
+            if (ps) AddTplRect(cv, 60, 26, 42, 15, 3, GpTplBase, 0, 0);
         }
 
-        // 模板圆角矩形（左上角 x/y + 宽高 + 圆角）
-        private void AddTplRound(Canvas cv, double x, double y, double w, double h, double r)
+        // 井 / 底盘（细外环 + 可选内部实心圆）
+        private void AddTplWell(Canvas cv, double cx, double cy, bool withInner)
+        {
+            AddTplOval(cv, cx, cy, 20, 20, GpTplWellRing, 0, 0);
+            if (withInner) AddTplOval(cv, cx, cy, 17, 17, GpTplWellInner, 0, 0);
+        }
+
+        // 机身轮廓（参数化）：机身圆角矩形 + 左右两个握把圆（同半径、左右对称），顺时针采样成闭合多边形。
+        // 采样顺序：左上圆角 → 顶边 → 右上圆角 → 右边（下行到与右握把圆相交处）→ 右握把外缘（绕过右端与底部）
+        // → 右握把内缘（升回机身底边）→ 机身底边（中央即"八字内凹"缺口）→ 左握把内缘（下行到底部）
+        // → 左握把外缘（绕过左端升回机身左边）→ 左边上行闭合。
+        private void AddTplSilhouette(Canvas cv, double x1, double y1, double x2, double y2, double r,
+                                      double gripOff, double gripCy, double gripR)
         {
             try
             {
-                var rc = new Rectangle
+                double mx = (x1 + x2) / 2.0;
+                double lcx = mx - gripOff, rcx = mx + gripOff;
+                double deg = 180.0 / Math.PI;
+                // 右握把：与右边相交（取上半支）→ 与机身底边相交（取内侧支）
+                double aInR = -Math.Acos(TplClamp((x2 - rcx) / gripR)) * deg;
+                double aOutR = (Math.PI - Math.Asin(TplClamp((y2 - gripCy) / gripR))) * deg;
+                // 左握把（镜像）：从机身底边内侧进入 → 绕过外缘升回机身左边
+                double aInL = Math.Asin(TplClamp((y2 - gripCy) / gripR)) * deg;
+                double aOutL = (Math.PI + Math.Acos(TplClamp((x1 - lcx) / gripR))) * deg;
+                var pts = new List<Point>();
+                TplArcPts(pts, x1 + r, y1 + r, r, r, 180, 270, 8);          // 左上圆角
+                pts.Add(new Point(x2 - r, y1));                              // 顶边
+                TplArcPts(pts, x2 - r, y1 + r, r, r, 270, 360, 8);           // 右上圆角
+                pts.Add(TplPt(rcx, gripCy, gripR, aInR));                    // 右边下行到与右握把相交
+                TplArcPts(pts, rcx, gripCy, gripR, gripR, aInR, 90, 8);      // 右握把外缘（绕过右端）
+                TplArcPts(pts, rcx, gripCy, gripR, gripR, 90, aOutR, 10);    // 右握把外缘继续到内缘升回底边
+                pts.Add(TplPt(lcx, gripCy, gripR, aInL));                    // 机身底边（中央内凹缺口）
+                TplArcPts(pts, lcx, gripCy, gripR, gripR, aInL, aOutL, 16);  // 左握把：内缘下行 + 外缘上行
+                pts.Add(new Point(x1, y1 + r));                              // 左边上行闭合
+                AddTplPolygon(cv, pts, GpTplBody);
+                AddTplPolygon(cv, pts, GpTplBodyLine);
+            }
+            catch (Exception ex) { DiagLog("gamepad silhouette fail: " + ex.Message); }
+        }
+
+        private static double TplClamp(double v)
+        {
+            return v < -1.0 ? -1.0 : (v > 1.0 ? 1.0 : v);
+        }
+
+        // 圆弧采样（角度制；rx/ry 分开是为了将来能画椭圆角）
+        private static void TplArcPts(List<Point> pts, double cx, double cy, double rx, double ry, double a0, double a1, int n)
+        {
+            if (n < 1) n = 1;
+            for (int i = 0; i <= n; i++)
+            {
+                double a = (a0 + (a1 - a0) * i / (double)n) * Math.PI / 180.0;
+                pts.Add(new Point(cx + rx * Math.Cos(a), cy + ry * Math.Sin(a)));
+            }
+        }
+
+        private static Point TplPt(double cx, double cy, double rr, double angDeg)
+        {
+            double a = angDeg * Math.PI / 180.0;
+            return new Point(cx + rr * Math.Cos(a), cy + rr * Math.Sin(a));
+        }
+
+        // 同一条点列加两次：一次只填充（机身底色）、一次只描边（2px 轮廓）——半透明填充不会有叠色接缝
+        private void AddTplPolygon(Canvas cv, List<Point> pts, int role)
+        {
+            try
+            {
+                var pc = new PointCollection();
+                for (int i = 0; i < pts.Count; i++) pc.Add(pts[i]);
+                var pg = new Polygon
                 {
-                    Width = w,
-                    Height = h,
-                    RadiusX = r,
-                    RadiusY = r,
-                    Stroke = BorderB(),
-                    StrokeThickness = 1,
-                    Fill = _transparent
+                    Points = pc,
+                    StrokeLineJoin = PenLineJoin.Round,
+                    IsHitTestVisible = false
                 };
-                Canvas.SetLeft(rc, x);
-                Canvas.SetTop(rc, y);
-                cv.Children.Add(rc);
+                cv.Children.Add(pg);
+                _gptNodes.Add(new GpTplNode { Shape = pg, Role = role });
             }
-            catch (Exception ex) { DiagLog("gamepad template round fail: " + ex.Message); }
+            catch (Exception ex) { DiagLog("gamepad silhouette poly fail: " + ex.Message); }
         }
 
-        // 模板椭圆/圆（圆心 + 半径）
-        private void AddTplEllipse(Canvas cv, double cx, double cy, double rx, double ry)
+        // ---- 模板节点：每个图形登记角色与"按下掩码"，配色统一由 GpPaintTemplate 负责 ----
+        // 角色：机身填充 / 机身描边 / 井外环 / 井内圆 / 按键底座 / 图形标记（填充/线条）
+        private const int GpTplBody = 1;
+        private const int GpTplBodyLine = 2;
+        private const int GpTplWellRing = 3;
+        private const int GpTplWellInner = 4;
+        private const int GpTplBase = 5;
+        private const int GpTplMarkFill = 6;
+        private const int GpTplMarkLine = 7;
+
+        private sealed class GpTplNode
         {
-            try
+            public Shape Shape;    // 图形本体
+            public int Role;       // 上面 7 个角色之一
+            public uint Mask;      // 按下掩码（0 = 不随按下变色；可多位或）
+            public int Trigger;    // 0 无 / 1=LT / 2=RT（按扳机值是否过阈值点亮）
+        }
+
+        private readonly List<GpTplNode> _gptNodes = new List<GpTplNode>();
+
+        // 模板圆角矩形（左上角 x/y + 宽高 + 圆角半径）
+        private Rectangle AddTplRect(Canvas cv, double x, double y, double w, double h, double r,
+                                     int role, uint mask, int trig)
+        {
+            var rc = new Rectangle
             {
-                var el = new Ellipse
-                {
-                    Width = rx * 2.0,
-                    Height = ry * 2.0,
-                    Stroke = BorderB(),
-                    StrokeThickness = 1,
-                    Fill = _transparent
-                };
-                Canvas.SetLeft(el, cx - rx);
-                Canvas.SetTop(el, cy - ry);
-                cv.Children.Add(el);
-            }
-            catch (Exception ex) { DiagLog("gamepad template ellipse fail: " + ex.Message); }
+                Width = w,
+                Height = h,
+                RadiusX = r,
+                RadiusY = r,
+                IsHitTestVisible = false
+            };
+            Canvas.SetLeft(rc, x);
+            Canvas.SetTop(rc, y);
+            cv.Children.Add(rc);
+            _gptNodes.Add(new GpTplNode { Shape = rc, Role = role, Mask = mask, Trigger = trig });
+            return rc;
         }
 
-        // 模板菱形（Xbox 的 ABXY 菱形轮廓）：用 4 条 Line 拼（Line 在本文件已用于吸附参考线，
-        // 不依赖旋转 RenderTransform，也不引入 Polygon/PointCollection 这类元数据不确定的类型）
-        private void AddTplDiamond(Canvas cv, double cx, double cy, double rx, double ry)
+        // 模板圆/椭圆（圆心 + 半径）
+        private Ellipse AddTplOval(Canvas cv, double cx, double cy, double rx, double ry,
+                                   int role, uint mask, int trig)
         {
-            try
-            {
-                AddTplLine(cv, cx, cy - ry, cx + rx, cy);
-                AddTplLine(cv, cx + rx, cy, cx, cy + ry);
-                AddTplLine(cv, cx, cy + ry, cx - rx, cy);
-                AddTplLine(cv, cx - rx, cy, cx, cy - ry);
-            }
-            catch (Exception ex) { DiagLog("gamepad template diamond fail: " + ex.Message); }
+            var el = new Ellipse { Width = rx * 2.0, Height = ry * 2.0, IsHitTestVisible = false };
+            Canvas.SetLeft(el, cx - rx);
+            Canvas.SetTop(el, cy - ry);
+            cv.Children.Add(el);
+            _gptNodes.Add(new GpTplNode { Shape = el, Role = role, Mask = mask, Trigger = trig });
+            return el;
         }
 
-        private void AddTplLine(Canvas cv, double x1, double y1, double x2, double y2)
+        // 模板线（中央小图形用；位置直接走 X1Y1X2Y2，与吸附参考线同一写法）
+        private void AddTplLineShape(Canvas cv, double x1, double y1, double x2, double y2, int role, uint mask)
         {
-            var ln = new Line { X1 = x1, Y1 = y1, X2 = x2, Y2 = y2, Stroke = BorderB(), StrokeThickness = 1 };
+            var ln = new Line { X1 = x1, Y1 = y1, X2 = x2, Y2 = y2, IsHitTestVisible = false };
             cv.Children.Add(ln);
+            _gptNodes.Add(new GpTplNode { Shape = ln, Role = role, Mask = mask });
+        }
+
+        // 模板整体配色：主题画刷 + 按下高亮（全部幂等写，值未变不写依赖属性）。
+        // 层次与参考图一致：机身用 KeyBgB 压暗（Opacity 0.55）、描边 BorderB() 2px、井内圆 KeyBgB(0.75)、
+        // 按键底座 KeyBgB → 按下 AccentB()、中央小图形 KeyFgB(半透明) → 按下 AccentB()。
+        // 快照为 null（始终显示但无数据）时按待机态绘制；整段 try/catch，异常只记 DiagLog。
+        private void GpPaintTemplate(InputSnapshot snap)
+        {
+            try
+            {
+                if (_gptNodes.Count == 0) return;
+                uint btn = snap != null ? snap.GamepadButtons : 0;
+                int lt = snap != null ? snap.GamepadLT : 0;
+                int rt = snap != null ? snap.GamepadRT : 0;
+                var bodyBg = KeyBgB();
+                var line = BorderB();
+                var baseBg = KeyBgB();
+                var accent = AccentB();
+                var markFg = KeyFgB();
+                for (int i = 0; i < _gptNodes.Count; i++)
+                {
+                    var n = _gptNodes[i];
+                    if (n.Shape == null) continue;
+                    Brush fill = null, stroke = null;
+                    double op = 1.0, th = 0.0;
+                    switch (n.Role)
+                    {
+                        case GpTplBody:
+                            fill = bodyBg; op = 0.55; th = 0.0;
+                            break;
+                        case GpTplBodyLine:
+                            stroke = line; op = 1.0; th = 2.0;
+                            break;
+                        case GpTplWellRing:
+                            stroke = line; op = 0.9; th = 1.0;
+                            break;
+                        case GpTplWellInner:
+                            fill = baseBg; op = 0.75; th = 0.0;
+                            break;
+                        case GpTplBase:
+                            {
+                                bool down = (n.Mask != 0 && (btn & n.Mask) != 0)
+                                         || (n.Trigger == 1 && lt > GpTriggerHighlightThreshold)
+                                         || (n.Trigger == 2 && rt > GpTriggerHighlightThreshold);
+                                fill = down ? accent : baseBg;
+                                stroke = line;
+                                op = 1.0; th = 1.0;
+                                break;
+                            }
+                        case GpTplMarkFill:
+                            {
+                                bool down = n.Mask != 0 && (btn & n.Mask) != 0;
+                                fill = down ? accent : markFg;
+                                op = down ? 1.0 : 0.5; th = 0.0;
+                                break;
+                            }
+                        case GpTplMarkLine:
+                            {
+                                bool down = n.Mask != 0 && (btn & n.Mask) != 0;
+                                stroke = down ? accent : markFg;
+                                op = down ? 1.0 : 0.5; th = 1.6;
+                                break;
+                            }
+                    }
+                    var sh = n.Shape;
+                    if (!ReferenceEquals(sh.Fill, fill)) sh.Fill = fill;
+                    if (!ReferenceEquals(sh.Stroke, stroke)) sh.Stroke = stroke;
+                    if (Math.Abs(sh.Opacity - op) > 0.001) sh.Opacity = op;
+                    if (Math.Abs(sh.StrokeThickness - th) > 0.001) sh.StrokeThickness = th;
+                }
+            }
+            catch (Exception ex) { DiagLog("gamepad template paint fail: " + ex.Message); }
         }
 
         // 幂等显隐（值未变不写依赖属性）
