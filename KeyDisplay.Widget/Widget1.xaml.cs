@@ -243,6 +243,8 @@ namespace KeyDisplay
         private void ApplyKeyFontTo(Border b)
         {
             if (b == null) return;
+            // 1.3：手柄部件（Gp_*）的标签字号/字重由部件自身按尺寸计算（见 GpRenderPart），不套用按键字号设置
+            if (IsGpPartName(b.Tag as string)) return;
             var tb = b.Child as TextBlock;
             if (tb == null) return;
             try
@@ -737,6 +739,8 @@ namespace KeyDisplay
                 try
                 {
                     if (!_reader.Connected) TryStartCompanion();
+                    // 1.4：auto 风格下定期重试品牌检测（内部 10s 限频；非 auto 时立即返回，零开销）
+                    TryStartGamepadBrandDetect();
                 }
                 catch
                 {
@@ -821,7 +825,9 @@ namespace KeyDisplay
 
             foreach (var kv in _keys) SetKey(kv.Value, false);
             foreach (var kv in _mouse) SetKey(kv.Value, false);
-            foreach (var kv in _customKeys) SetKey(kv.Value, false);
+            // 1.3：手柄部件（Gp_*）的配色由 ApplyGamepadCustomParts 按部件类型维护（渲染循环每帧刷新），
+            // 此处跳过——否则圆环/扳机条会被刷成填充键帽底色
+            foreach (var kv in _customKeys) { if (IsGpPartName(kv.Key)) continue; SetKey(kv.Value, false); }
             if (_moveKey != null) { EndMoveStyle(_moveKey); _moveKey = null; }   // 主题切换时清除移动高亮（鼠标垫走专属恢复）
             _deleteConfirmKey = null;
             if (DeleteConfirmPanel != null) DeleteConfirmPanel.Visibility = Visibility.Collapsed;
@@ -885,6 +891,11 @@ namespace KeyDisplay
                 MousePad.Background = PadB();
                 MousePad.BorderBrush = BorderB();
             }
+            else if (IsGpPartName(NameOf(key)))
+            {
+                // 1.3：手柄部件落位后按部件类型恢复（圆环/扳机条的底与边色与键帽不同）
+                try { ApplyGamepadCustomParts(_latest); } catch { }
+            }
             else
             {
                 SetKey(key, false);
@@ -932,6 +943,8 @@ namespace KeyDisplay
                 foreach (var kv in _customKeys)
                 {
                     if (kv.Value == _moveKey) continue;   // 移动模式高亮不被轮询覆盖
+                    // 1.3：手柄部件（Gp_*）不是虚拟键，绝不查 VK 位图——改由 ApplyGamepadCustomParts 按手柄快照更新
+                    if (IsGpPartName(kv.Key)) continue;
                     bool down = false;
                     if (snap != null && snap.ExtraKeys != null)
                     {
@@ -944,6 +957,9 @@ namespace KeyDisplay
                     SetKey(kv.Value, down);
                 }
             }
+            // 1.3：手柄部件（Gp_*）逐帧按手柄快照更新其视觉（未添加任何部件时立即返回，零开销；
+            // 内部自带 try/catch，手柄侧异常绝不影响键鼠渲染）
+            ApplyGamepadCustomParts(snap);
             if (snap == null)
             {
                 if (_lastSeq != uint.MaxValue)
@@ -1465,6 +1481,9 @@ namespace KeyDisplay
                     string size = ((int)Math.Round(kv.Value.Width)) + ";" + ((int)Math.Round(kv.Value.Height));
                     var tb = kv.Value.Child as TextBlock;
                     string disp = tb != null ? tb.Text : kv.Key;
+                    // 1.3：手柄部件此刻印的字是随风格/电量/扳机值变的"活文本"（摇杆等非文字部件还会回落到键名），
+                    // 不是用户改的名字——按 GpIsLiveLabel 判定，活文本不写进预设（否则下次应用预设会把字形钉死）
+                    if (IsGpPartName(kv.Key) && GpIsLiveLabel(kv.Key, GpPartKind(kv.Key), disp)) disp = null;
                     if (!first) sb.Append(",");
                     first = false;
                     sb.Append("\"").Append(EscapeJsonStr(kv.Key)).Append("\":{\"pos\":\"").Append(pos)
@@ -1724,7 +1743,10 @@ namespace KeyDisplay
             }
             // 自定义键尺寸（0.7.1）：CustomSize_<名>（w;h）持久化，恢复精确尺寸（默认按名称宽度计算）
             string csize = ApplicationData.Current.LocalSettings.Values["CustomSize_" + name] as string;
-            double cw = CustomKeyWidth(name), ch = 48;
+            // 1.3：手柄部件（Gp_*）用部件专属默认尺寸；其余自定义键沿用按名字宽度计算
+            double cw, ch;
+            if (IsGpPartName(name)) { GpDefaultSize(name, out cw, out ch); }
+            else { cw = CustomKeyWidth(name); ch = 48; }
             if (!string.IsNullOrEmpty(csize))
             {
                 try
@@ -1750,7 +1772,8 @@ namespace KeyDisplay
             };
             border.Child = new TextBlock
             {
-                Text = KeyDisplayName(name),   // 显示名（0.8.1）：DisplayName_<名> 持久化，无则默认（空格键显示「空格」）
+                // 1.3：手柄部件印的是部件字形（随 GamepadStyle_ 变，渲染循环每帧校正）；其余自定义键用既有显示名
+                Text = IsGpPartName(name) ? GpPartDefaultLabel(name) : KeyDisplayName(name),   // 显示名（0.8.1）：DisplayName_<名> 持久化，无则默认（空格键显示「空格」）
                 FontSize = _keyFontSize,       // 0.9.4：跟随"字体大小"设置（原硬编码 18 导致粘贴键与默认键字号不一致）
                 FontWeight = _keyFontWeight,   // 0.9.4：跟随"字体粗细"设置
                 FontFamily = CurrentFontFamily(),   // 0.9.5 修复：此前漏了字体族 → 复制粘贴/新增出来的键字体与原有键不一致
@@ -1765,6 +1788,13 @@ namespace KeyDisplay
             AttachResize(border);       // 复用拖拽缩放/hover/锁定/长按移动机制
             SetKey(border, false);      // 初始主题样式
             ApplyKeyFontTo(border);     // 0.9.5：兜底再应用一次字号/字重/字体族，确保与现有键完全一致
+            // 1.3：手柄部件按类型建立内容（扳机/摇杆用 Canvas 承载填充与点，圆环/方块用 Border 自身，文字类沿用 TextBlock）。
+            // 初始一律 Collapsed：显隐交给 ApplyGamepadCustomParts 按 GamepadLayout_ / GamepadMode_ 决定。
+            if (IsGpPartName(name))
+            {
+                GpBuildPartContent(border, name);
+                border.Visibility = Visibility.Collapsed;
+            }
             ApplicationData.Current.LocalSettings.Values["Custom_" + name] = "1";
             // 移动位置持久化：若已存 CustomPos_<名>（tx;ty）则应用 transform，否则写默认 (0,0)
             string pos = ApplicationData.Current.LocalSettings.Values["CustomPos_" + name] as string;
@@ -1875,6 +1905,8 @@ namespace KeyDisplay
         private static int VkFromName(string name)
         {
             if (string.IsNullOrEmpty(name)) return 0;
+            // 1.3：手柄部件（Gp_*）不是虚拟键，永不参与 VK 位图映射（含复制副本 "Gp_A(2)"）
+            if (name.StartsWith(GpPartPrefix, StringComparison.Ordinal)) return -1;
             // 0.8.1 粘贴副本命名 "名(n)"：循环剥离序号后缀，映射到基名 VK（"Q(2)" 映射 VK_Q，与原键同时点亮；
             // 副本再复制再粘贴产生 "Q(2)(2)" 等多层后缀，循环剥到基名为止）
             while (name.Length > 3 && name[name.Length - 1] == ')')
@@ -2258,6 +2290,9 @@ namespace KeyDisplay
                 ApplicationData.Current.LocalSettings.Values.Remove("Custom_" + name);
                 ApplicationData.Current.LocalSettings.Values.Remove("CustomPos_" + name);
                 ApplicationData.Current.LocalSettings.Values.Remove("CustomSize_" + name);
+                // 1.3：手柄部件额外留下删除记录（与内置键的 Deleted_ 约定一致；设置窗口/AddGamepadPart
+                // 重新添加时会一并清掉该标记）
+                if (IsGpPartName(name)) ApplicationData.Current.LocalSettings.Values["Deleted_" + name] = 1;
                 if (_customKeys.Count == 0) CustomKeysPanel.Visibility = Visibility.Collapsed;
                 DiagLog("custom key deleted: " + name);
             }
@@ -2861,7 +2896,10 @@ namespace KeyDisplay
             var rects = new List<Rect>();
             foreach (var kv in _keys) if (kv.Value != exclude) AddSnapRects(rects, kv.Value);
             foreach (var kv in _mouse) if (kv.Value != exclude) AddSnapRects(rects, kv.Value);
-            foreach (var kv in _customKeys) if (kv.Value != exclude) AddSnapRects(rects, kv.Value);
+            // 1.3：手柄部件隐藏时（组合模式 / 未连接手柄）不作为吸附目标——否则会出现"看不到的键"在吸参考线
+            foreach (var kv in _customKeys)
+                if (kv.Value != exclude && !(IsGpPartName(kv.Key) && kv.Value.Visibility != Visibility.Visible))
+                    AddSnapRects(rects, kv.Value);
             if (MousePad != exclude) AddSnapRects(rects, MousePad);   // 0.7.1：鼠标垫也是吸附目标（靠近鼠标垫有参考线）
             return rects;
         }
@@ -3279,6 +3317,15 @@ namespace KeyDisplay
         private string _gpTrigger = "bar";
         private int _gpDeadzone = 24;
         private int _gpBrand;
+        // 1.4：键位风格新增 "auto"（按实际连接的手柄品牌自动挑模板与字形）：
+        //   _gpStyleRaw = GamepadStyle_ 的原值（xbox/ps/switch/auto）；_gpStyle = 实际生效的风格
+        //   （auto 时 = 检测到的品牌，检测不到或 unknown 一律按 xbox）。用 _gpStyleRaw 判断"是否 auto"。
+        private string _gpStyleRaw = "xbox";
+        private string _gpAutoBrand;       // 自动检测到的品牌（null = 还没有拿到品牌 → 按 xbox）
+        private long _gpAutoLastTicks;     // 上次查询时刻（限频用；单飞避免重复发 CMD|PAD）
+        private bool _gpAutoBusy;          // 正在查询中
+        private bool _gpAutoAnswered;      // 接收器是否应答过 CMD|PAD（决定 10s / 60s 的重试间隔）
+        private string _gpTemplateStyle;   // 已建立的模板风格（null = 还没建立；仅变化时重建）
 
         // XINPUT_GAMEPAD_* 掩码（与 KeyDisplay.Companion/gamepad.py 的常量逐位一致；0x0400 Guide 为未公开位）
         private const uint GP_DPAD_UP = 0x0001;
@@ -3345,7 +3392,9 @@ namespace KeyDisplay
                 _gpSlot = (int)ParseDoubleOr(v["GamepadSlot_"], -1);
                 if (_gpSlot < -1 || _gpSlot > 3) _gpSlot = -1;
                 string style = (v["GamepadStyle_"] as string ?? "").Trim().ToLowerInvariant();
-                _gpStyle = (style == "ps" || style == "switch") ? style : "xbox";
+                // 1.4：白名单新增 "auto"（自动检测）；缺省/非法值仍回落 xbox，保证默认行为与改动前一致
+                _gpStyleRaw = (style == "auto" || style == "ps" || style == "switch") ? style : "xbox";
+                _gpStyle = _gpStyleRaw == "auto" ? (_gpAutoBrand != null ? _gpAutoBrand : "xbox") : _gpStyleRaw;
                 _gpParts = (int)ParseDoubleOr(v["GamepadParts_"], 0x1FF) & 0x1FF;   // 只有 9 个部件位有效
                 string trig = (v["GamepadTrigger_"] as string ?? "").Trim().ToLowerInvariant();
                 _gpTrigger = (trig == "value" || trig == "highlight") ? trig : "bar";
@@ -3353,6 +3402,12 @@ namespace KeyDisplay
                 if (_gpDeadzone < 0) _gpDeadzone = 0;
                 if (_gpDeadzone > 40) _gpDeadzone = 40;
                 _gpBrand = (int)ParseDoubleOr(v["GamepadBrand_"], 0) != 0 ? 1 : 0;
+                // 1.3：布局模式（组合面板 / 逐个添加的手柄部件）。缺省或非法值一律 composite ——
+                // 用户从未设置过时看到的必须与改动前完全一致。
+                string layout = (v["GamepadLayout_"] as string ?? "").Trim().ToLowerInvariant();
+                _gpLayout = (layout == "custom") ? "custom" : "composite";
+                // 1.4：auto 风格 → 立即起一次品牌查询（内部 10s 限频 + 单飞；未连接/失败一律静默按 xbox）
+                if (_gpStyleRaw == "auto") TryStartGamepadBrandDetect();
             }
             catch (Exception ex) { DiagLog("gamepad settings read fail: " + ex.Message); }
         }
@@ -3366,6 +3421,8 @@ namespace KeyDisplay
                 ApplyGamepadLabels();
                 ApplyGamepadColors();
                 ApplyGamepadParts();
+                // 1.4：组合模式的手柄轮廓模板（风格切换即时换模板；custom 模式整块隐藏）
+                ApplyGamepadTemplate();
                 // 整组可见性：关闭 → 立即折叠；始终显示 → 立即显示（没有快照时显示静息态）；
                 // 自动 → 完全交给每帧的 ApplyGamepadState（检测到已连接手柄才显示，默认行为与改动前一致）。
                 if (_gpMode == 0)
@@ -3379,6 +3436,16 @@ namespace KeyDisplay
                 {
                     GpSetVisible(GamepadPanel, true);
                 }
+                // 1.3：custom 布局下整块组合面板始终隐藏（数据仍在，切回 composite 立即恢复显示）
+                if (_gpLayout == "custom")
+                {
+                    GpSetVisible(GamepadPanel, false);
+                    _gpPanelShown = false;
+                    _gpStickInit = false;
+                    _gpStickAnim = false;
+                }
+                // 1.3：自定义手柄部件（Gp_*）的显隐按布局模式 + GamepadMode_ 立即生效（切换模式即时可见）
+                ApplyGamepadCustomParts(_latest);
             }
             catch (Exception ex) { DiagLog("gamepad settings apply fail: " + ex.Message); }
         }
@@ -3500,6 +3567,15 @@ namespace KeyDisplay
         {
             try
             {
+                // 1.3：custom 布局下组合面板整块交给部件显示：隐藏面板并跳过组合渲染（快照数据不受影响）
+                if (_gpLayout == "custom")
+                {
+                    GpSetVisible(GamepadPanel, false);
+                    _gpPanelShown = false;
+                    _gpStickInit = false;
+                    _gpStickAnim = false;
+                    return;
+                }
                 int conn = snap != null ? snap.GamepadConnected : 0;
                 bool hasTail = snap != null && snap.HasGamepad;   // 只有握手过 92 字节帧的伴生进程才带手柄尾块
                 bool show = snap != null && (_gpMode == 2 || (_gpMode == 1 && hasTail && conn != 0));
@@ -3722,6 +3798,861 @@ namespace KeyDisplay
             }
             GpPlaceDot(dot, cx, cy, sx, sy);
             return moving;
+        }
+
+        // ===================== 1.3：手柄部件（自定义模式，逐个添加）=====================
+        // 与上面的"整块组合面板"（GamepadPanel）并存，由 GamepadLayout_ 切换：
+        //   composite（默认）→ 组合面板照旧，全部部件隐藏；custom → 组合面板隐藏，显示已添加的部件。
+        // 部件就是普通的自定义键：Custom_Gp_A=1 即"已添加"，位置/尺寸/显示名沿用 CustomPos_/CustomSize_/
+        // DisplayName_，删除走既有自定义键删除路径（清 Custom_/CustomPos_/CustomSize_），
+        // 因此拖动、四角缩放、吸附、整体按键大小、主题 10 色槽、透明度、布局预设、改名、删除、多选全部自动继承。
+        // 唯一区别：这些键没有虚拟键码，按下态一律按手柄快照更新（绝不喂给 VkFromName / VK 位图逻辑）。
+        private const string GpPartPrefix = "Gp_";
+        private string _gpLayout = "composite";   // GamepadLayout_：composite=整块组合面板（默认）/ custom=逐部件
+
+        // 20 个部件：名字前缀统一 Gp_（顺序即设置窗口里的展示顺序）
+        private static readonly string[] GpParts =
+        {
+            "Gp_A", "Gp_B", "Gp_X", "Gp_Y",
+            "Gp_LB", "Gp_RB", "Gp_LT", "Gp_RT",
+            "Gp_LS", "Gp_RS", "Gp_L3", "Gp_R3",
+            "Gp_DpadUp", "Gp_DpadDown", "Gp_DpadLeft", "Gp_DpadRight",
+            "Gp_View", "Gp_Menu", "Gp_Guide", "Gp_Battery"
+        };
+
+        // 剥离复制副本的 "名(n)" 后缀（与 VkFromName 同一规则）→ 部件基名
+        private static string GpBaseName(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return "";
+            int lp = name.LastIndexOf('(');
+            if (lp > 0 && name[name.Length - 1] == ')')
+            {
+                bool digits = true;
+                for (int i = lp + 1; i < name.Length - 1; i++)
+                    if (name[i] < '0' || name[i] > '9') { digits = false; break; }
+                if (digits) return name.Substring(0, lp);
+            }
+            return name;
+        }
+
+        // 是否手柄部件名（Gp_ 前缀；含复制副本 "Gp_A(2)"）——所有"按名字分流"的地方都用它
+        private static bool IsGpPartName(string name)
+        {
+            return GpBaseName(name).StartsWith(GpPartPrefix, StringComparison.Ordinal);
+        }
+
+        // 部件类型（决定渲染方式）：
+        // face=ABXY 圆 + 字母 / shoulder=LB/RB 圆角块 + 字 / trigger=LT/RT 竖条 + 底部填充 /
+        // stick=LS/RS 圆环 + 随摇杆移动的点 / thumb=L3/R3 圆环 + 中心点（按下变按下色）/
+        // dpad=小圆角方块 / guide=圆环 / battery=文字 / plain=非清单内的 Gp_ 名（当普通自定义键画）
+        private static string GpPartKind(string name)
+        {
+            switch (GpBaseName(name))
+            {
+                case "Gp_A":
+                case "Gp_B":
+                case "Gp_X":
+                case "Gp_Y": return "face";
+                case "Gp_LB":
+                case "Gp_RB": return "shoulder";
+                case "Gp_LT":
+                case "Gp_RT": return "trigger";
+                case "Gp_LS":
+                case "Gp_RS": return "stick";
+                case "Gp_L3":
+                case "Gp_R3": return "thumb";
+                case "Gp_DpadUp":
+                case "Gp_DpadDown":
+                case "Gp_DpadLeft":
+                case "Gp_DpadRight": return "dpad";
+                case "Gp_View":
+                case "Gp_Menu": return "menu";
+                case "Gp_Guide": return "guide";
+                case "Gp_Battery": return "battery";
+            }
+            return "plain";
+        }
+
+        // 部件默认尺寸（无 CustomSize_ 时的落位尺寸；之后用户可自由拖动/缩放，尺寸走既有 CustomSize_ 持久化）
+        private static void GpDefaultSize(string name, out double w, out double h)
+        {
+            switch (GpBaseName(name))
+            {
+                case "Gp_A":
+                case "Gp_B":
+                case "Gp_X":
+                case "Gp_Y": w = 40; h = 40; break;
+                case "Gp_LB":
+                case "Gp_RB": w = 64; h = 28; break;
+                case "Gp_LT":
+                case "Gp_RT": w = 24; h = 64; break;
+                case "Gp_LS":
+                case "Gp_RS":
+                case "Gp_L3":
+                case "Gp_R3": w = 56; h = 56; break;
+                // 十字四向：不做十字合体，各自一块；上/下取竖长、左/右取横长，便于一眼区分方向
+                case "Gp_DpadUp":
+                case "Gp_DpadDown": w = 28; h = 34; break;
+                case "Gp_DpadLeft":
+                case "Gp_DpadRight": w = 34; h = 28; break;
+                case "Gp_View":
+                case "Gp_Menu": w = 56; h = 30; break;
+                case "Gp_Guide": w = 48; h = 48; break;
+                case "Gp_Battery": w = 96; h = 28; break;
+                default: w = 52; h = 48; break;
+            }
+        }
+
+        // 部件默认字形（随 GamepadStyle_ 变；与组合模式 ApplyGamepadLabels 同一张表：物理位置固定，只换印字）
+        private string GpPartDefaultLabel(string name)
+        {
+            return GpPartLabelWithStyle(name, _gpStyle);
+        }
+
+        private static string GpPartLabelWithStyle(string name, string style)
+        {
+            bool ps = style == "ps", sw = style == "switch";
+            switch (GpBaseName(name))
+            {
+                case "Gp_A": return ps ? "\u2715" : sw ? "B" : "A";   // ✕ / B / A
+                case "Gp_B": return ps ? "\u25CB" : sw ? "A" : "B";   // ○ / A / B
+                case "Gp_X": return ps ? "\u25A1" : sw ? "Y" : "X";   // □ / Y / X
+                case "Gp_Y": return ps ? "\u25B3" : sw ? "X" : "Y";   // △ / X / Y
+                case "Gp_LB": return ps ? "L1" : sw ? "L" : "LB";
+                case "Gp_RB": return ps ? "R1" : sw ? "R" : "RB";
+                case "Gp_LT": return ps ? "L2" : sw ? "ZL" : "LT";
+                case "Gp_RT": return ps ? "R2" : sw ? "ZR" : "RT";
+                case "Gp_View": return "View";
+                case "Gp_Menu": return "Menu";
+                case "Gp_LS": return "LS";
+                case "Gp_RS": return "RS";
+                case "Gp_L3": return "L3";
+                case "Gp_R3": return "R3";
+                case "Gp_Guide": return "Guide";
+                case "Gp_Battery": return "";
+                case "Gp_DpadUp": return "\u2191";   // ↑
+                case "Gp_DpadDown": return "\u2193"; // ↓
+                case "Gp_DpadLeft": return "\u2190"; // ←
+                case "Gp_DpadRight": return "\u2192";// →
+            }
+            return GpBaseName(name);
+        }
+
+        // 布局预设会把小组件当时的"可见文本"当成显示名回写（WriteLayoutSnapshot：文字类取 TextBlock 文本、
+        // 无文字类回落成键名；扳机在 value 模式下还带百分比）。这些都不是用户改的名字——若显示名等于键名/
+        // 部件名、等于该部件在三种风格下的任一印字、或等于电量文字，一律视为"无覆盖"，
+        // 否则风格切换与电量显示会被预设保存那一刻的值钉死。
+        private static bool GpIsLiveLabel(string name, string kind, string text)
+        {
+            if (string.IsNullOrEmpty(text)) return true;
+            string b = GpBaseName(name);
+            if (text == name || text == b) return true;
+            if (kind == "battery")
+                return text == "\u7535\u91cf \u4f4e" || text == "\u7535\u91cf \u4e2d" || text == "\u7535\u91cf \u6ee1";
+            if (kind == "trigger" && text[text.Length - 1] == '%')
+            {
+                int sp = text.LastIndexOf(' ');
+                if (sp > 0) text = text.Substring(0, sp);
+            }
+            if (kind == "face" || kind == "shoulder" || kind == "trigger" || kind == "menu")
+                return text == GpPartLabelWithStyle(b, "xbox")
+                    || text == GpPartLabelWithStyle(b, "ps")
+                    || text == GpPartLabelWithStyle(b, "switch");
+            return false;
+        }
+
+        // 显示名（DisplayName_<名> 优先，沿用既有改名机制）——无覆盖值时返回 null
+        private static string GpDisplayNameOrNull(string name, Windows.Foundation.Collections.IPropertySet vals)
+        {
+            try
+            {
+                if (vals == null) return null;
+                string s = vals["DisplayName_" + name] as string;
+                return string.IsNullOrEmpty(s) ? null : s;
+            }
+            catch { return null; }
+        }
+
+        // 逐个添加一个手柄部件（可被外部调用；行为与键盘自定义键一致）：
+        // 参数可写 "Gp_A" 或简写 "A"；已存在则只按当前模式刷新显隐，并清掉删除记录（= 重新显示被删的）；
+        // 不存在则在面板空白处落位并持久化（走既有 AddCustomKey 创建链）。未识别的名字只记 DiagLog，绝不抛异常。
+        public void AddGamepadPart(string partName)
+        {
+            try
+            {
+                string name = GpNormalizePartName(partName);
+                if (name == null)
+                {
+                    DiagLog("gamepad part add ignored: " + (partName == null ? "(null)" : partName));
+                    return;
+                }
+                ApplicationData.Current.LocalSettings.Values.Remove("Deleted_" + name);
+                if (_customKeys.ContainsKey(name))
+                {
+                    DiagLog("gamepad part already exists: " + name);
+                }
+                else
+                {
+                    AddCustomKey(name);
+                    DiagLog("gamepad part added: " + name);
+                }
+                ApplyGamepadCustomParts(_latest);
+            }
+            catch (Exception ex) { DiagLog("gamepad part add fail: " + ex.Message); }
+        }
+
+        // 部件名归一：补 Gp_ 前缀、大小写不敏感匹配 20 个部件清单；未识别返回 null
+        private static string GpNormalizePartName(string partName)
+        {
+            if (string.IsNullOrEmpty(partName)) return null;
+            string s = partName.Trim();
+            if (s.Length == 0) return null;
+            if (!s.StartsWith(GpPartPrefix, StringComparison.OrdinalIgnoreCase)) s = GpPartPrefix + s;
+            for (int i = 0; i < GpParts.Length; i++)
+                if (string.Equals(GpParts[i], s, StringComparison.OrdinalIgnoreCase)) return GpParts[i];
+            return null;
+        }
+
+        // 是否存在手柄部件自定义键（未添加任何部件时，渲染循环的整段更新立即返回）
+        private bool HasGpCustomParts()
+        {
+            foreach (var kv in _customKeys) if (IsGpPartName(kv.Key)) return true;
+            return false;
+        }
+
+        // 部件是否可见：GamepadLayout_ + GamepadMode_（0 关闭 / 1 自动=检测到已连接手柄 / 2 始终显示）。
+        // 注意：GamepadParts_（组合面板的部件位掩码）只作用于组合面板；自定义部件由"是否已添加"决定，不受它影响。
+        private bool GpCustomPartsVisible(InputSnapshot snap)
+        {
+            if (_gpLayout != "custom") return false;   // 组合模式：部件一律不显示，组合面板照旧
+            if (_gpMode == 0) return false;
+            if (_gpMode == 2) return true;             // 始终显示：没有数据时也显示静息态
+            if (snap == null || !snap.HasGamepad) return false;
+            if (snap.GamepadConnected == 0) return false;
+            if (_gpSlot >= 0 && _gpSlot <= 3 && (snap.GamepadConnected & (1 << _gpSlot)) == 0) return false;
+            return true;
+        }
+
+        // 逐帧更新全部手柄部件（在 ApplyGamepadState 之外独立运行，与组合面板互不影响）。
+        // 无部件时立即返回 → 默认（从未添加过部件）行为与改动前完全一致；整段自带 try/catch，异常只记 DiagLog。
+        private void ApplyGamepadCustomParts(InputSnapshot snap)
+        {
+            try
+            {
+                if (!HasGpCustomParts()) return;
+                bool show = GpCustomPartsVisible(snap);
+                Windows.Foundation.Collections.IPropertySet vals = null;
+                try { vals = ApplicationData.Current.LocalSettings.Values; } catch { }
+                foreach (var kv in _customKeys)
+                {
+                    if (!IsGpPartName(kv.Key)) continue;
+                    Border b = kv.Value;
+                    if (b == null) continue;
+                    // 删除记录（Deleted_Gp_*）优先：被标记为已删的部件不显示（重新添加时由 AddGamepadPart 清掉）
+                    bool marked = false;
+                    try { marked = vals != null && vals["Deleted_" + kv.Key] != null; } catch { }
+                    if (!show || marked)
+                    {
+                        GpSetVisible(b, false);
+                        continue;
+                    }
+                    if (ReferenceEquals(b, _moveKey))
+                    {
+                        GpSetVisible(b, true);   // 移动高亮不被快照重绘覆盖（与既有自定义键同一处理）
+                        continue;
+                    }
+                    GpSetVisible(b, true);
+                    GpRenderPart(b, kv.Key, snap, vals);
+                }
+            }
+            catch (Exception ex) { DiagLog("gamepad custom parts fail: " + ex.Message); }
+        }
+
+        // 建立/校正部件内容：扳机与摇杆用 Canvas 承载（填充条 / 中心点），圆环与方块由 Border 自身承担（无内容），
+        // 文字类部件沿用自定义键自带的 TextBlock（改名机制可直接作用于它）。幂等，可重复调用。
+        private void GpBuildPartContent(Border b, string name)
+        {
+            if (b == null) return;
+            string kind = GpPartKind(name);
+            if (kind == "dpad" || kind == "guide")
+            {
+                if (b.Child != null) b.Child = null;   // 形状由 Border 自身（圆角/描边）承担
+                return;
+            }
+            if (kind != "trigger" && kind != "stick" && kind != "thumb")
+            {
+                GpEnsureTextChild(b);
+                return;
+            }
+            var old = b.Child as Canvas;
+            if (old != null && (old.Tag as string) == kind) return;   // 已是目标结构
+            var cv = new Canvas
+            {
+                IsHitTestVisible = false,   // 指针事件落到 Border 本身，拖拽/缩放/吸附不受影响
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Top,
+                Tag = kind
+            };
+            if (kind == "trigger")
+            {
+                cv.Children.Add(new Rectangle());   // 从底向上的填充
+                cv.Children.Add(new TextBlock
+                {
+                    TextAlignment = TextAlignment.Center,
+                    TextWrapping = TextWrapping.Wrap,
+                    HorizontalAlignment = HorizontalAlignment.Center
+                });
+            }
+            else
+            {
+                cv.Children.Add(new Ellipse());     // 摇杆点 / 中心点
+            }
+            b.Child = cv;
+        }
+
+        // 文字类部件：确保有 TextBlock 子元素（AddCustomKey 已建，此处兜底复制副本/异常情况）
+        private static void GpEnsureTextChild(Border b)
+        {
+            if (b == null) return;
+            if (b.Child is TextBlock) return;
+            b.Child = new TextBlock
+            {
+                Text = "",
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                TextAlignment = TextAlignment.Center
+            };
+        }
+
+        // 按部件类型渲染一个 Gp_ 自定义键（全部走"值未变不写依赖属性"的幂等写入，与既有渲染循环一致，可每帧调用）。
+        // 形状全部按 Border 当前尺寸换算 → 用户拖动/四角缩放后自动跟随；配色只用既有语义画刷方法。
+        private void GpRenderPart(Border b, string name, InputSnapshot snap, Windows.Foundation.Collections.IPropertySet vals)
+        {
+            if (b == null) return;
+            string kind = GpPartKind(name);
+            double w = b.Width; if (double.IsNaN(w) || w <= 0) w = b.ActualWidth;
+            double h = b.Height; if (double.IsNaN(h) || h <= 0) h = b.ActualHeight;
+            if (w <= 0) w = 40;
+            if (h <= 0) h = 40;
+            double iw = w - 2.0, ih = h - 2.0;   // BorderThickness = 1：内容区
+            if (iw < 4.0) iw = w;
+            if (ih < 4.0) ih = h;
+            uint btn = snap != null ? snap.GamepadButtons : 0;
+            string disp = GpDisplayNameOrNull(name, vals);
+            if (disp != null && GpIsLiveLabel(name, kind, disp)) disp = null;   // 预设回写的"当时的可见文本"不算改名
+
+            switch (kind)
+            {
+                case "face":
+                    {
+                        bool down = (btn & GpFaceMask(GpBaseName(name))) != 0;
+                        GpSetCornerRadius(b, Math.Min(w, h) / 2.0);   // 圆角取半边长 = 圆（非正方时是胶囊）
+                        var tb = b.Child as TextBlock;
+                        if (tb != null)
+                        {
+                            GpSetText(tb, disp != null ? disp : GpPartDefaultLabel(name));
+                            GpSetPartFont(tb, GpFitFont(w, h, 0.5));
+                        }
+                        GpSetFaceKey(b, down);   // 既有面位配色：底/字对调 + 品牌色（GamepadBrand_ 开启且未按下）
+                        return;
+                    }
+                case "shoulder":
+                    {
+                        bool down = (btn & (GpBaseName(name) == "Gp_LB" ? GP_LEFT_SHOULDER : GP_RIGHT_SHOULDER)) != 0;
+                        GpSetCornerRadius(b, Math.Min(w, h) / 2.0);
+                        var tb = b.Child as TextBlock;
+                        if (tb != null)
+                        {
+                            GpSetText(tb, disp != null ? disp : GpPartDefaultLabel(name));
+                            GpSetPartFont(tb, GpFitFont(w, h, 0.45));
+                        }
+                        SetKey(b, down);
+                        return;
+                    }
+                case "menu":
+                    {
+                        bool down = (btn & (GpBaseName(name) == "Gp_View" ? GP_BACK : GP_START)) != 0;
+                        GpSetCornerRadius(b, Math.Min(w, h) / 2.0);
+                        var tb = b.Child as TextBlock;
+                        if (tb != null)
+                        {
+                            GpSetText(tb, disp != null ? disp : GpPartDefaultLabel(name));
+                            GpSetPartFont(tb, GpFitFont(w, h, 0.42));
+                        }
+                        SetKey(b, down);
+                        return;
+                    }
+                case "dpad":
+                    {
+                        uint mask = GpDpadMask(GpBaseName(name));
+                        GpSetCornerRadius(b, Math.Min(w, h) / 4.0);   // 小圆角方块（不做十字合体）
+                        SetKey(b, (btn & mask) != 0);
+                        return;
+                    }
+                case "guide":
+                    {
+                        bool down = (btn & GP_GUIDE) != 0;
+                        GpSetCornerRadius(b, Math.Min(w, h) / 2.0);
+                        var bg = down ? PressBgB() : _transparent;   // 按下时圆环用按下底色填充（同组合模式 GpSetGuide）
+                        if (!ReferenceEquals(b.Background, bg)) b.Background = bg;
+                        GpSetPartBorder(b, BorderB());
+                        return;
+                    }
+                case "battery":
+                    {
+                        int lv = snap != null ? snap.GamepadBattery : 0;
+                        GpEnsureTextChild(b);
+                        var tb = b.Child as TextBlock;
+                        if (tb != null)
+                        {
+                            GpSetText(tb, disp != null ? disp
+                                : lv == 1 ? "\u7535\u91cf \u4f4e"      // 电量 低
+                                : lv == 2 ? "\u7535\u91cf \u4e2d"      // 电量 中
+                                : lv == 3 ? "\u7535\u91cf \u6ee1"      // 电量 满
+                                : "");
+                            GpSetPartFont(tb, GpFitFont(w, h, 0.5));
+                            var fg = KeyFgB();
+                            if (!ReferenceEquals(tb.Foreground, fg)) tb.Foreground = fg;
+                        }
+                        if (!ReferenceEquals(b.Background, _transparent)) b.Background = _transparent;
+                        GpSetPartBorder(b, _transparent);   // 只显示文字，不画键帽底/描边
+                        return;
+                    }
+                case "trigger":
+                    {
+                        bool left = GpBaseName(name) == "Gp_LT";
+                        int val = snap != null ? (left ? snap.GamepadLT : snap.GamepadRT) : 0;
+                        if (val < 0) val = 0;
+                        if (val > 255) val = 255;
+                        bool highlight = _gpTrigger == "highlight";
+                        bool lit = val > GpTriggerHighlightThreshold;
+                        GpSetCornerRadius(b, Math.Min(w, h) / 3.0);   // 竖向圆角条（角半径与组合模式同比例）
+                        GpSetPartBorder(b, BorderB());
+                        var barBg = highlight && lit ? PressBgB() : KeyBgB();
+                        if (!ReferenceEquals(b.Background, barBg)) b.Background = barBg;
+                        GpBuildPartContent(b, name);
+                        var cv = b.Child as Canvas;
+                        if (cv == null) return;
+                        GpSetSize(cv, iw, ih);
+                        var rect = cv.Children.Count > 0 ? cv.Children[0] as Rectangle : null;
+                        var tb = cv.Children.Count > 1 ? cv.Children[1] as TextBlock : null;
+                        double fillH = 0;
+                        if (highlight)
+                        {
+                            if (rect != null)   // 仅高亮：不填充（整条换色，同组合模式）
+                            {
+                                GpSetSize(rect, iw, 0);
+                                GpSetPos(rect, 0, ih);
+                            }
+                        }
+                        else
+                        {
+                            fillH = ih * (val / 255.0);
+                            if (rect != null)
+                            {
+                                var accent = AccentB();
+                                if (!ReferenceEquals(rect.Fill, accent)) rect.Fill = accent;
+                                GpSetSize(rect, iw, fillH);
+                                GpSetPos(rect, 0, ih - fillH);
+                            }
+                        }
+                        if (tb != null)
+                        {
+                            double fs = GpFitFont(w, h, 0.5);
+                            GpSetPartFont(tb, fs);
+                            string tn = disp != null ? disp : GpTriggerName(left);
+                            GpSetText(tb, _gpTrigger == "value" ? tn + " " + (int)(val / 2.55) + "%" : tn);
+                            GpSetWidth(tb, iw);
+                            GpSetPos(tb, 0, 1);
+                            // 文字在条内顶部：填充涨到文字后面时改用按下字色，保证任何主题下都读得清
+                            bool covered = fillH > ih - fs * 1.4 - 1.0;
+                            var fg = highlight ? (lit ? PressFgB() : KeyFgB()) : (covered ? PressFgB() : KeyFgB());
+                            if (!ReferenceEquals(tb.Foreground, fg)) tb.Foreground = fg;
+                        }
+                        return;
+                    }
+                case "stick":
+                case "thumb":
+                    {
+                        bool left = GpBaseName(name) == "Gp_LS" || GpBaseName(name) == "Gp_L3";
+                        bool down = (btn & (left ? GP_LEFT_THUMB : GP_RIGHT_THUMB)) != 0;
+                        double nx = 0.0, ny = 0.0;
+                        if (kind == "stick" && snap != null)
+                        {
+                            // 死区 + 径向钳制：复用组合模式同一套算法
+                            GpStickNormalize(left ? snap.GamepadLX : snap.GamepadRX,
+                                             left ? snap.GamepadLY : snap.GamepadRY,
+                                             _gpDeadzone, out nx, out ny);
+                        }
+                        GpSetCornerRadius(b, Math.Min(w, h) / 2.0);   // 圆环（Border 自身描边）
+                        var ringBg = (kind == "thumb" && down) ? PressBgB() : _transparent;
+                        if (!ReferenceEquals(b.Background, ringBg)) b.Background = ringBg;
+                        GpSetPartBorder(b, BorderB());
+                        GpBuildPartContent(b, name);
+                        var cv = b.Child as Canvas;
+                        if (cv == null) return;
+                        GpSetSize(cv, iw, ih);
+                        var dot = cv.Children.Count > 0 ? cv.Children[0] as Ellipse : null;
+                        if (dot == null) return;
+                        double dotR = Math.Min(iw, ih) / 6.0;   // 与组合模式同比例：点半径 = 环半径 / 3
+                        if (dotR < 2.5) dotR = 2.5;
+                        double travelX = iw / 2.0 - dotR;
+                        double travelY = ih / 2.0 - dotR;
+                        if (travelX < 0) travelX = 0;
+                        if (travelY < 0) travelY = 0;
+                        GpSetWidth(dot, dotR * 2.0);
+                        GpSetHeight(dot, dotR * 2.0);
+                        // 点圆心 = 环心 + (nx, -ny) × 可移动半径（协议 Y 轴向上为正，画布 Y 向下）
+                        GpSetPos(dot, iw / 2.0 - dotR + nx * travelX, ih / 2.0 - dotR - ny * travelY);
+                        // L3/R3 按下时用"鼠标点按下色"（与组合模式摇杆点的处理一致）
+                        var df = (kind == "thumb" && down) ? DotPressedB() : DotB();
+                        if (!ReferenceEquals(dot.Fill, df)) dot.Fill = df;
+                        return;
+                    }
+                default:
+                    {
+                        // 非清单内的 Gp_ 名（例如用户自建）：按普通自定义键渲染，绝不抛异常
+                        SetKey(b, false);
+                        var tb = b.Child as TextBlock;
+                        if (tb != null)
+                        {
+                            GpSetText(tb, disp != null ? disp : GpBaseName(name));
+                            GpSetPartFont(tb, GpFitFont(w, h, 0.42));
+                        }
+                        return;
+                    }
+            }
+        }
+
+        // ABXY → XInput 掩码（下/右/左/上 = A/B/X/Y）
+        private static uint GpFaceMask(string baseName)
+        {
+            switch (baseName)
+            {
+                case "Gp_A": return GP_A;
+                case "Gp_B": return GP_B;
+                case "Gp_X": return GP_X;
+                case "Gp_Y": return GP_Y;
+            }
+            return 0;
+        }
+
+        // 十字键方向 → XInput 掩码
+        private static uint GpDpadMask(string baseName)
+        {
+            switch (baseName)
+            {
+                case "Gp_DpadUp": return GP_DPAD_UP;
+                case "Gp_DpadDown": return GP_DPAD_DOWN;
+                case "Gp_DpadLeft": return GP_DPAD_LEFT;
+                case "Gp_DpadRight": return GP_DPAD_RIGHT;
+            }
+            return 0;
+        }
+
+        // 部件标签字号：随部件尺寸缩放（夹在 6~30，避免拖到极小/极大时字不可读或撑破）
+        private static double GpFitFont(double w, double h, double ratio)
+        {
+            double s = Math.Min(w, h) * ratio;
+            if (s < 6.0) s = 6.0;
+            if (s > 30.0) s = 30.0;
+            return s;
+        }
+
+        // 部件标签字号/字重（字重跟随"字体粗细"设置；字体族在创建时已定，不在此每帧重建，避免无谓分配）
+        private void GpSetPartFont(TextBlock tb, double size)
+        {
+            if (tb == null) return;
+            if (double.IsNaN(tb.FontSize) || Math.Abs(tb.FontSize - size) > 0.01) tb.FontSize = size;
+            if (tb.FontWeight.Weight != _keyFontWeight.Weight) tb.FontWeight = _keyFontWeight;
+        }
+
+        // 幂等圆角（值未变不写依赖属性）
+        private static void GpSetCornerRadius(Border b, double r)
+        {
+            if (b == null) return;
+            if (r < 0.0) r = 0.0;
+            var c = b.CornerRadius;
+            if (Math.Abs(c.TopLeft - r) > 0.01 || Math.Abs(c.TopRight - r) > 0.01 ||
+                Math.Abs(c.BottomRight - r) > 0.01 || Math.Abs(c.BottomLeft - r) > 0.01)
+                b.CornerRadius = new CornerRadius(r, r, r, r);
+        }
+
+        // 幂等宽度（值未变不写依赖属性；NaN 视为需要写入）
+        private static void GpSetWidth(FrameworkElement el, double w)
+        {
+            if (el == null) return;
+            double cur = el.Width;
+            if (double.IsNaN(cur) || Math.Abs(cur - w) > 0.01) el.Width = w;
+        }
+
+        // 幂等宽高
+        private static void GpSetSize(FrameworkElement el, double w, double h)
+        {
+            GpSetWidth(el, w);
+            GpSetHeight(el, h);
+        }
+
+        // 幂等 Canvas 坐标（值未变不写依赖属性）
+        private static void GpSetPos(FrameworkElement el, double x, double y)
+        {
+            if (el == null) return;
+            double cur = Canvas.GetLeft(el);
+            if (double.IsNaN(cur) || Math.Abs(cur - x) > 0.01) Canvas.SetLeft(el, x);
+            cur = Canvas.GetTop(el);
+            if (double.IsNaN(cur) || Math.Abs(cur - y) > 0.01) Canvas.SetTop(el, y);
+        }
+
+        // 部件边框色（多选选中态保持固定红框，与 SetKey 的处理一致）
+        private void GpSetPartBorder(Border b, Brush br)
+        {
+            if (b == null) return;
+            if (IsKeySelected(b)) return;
+            if (!ReferenceEquals(b.BorderBrush, br)) b.BorderBrush = br;
+        }
+
+        // ===================== 1.4：键位风格自动检测（GamepadStyle_ = "auto"）=====================
+        // 向管道发 CMD|PAD，应答 RESP|DATA|{"brand":"xbox","vid":"0x045E","pid":"0x0B13"}；只取 brand。
+        // 限频（已应答 10s / 无应答 60s）+ 单飞（_gpAutoBusy）避免频繁发命令；超时/解析失败/unknown
+        // 一律静默按 xbox 回落，整段 try/catch：手柄侧任何异常都只记 DiagLog，绝不影响键鼠渲染。
+        private async void TryStartGamepadBrandDetect()
+        {
+            try
+            {
+                if (_gpStyleRaw != "auto") return;     // 只有 auto 才查询
+                if (_gpAutoBusy) return;               // 单飞：上一轮还没回来就不重复发
+                var reader = _reader;
+                if (reader == null || !reader.Connected) return;   // 还没连上：不记时刻，下一轮再试（连上即检测）
+                long now = DateTime.UtcNow.Ticks;
+                // 限频：接收器已应答（含 unknown）→ 10s；一直没应答（旧接收器/未实现 PAD）→ 60s，
+                // 免得隔一会儿就往管道塞一条没人接的命令。
+                long wait = _gpAutoAnswered ? TimeSpan.FromSeconds(10).Ticks : TimeSpan.FromSeconds(60).Ticks;
+                if (_gpAutoLastTicks != 0 && now - _gpAutoLastTicks < wait) return;
+                _gpAutoLastTicks = now;
+                string resp = null;   // 显式初始化：即使 await 抛异常也不会走到下面用到未赋值变量
+                _gpAutoBusy = true;
+                try { resp = await reader.RequestPresetAsync("PAD", null, 800); }
+                finally { _gpAutoBusy = false; }
+                if (resp != null) _gpAutoAnswered = true;
+                string brand = GpParseBrand(resp);
+                if (brand == null)
+                {
+                    // 超时 / ERR| / unknown / JSON 不合法：保持"按 xbox"的回落（默认风格就是 xbox），不动界面
+                    DiagLog("gamepad brand detect: fallback xbox");
+                    return;
+                }
+                if (_gpAutoBrand == brand) return;     // 结果没变：不动界面
+                _gpAutoBrand = brand;
+                DiagLog("gamepad brand detect: " + brand);
+                await Dispatcher.RunAsync(CoreDispatcherPriority.Normal, () =>
+                {
+                    try
+                    {
+                        if (_gpStyleRaw != "auto") return;   // 等待期间用户可能已改成固定风格
+                        if (_gpStyle == brand) return;
+                        _gpStyle = brand;
+                        ApplyGamepadSettings();   // 字形 + 配色 + 部件显隐 + 模板一并重刷
+                    }
+                    catch (Exception ex) { DiagLog("gamepad brand apply fail: " + ex.Message); }
+                });
+            }
+            catch (Exception ex) { DiagLog("gamepad brand detect fail: " + ex.Message); }
+        }
+
+        // 解析 CMD|PAD 的应答：只认 xbox / ps（playstation）/ switch（nintendo）；
+        // "unknown"、字段缺失、JSON 不合法、应答是 OK|ERR|、超时（null）一律返回 null（调用方按 xbox 处理）。
+        private static string GpParseBrand(string resp)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(resp)) return null;
+                string body = resp.StartsWith("DATA|", StringComparison.Ordinal) ? resp.Substring(5) : resp;
+                Windows.Data.Json.JsonObject o;   // 全限定名：与设置窗口里同一套解析写法，避免类型名歧义
+                if (!Windows.Data.Json.JsonObject.TryParse(body, out o) || o == null) return null;
+                if (!o.ContainsKey("brand")) return null;
+                string b = (o.GetNamedString("brand", "") ?? "").Trim().ToLowerInvariant();
+                if (b == "xbox") return "xbox";
+                if (b == "ps" || b == "playstation") return "ps";
+                if (b == "switch" || b == "nintendo") return "switch";
+                return null;
+            }
+            catch { return null; }
+        }
+
+        // ===================== 1.4：组合模式的手柄轮廓模板（纯描边背景）=====================
+        // 画在 GamepadTemplatePanel 里（GamepadPanel 的第一个子元素 → 位于所有部件之下），坐标与组合模式
+        // 部件同一套设计单位 → 按键正好落在模板上对应的位置。只用 BorderB() 描边、透明填充，不新增颜色常量。
+        // custom 布局不画任何模板（整块 Collapsed）；模板与 GamepadParts_ 部件位掩码无关（那是部件的显隐）。
+        private void ApplyGamepadTemplate()
+        {
+            try
+            {
+                if (GamepadTemplatePanel == null) return;
+                if (_gpLayout == "custom")
+                {
+                    GpSetVisible(GamepadTemplatePanel, false);   // 自定义模式：没有任何背景模板
+                    return;
+                }
+                GpSetVisible(GamepadTemplatePanel, true);
+                string tpl = GpTemplateStyle();
+                if (_gpTemplateStyle != tpl)
+                {
+                    BuildGamepadTemplate(tpl);
+                    _gpTemplateStyle = tpl;
+                }
+                // 配色随主题刷新（值未变不写依赖属性）
+                var bd = BorderB();
+                for (int i = 0; i < GamepadTemplatePanel.Children.Count; i++)
+                {
+                    var sh = GamepadTemplatePanel.Children[i] as Shape;
+                    if (sh == null) continue;
+                    if (!ReferenceEquals(sh.Stroke, bd)) sh.Stroke = bd;
+                    if (!ReferenceEquals(sh.Fill, _transparent)) sh.Fill = _transparent;
+                    if (Math.Abs(sh.StrokeThickness - 1.0) > 0.001) sh.StrokeThickness = 1.0;
+                }
+            }
+            catch (Exception ex) { DiagLog("gamepad template fail: " + ex.Message); }
+        }
+
+        // 模板风格 = 当前生效的键位风格（"auto" 已在 _gpStyle 里落成 xbox/ps/switch）
+        private string GpTemplateStyle()
+        {
+            return (_gpStyle == "ps" || _gpStyle == "switch") ? _gpStyle : "xbox";
+        }
+
+        // 建立模板轮廓（只在风格变化时重建一次；元素全部纯描边）
+        private void BuildGamepadTemplate(string tpl)
+        {
+            var cv = GamepadTemplatePanel;
+            if (cv == null) return;
+            cv.Children.Clear();
+            bool ps = tpl == "ps", sw = tpl == "switch";
+            // ---- 机身 + 左右握把（只需近似：一眼能看出是手柄，不做写实）----
+            if (ps)
+            {
+                AddTplRound(cv, 14, 4, 140, 96, 34);        // PlayStation：机身较窄长
+                AddTplEllipse(cv, 28, 80, 24, 30);
+                AddTplEllipse(cv, 140, 80, 24, 30);
+            }
+            else if (sw)
+            {
+                AddTplRound(cv, 10, 6, 148, 88, 26);        // Switch：机身偏方
+                AddTplEllipse(cv, 24, 78, 22, 28);
+                AddTplEllipse(cv, 144, 78, 22, 28);
+            }
+            else
+            {
+                AddTplRound(cv, 4, 4, 164, 92, 28);         // Xbox：机身较宽
+                AddTplEllipse(cv, 26, 78, 26, 30);
+                AddTplEllipse(cv, 142, 78, 26, 30);
+            }
+            // ---- 顶部：肩键 / 扳机的小方块轮廓（与 LB/RB、LT/RT 部件同位）----
+            AddTplRound(cv, 22, 6, 30, 18, ps ? 6 : 5);     // LB / L1 / L
+            AddTplRound(cv, 116, 6, 30, 18, ps ? 6 : 5);    // RB / R1 / R
+            AddTplRound(cv, 4, 0, 16, 34, ps ? 8 : 5);      // LT / L2 / ZL 竖条
+            AddTplRound(cv, 148, 0, 16, 34, ps ? 8 : 5);    // RT / R2 / ZR 竖条
+            // ---- 两个摇杆圆环（与 LS/RS 同心，环半径略大于部件环 → 把按键圈在里面）----
+            AddTplEllipse(cv, 34, 44, 18, 18);              // 左摇杆
+            AddTplEllipse(cv, 126, 88, 18, 18);             // 右摇杆
+            // ---- 十字键：Xbox 一体十字 / PlayStation 四个小方块 / Switch 四个圆点 ----
+            if (ps)
+            {
+                // 四个小方块（各自框住一个方向键，块与块只在内角轻触，不互相压线）
+                AddTplRound(cv, 27, 63, 14, 14, 4);
+                AddTplRound(cv, 27, 90, 14, 14, 4);
+                AddTplRound(cv, 13, 76, 14, 14, 4);
+                AddTplRound(cv, 40, 76, 14, 14, 4);
+            }
+            else if (sw)
+            {
+                AddTplEllipse(cv, 34, 71, 7, 7);
+                AddTplEllipse(cv, 34, 97, 7, 7);
+                AddTplEllipse(cv, 21, 84, 7, 7);
+                AddTplEllipse(cv, 47, 84, 7, 7);
+            }
+            else
+            {
+                AddTplRound(cv, 26, 63, 16, 40, 4);         // 十字：竖
+                AddTplRound(cv, 14, 75, 40, 16, 4);         // 十字：横
+            }
+            // ---- ABXY：Xbox 菱形 / PlayStation、Switch 四个圆 ----
+            if (ps || sw)
+            {
+                AddTplEllipse(cv, 126, 35, 12, 12);
+                AddTplEllipse(cv, 113, 48, 12, 12);
+                AddTplEllipse(cv, 139, 48, 12, 12);
+                AddTplEllipse(cv, 126, 61, 12, 12);
+            }
+            else
+            {
+                AddTplDiamond(cv, 126, 48, 26, 26);
+            }
+            // ---- View / Menu / Guide ----
+            AddTplRound(cv, 54, 76, 22, 17, 5);
+            AddTplRound(cv, 76, 76, 22, 17, 5);
+            AddTplEllipse(cv, 84, 56, 13, 13);
+        }
+
+        // 模板圆角矩形（左上角 x/y + 宽高 + 圆角）
+        private void AddTplRound(Canvas cv, double x, double y, double w, double h, double r)
+        {
+            try
+            {
+                var rc = new Rectangle
+                {
+                    Width = w,
+                    Height = h,
+                    RadiusX = r,
+                    RadiusY = r,
+                    Stroke = BorderB(),
+                    StrokeThickness = 1,
+                    Fill = _transparent
+                };
+                Canvas.SetLeft(rc, x);
+                Canvas.SetTop(rc, y);
+                cv.Children.Add(rc);
+            }
+            catch (Exception ex) { DiagLog("gamepad template round fail: " + ex.Message); }
+        }
+
+        // 模板椭圆/圆（圆心 + 半径）
+        private void AddTplEllipse(Canvas cv, double cx, double cy, double rx, double ry)
+        {
+            try
+            {
+                var el = new Ellipse
+                {
+                    Width = rx * 2.0,
+                    Height = ry * 2.0,
+                    Stroke = BorderB(),
+                    StrokeThickness = 1,
+                    Fill = _transparent
+                };
+                Canvas.SetLeft(el, cx - rx);
+                Canvas.SetTop(el, cy - ry);
+                cv.Children.Add(el);
+            }
+            catch (Exception ex) { DiagLog("gamepad template ellipse fail: " + ex.Message); }
+        }
+
+        // 模板菱形（Xbox 的 ABXY 菱形轮廓）：用 4 条 Line 拼（Line 在本文件已用于吸附参考线，
+        // 不依赖旋转 RenderTransform，也不引入 Polygon/PointCollection 这类元数据不确定的类型）
+        private void AddTplDiamond(Canvas cv, double cx, double cy, double rx, double ry)
+        {
+            try
+            {
+                AddTplLine(cv, cx, cy - ry, cx + rx, cy);
+                AddTplLine(cv, cx + rx, cy, cx, cy + ry);
+                AddTplLine(cv, cx, cy + ry, cx - rx, cy);
+                AddTplLine(cv, cx - rx, cy, cx, cy - ry);
+            }
+            catch (Exception ex) { DiagLog("gamepad template diamond fail: " + ex.Message); }
+        }
+
+        private void AddTplLine(Canvas cv, double x1, double y1, double x2, double y2)
+        {
+            var ln = new Line { X1 = x1, Y1 = y1, X2 = x2, Y2 = y2, Stroke = BorderB(), StrokeThickness = 1 };
+            cv.Children.Add(ln);
         }
 
         // 幂等显隐（值未变不写依赖属性）

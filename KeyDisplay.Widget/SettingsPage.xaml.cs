@@ -291,7 +291,8 @@ namespace KeyDisplay
             foreach (var t in new TextBlock[] { PageDesc, ThemeCardDesc, ColorCardDesc, FontCardDesc, PresetCardDesc,
                                                 AboutVerText, AboutDesc, AboutRepo, AuthorDescText,
                                                 AddKeyHint, AboutTech, AdvSwitchDesc, AdvSpeedDesc,
-                                                GpCardDesc, GpStyleHint, GpDeadzoneHint, GpBrandHint })
+                                                GpCardDesc, GpStyleHint, GpDeadzoneHint, GpBrandHint,
+                                                GpLayoutHint, GpAddHint })
             { t.Foreground = B(_pal.Subtle); }
 
             foreach (var card in new Border[] { ThemeCard, AdvSwitchCard, ColorCard, FontCard, LayoutCard, PresetCard, AboutCard, GpCard })
@@ -312,6 +313,7 @@ namespace KeyDisplay
             RefreshSlotRows();
             ApplyDotKeyStyles();
             PaintKeyPicker();
+            PaintGpPartPicker();
             PaintPickerChrome();
             if (_presetsRaw != null && _presetsRaw.Length > 0) RenderPresets();   // 预设行按新配色重建
             UpdateStateTexts();
@@ -417,7 +419,7 @@ namespace KeyDisplay
             _panelBgTransparent = !(v["PanelTransparent_"] != null && v["PanelTransparent_"].ToString() == "0");
             _locked = !(v["LayoutLocked"] is bool lb && !lb);
 
-            // 手柄显示（布局页最后一块，7 个键与主小组件约定）：
+            // 手柄显示（布局页最后一块，8 个键与主小组件约定）：
             // 读法与上面完全一致 —— 缺省 / 类型不对 / 越界一律回默认值（ReadDouble 负责数值，ReadChoice 负责字符串白名单）
             _gpMode = (int)ReadDouble(v["GamepadMode_"], 1, 0, 2);
             _gpSlot = (int)ReadDouble(v["GamepadSlot_"], -1, -1, 3);
@@ -426,6 +428,8 @@ namespace KeyDisplay
             _gpTrigger = ReadChoice(v["GamepadTrigger_"], "bar", GpTriggerKeys);
             _gpDeadzone = (int)ReadDouble(v["GamepadDeadzone_"], 24, GpDeadzoneMin, GpDeadzoneMax);
             _gpBrand = (int)ReadDouble(v["GamepadBrand_"], 0, 0, 1);
+            // 布局模式：读法与上面一致，缺省 / 类型不对 / 不在白名单内一律回默认 "composite"
+            _gpLayout = ReadChoice(v["GamepadLayout_"], GpLayoutCompositeVal, GpLayoutKeys);
             ApplyGamepadToControls();
 
             // 回报率（参数页三个滑条，键盘 / 鼠标 / 手柄各自独立）：30..480Hz，缺省 240 / 240 / 120
@@ -1089,7 +1093,7 @@ namespace KeyDisplay
         }
 
         // ===================== 手柄显示（布局页最后一块）=====================
-        // 与主小组件约定的 7 个键，类型 / 取值 / 默认值必须逐位一致（小组件侧负责绘制与配色）：
+        // 与主小组件约定的 8 个键，类型 / 取值 / 默认值必须逐位一致（小组件侧负责绘制与配色）：
         //   GamepadMode_     int     0=关闭 / 1=自动 / 2=始终显示          默认 1
         //   GamepadSlot_     int     -1=自动 / 0..3=P1..P4                默认 -1
         //   GamepadStyle_    string  "xbox" / "ps" / "switch"             默认 "xbox"
@@ -1097,14 +1101,21 @@ namespace KeyDisplay
         //   GamepadTrigger_  string  "bar" / "value" / "highlight"         默认 "bar"
         //   GamepadDeadzone_ int     0..40（百分比）                       默认 24
         //   GamepadBrand_    int     0/1                                   默认 0
+        //   GamepadLayout_   string  "composite" / "custom"               默认 "composite"
+        //                            （custom = 像键盘那样逐个添加部件：写 Custom_Gp_* 自定义键）
         // 本页不写任何颜色键：勾选项只描述"显示什么"，配色一律由小组件侧处理。
 
         private const int GpPartsAll = 0x1FF;   // 9 个部件全开（默认值）
         private const int GpDeadzoneMin = 0;
         private const int GpDeadzoneMax = 40;
 
-        private static readonly string[] GpStyleKeys = { "xbox", "ps", "switch" };
+        private static readonly string[] GpStyleKeys = { "xbox", "ps", "switch", "auto" };   // 1.4：新增 auto（按实际连接的手柄自动检测）
         private static readonly string[] GpTriggerKeys = { "bar", "value", "highlight" };
+
+        // 布局模式 → GamepadLayout_（"composite" 一整块手柄面板（默认）/ "custom" 逐个添加部件）
+        private static readonly string[] GpLayoutKeys = { "composite", "custom" };
+        private const string GpLayoutCompositeVal = "composite";
+        private const string GpLayoutCustomVal = "custom";
 
         private bool _gpLoading;                // 回填控件期间抑制保存（见 ApplyGamepadToControls）
         private int _gpMode = 1;
@@ -1114,6 +1125,7 @@ namespace KeyDisplay
         private string _gpTrigger = "bar";
         private int _gpDeadzone = 24;
         private int _gpBrand;                   // 0=跟随主题 / 1=品牌色
+        private string _gpLayout = GpLayoutCompositeVal;   // "composite"=整块面板（默认）/ "custom"=逐个添加部件
 
         // 字符串键的容错读取：类型不是字符串、缺省、不在白名单内，一律回默认值
         private static string ReadChoice(object o, string def, string[] allowed)
@@ -1175,6 +1187,9 @@ namespace KeyDisplay
                 if (GpModeAuto != null) GpModeAuto.IsChecked = _gpMode == 1;
                 if (GpModeOn != null) GpModeOn.IsChecked = _gpMode == 2;
 
+                if (GpLayoutComposite != null) GpLayoutComposite.IsChecked = _gpLayout == GpLayoutCompositeVal;
+                if (GpLayoutCustom != null) GpLayoutCustom.IsChecked = _gpLayout == GpLayoutCustomVal;
+
                 if (GpSlotAuto != null) GpSlotAuto.IsChecked = _gpSlot < 0;
                 if (GpSlotP1 != null) GpSlotP1.IsChecked = _gpSlot == 0;
                 if (GpSlotP2 != null) GpSlotP2.IsChecked = _gpSlot == 1;
@@ -1184,6 +1199,7 @@ namespace KeyDisplay
                 if (GpStyleXbox != null) GpStyleXbox.IsChecked = _gpStyle == "xbox";
                 if (GpStylePs != null) GpStylePs.IsChecked = _gpStyle == "ps";
                 if (GpStyleSwitch != null) GpStyleSwitch.IsChecked = _gpStyle == "switch";
+                if (GpStyleAuto != null) GpStyleAuto.IsChecked = _gpStyle == "auto";   // 1.4：自动检测
 
                 GamepadPartsToControls(_gpParts);
 
@@ -1248,7 +1264,9 @@ namespace KeyDisplay
             if (!GpReady()) return;
             try
             {
-                string st = (GpStylePs != null && GpStylePs.IsChecked == true) ? "ps"
+                // 1.4：新增「自动检测」→ "auto"（小组件按实际连接的手柄品牌自动选字形与模板）
+                string st = (GpStyleAuto != null && GpStyleAuto.IsChecked == true) ? "auto"
+                          : (GpStylePs != null && GpStylePs.IsChecked == true) ? "ps"
                           : ((GpStyleSwitch != null && GpStyleSwitch.IsChecked == true) ? "switch" : "xbox");
                 _gpStyle = st;
                 Save("GamepadStyle_", st);
@@ -1310,6 +1328,213 @@ namespace KeyDisplay
                 Save("GamepadBrand_", b);
             }
             catch (Exception ex) { Diag("gamepad brand fail: " + ex.Message); }
+        }
+
+        // 8. 布局模式 → GamepadLayout_（"composite" 一整块手柄面板 / "custom" 像键盘那样逐个添加部件）
+        private void GpLayout_Click(object sender, RoutedEventArgs e)
+        {
+            if (!GpReady()) return;
+            try
+            {
+                string lay = (GpLayoutCustom != null && GpLayoutCustom.IsChecked == true) ? GpLayoutCustomVal : GpLayoutCompositeVal;
+                _gpLayout = lay;
+                Save("GamepadLayout_", lay);
+                // 即时反馈：切到自定义模式却一个部件都没添加过 → 直接告诉用户去哪里挑部件
+                if (lay == GpLayoutCustomVal && CountGpParts() == 0)
+                    GpStatusSet("已是自定义模式：请在下面「添加手柄部件」里挑选要显示的部件");
+            }
+            catch (Exception ex) { Diag("gamepad layout mode fail: " + ex.Message); }
+        }
+
+        // ===================== 0.9.5：添加手柄部件（折叠选择器，交互与样式照抄上面的 87 键添加器）=====================
+        // 每行一组：ABXY / 肩键 / 扳机 / 摇杆 / 十字键 / 其它；表中字符串格式为「显示名|自定义键名」。
+        // 点一个按钮 = 新增一个自定义键，持久化与键盘自定义键完全一致：
+        //   Custom_<键名> = "1"（存在即显示）、CustomPos_<键名>（错开落位）、CustomSize_<键名> = "52;48"、
+        //   并清掉可能残留的 Deleted_<键名> 删除标记。小组件侧因此自动继承拖动 / 缩放 / 吸附 / 主题 / 布局预设。
+
+        private static readonly string[][] GpPartRows = new string[][]
+        {
+            new[] { "A|Gp_A", "B|Gp_B", "X|Gp_X", "Y|Gp_Y" },
+            new[] { "LB|Gp_LB", "RB|Gp_RB" },
+            new[] { "LT|Gp_LT", "RT|Gp_RT" },
+            new[] { "左摇杆|Gp_LS", "右摇杆|Gp_RS", "L3|Gp_L3", "R3|Gp_R3" },
+            new[] { "十字·上|Gp_DpadUp", "十字·下|Gp_DpadDown", "十字·左|Gp_DpadLeft", "十字·右|Gp_DpadRight" },
+            new[] { "View|Gp_View", "Menu|Gp_Menu", "Guide|Gp_Guide", "电量|Gp_Battery" }
+        };
+
+        private const string GpPartPrefix = "Custom_Gp_";   // 手柄部件用的自定义键前缀
+        private bool _gpPickerBuilt;
+
+        private void GpAddToggle_Click(object sender, TappedRoutedEventArgs e)
+        {
+            try
+            {
+                bool show = GpAddScroll.Visibility != Visibility.Visible;
+                GpAddScroll.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+                GpAddToggleArrow.Text = show ? "\u25B2" : "\u25BC";
+                if (show && !_gpPickerBuilt) BuildGpPartPicker();
+            }
+            catch (Exception ex) { Diag("gamepad picker toggle fail: " + ex.Message); }
+            e.Handled = true;
+        }
+
+        // 按钮宽度：与键盘添加器同一算法，只是中文/全角按两个字宽计（否则「左摇杆」会被挤成一团）
+        private static double GpPartBtnWidth(string s)
+        {
+            int units = 0;
+            foreach (char ch in s) units += (ch >= 0x2E80) ? 2 : 1;
+            if (units <= 2) return 40;
+            if (units <= 4) return 54;
+            return 68;
+        }
+
+        private static string GpPartLabel(string item)
+        {
+            int i = item.IndexOf('|');
+            return i > 0 ? item.Substring(0, i) : item;
+        }
+
+        private static string GpPartKey(string item)
+        {
+            int i = item.IndexOf('|');
+            return i > 0 ? item.Substring(i + 1) : item;
+        }
+
+        private void BuildGpPartPicker()
+        {
+            if (_gpPickerBuilt || GpAddHost == null) return;
+            _gpPickerBuilt = true;
+            try
+            {
+                foreach (var row in GpPartRows)
+                {
+                    var sp = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 0) };
+                    foreach (var item in row)
+                    {
+                        string label = GpPartLabel(item);
+                        var b = new Border
+                        {
+                            Width = GpPartBtnWidth(label),
+                            Height = 28,
+                            CornerRadius = new CornerRadius(4),
+                            BorderThickness = new Thickness(1),
+                            Margin = new Thickness(0, 0, 4, 0),
+                            Tag = item,                     // 「显示名|键名」，点击时再拆
+                            Background = B(_pal.Card2),
+                            BorderBrush = B(_pal.Border)
+                        };
+                        b.Child = new TextBlock
+                        {
+                            Text = label,
+                            FontSize = label.Length <= 3 ? 11 : 10,
+                            Foreground = B(_pal.Text),
+                            HorizontalAlignment = HorizontalAlignment.Center,
+                            VerticalAlignment = VerticalAlignment.Center
+                        };
+                        b.Tapped += GpPartPick_Click;
+                        sp.Children.Add(b);
+                    }
+                    GpAddHost.Children.Add(sp);
+                }
+                Diag("gamepad part picker built");
+            }
+            catch (Exception ex) { Diag("build gamepad part picker fail: " + ex.Message); }
+        }
+
+        // 点击一个部件 → 添加为自定义键（与键盘添加器同一套写入：Custom_ / CustomPos_ / CustomSize_）
+        private void GpPartPick_Click(object sender, TappedRoutedEventArgs e)
+        {
+            var b = sender as Border;
+            if (b == null) { e.Handled = true; return; }
+            string item = b.Tag as string;
+            if (string.IsNullOrEmpty(item)) { e.Handled = true; return; }
+            string label = GpPartLabel(item);
+            string key = GpPartKey(item);
+            try
+            {
+                var v = ApplicationData.Current.LocalSettings.Values;
+                if (v["Custom_" + key] as string == "1")
+                {
+                    GpStatusSet("「" + label + "」已经添加过了");
+                    e.Handled = true;
+                    return;
+                }
+                // 位置：按已有自定义键数量错开排布（避免全部叠在一起）—— 与键盘添加器完全一致
+                int n = 0;
+                foreach (var kv in v) if (kv.Key.StartsWith("Custom_", StringComparison.Ordinal)) n++;
+                double tx = 10 + (n % 10) * 46;
+                double ty = 10 + (n / 10) * 46;
+                v["Custom_" + key] = "1";
+                v["CustomPos_" + key] = tx.ToString(CultureInfo.InvariantCulture) + ";" + ty.ToString(CultureInfo.InvariantCulture);
+                v["CustomSize_" + key] = "52;48";
+                // 这个键以前被删过（存在 Deleted_<键名>）时把删除标记一并清掉，否则小组件仍按"已删除"处理
+                if (v["Deleted_" + key] != null) v.Remove("Deleted_" + key);
+                ApplicationData.Current.SignalDataChanged();
+                GpStatusSet("已添加手柄部件：「" + label + "」（主窗口已同步）");
+                Diag("add gamepad part: " + key);
+            }
+            catch (Exception ex) { Diag("add gamepad part fail: " + ex.Message); }
+            e.Handled = true;
+        }
+
+        // 已经添加过的手柄部件数量（Custom_Gp_* = "1"）
+        private static int CountGpParts()
+        {
+            int n = 0;
+            try
+            {
+                var v = ApplicationData.Current.LocalSettings.Values;
+                foreach (var kv in v)
+                    if (kv.Key.StartsWith(GpPartPrefix, StringComparison.Ordinal)) n++;
+            }
+            catch { }
+            return n;
+        }
+
+        // 手柄部件选择器的主题上色（与 PaintKeyPicker 同一套：折叠开关 + 每个按钮的底/描边/字色）
+        private void PaintGpPartPicker()
+        {
+            try
+            {
+                if (GpAddToggle != null)
+                {
+                    GpAddToggle.Background = B(_pal.Card2);
+                    GpAddToggle.BorderBrush = B(_pal.Border);
+                }
+                if (GpAddToggleText != null) GpAddToggleText.Foreground = B(_pal.Text);
+                if (GpAddToggleArrow != null) GpAddToggleArrow.Foreground = B(_pal.Text);
+                if (!_gpPickerBuilt || GpAddHost == null) return;
+                foreach (var rowObj in GpAddHost.Children)
+                {
+                    var sp = rowObj as StackPanel;
+                    if (sp == null) continue;
+                    foreach (var bObj in sp.Children)
+                    {
+                        var b = bObj as Border;
+                        if (b == null) continue;
+                        b.Background = B(_pal.Card2);
+                        b.BorderBrush = B(_pal.Border);
+                        var tb = b.Child as TextBlock;
+                        if (tb != null) tb.Foreground = B(_pal.Text);
+                    }
+                }
+            }
+            catch { }
+        }
+
+        // 手柄卡片自己的状态行（布局模式切换 / 添加部件后的反馈；LayoutStatus 属于布局卡片，不共用）
+        private void GpStatusSet(string s)
+        {
+            try
+            {
+                if (GpStatus != null)
+                {
+                    GpStatus.Text = s;
+                    GpStatus.Foreground = B(_pal.Accent);
+                }
+                Diag(s);
+            }
+            catch { }
         }
 
         // ===================== 0.9.5：添加按键（87 配列键盘，代码生成）=====================

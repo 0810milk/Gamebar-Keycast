@@ -115,6 +115,12 @@
                          现有键鼠界面一个像素都不变；显隐与按下态由 Widget1.xaml.cs 的 ApplyGamepadState 每帧决定。
                          圆角/描边与既有按键一致（角上的半径按预览：肩键/View/Menu 用 6，十字键 3，扳机条 4）。 -->
                     <Canvas x:Name="GamepadPanel" Visibility="Collapsed" Canvas.Left="208" Canvas.Top="160">
+                        <!-- 1.4：手柄轮廓模板层（组合模式才有；custom 模式整块 Collapsed）。
+                             必须是 GamepadPanel 的第一个子元素 → 渲染在最底层，位于所有部件之下；
+                             IsHitTestVisible=False → 不拦截指针，拖拽/缩放/吸附/右键菜单完全不受影响。
+                             轮廓元素由代码按键位风格（Xbox / PlayStation / Switch）建立为纯描边图形
+                             （Stroke=BorderB()、StrokeThickness=1、Fill=透明），坐标与部件同一套设计单位。 -->
+                        <Canvas x:Name="GamepadTemplatePanel" IsHitTestVisible="False"/>
                         <!-- 电量角标：文字中心 (84,14)（与预览同锚点），按等级显示「电量 低/中/满」 -->
                         <TextBlock x:Name="GpBattery" Text="" FontSize="9" TextAlignment="Center" Width="100"
                                    Canvas.Left="34" Canvas.Top="8"/>

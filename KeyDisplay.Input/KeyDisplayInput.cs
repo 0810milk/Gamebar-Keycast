@@ -456,6 +456,12 @@ internal static class Program
             }
             if (active < 0) active = (int)i;
         }
+        // 连接掩码变化（插入/拔出/掉线）才重扫品牌：不做每帧枚举（枚举有系统调用开销）
+        if (connected != _gpConnectedPrev)
+        {
+            _gpConnectedPrev = connected;
+            Interlocked.Exchange(ref _padRescanPending, 1);
+        }
         int chosen = (_gpActive != 0xFF && (connected & (1 << _gpActive)) != 0) ? _gpActive : active;
         if (active < 0) chosen = -1;
         else if ((connected & (1 << active)) != 0 && _gpActive == 0xFF) _gpActive = active;
@@ -490,6 +496,8 @@ internal static class Program
                 Gamepad[14] = 0xFF; Gamepad[15] = 0xFF;
             }
         }
+        // 品牌重扫在 StateLock 之外执行：枚举是系统调用，不能拖住帧序列化
+        if (Interlocked.Exchange(ref _padRescanPending, 0) != 0) ScanGamepadBrand();
     }
 
     private static bool HasRealInput(XINPUT_GAMEPAD g)
@@ -511,6 +519,249 @@ internal static class Program
         buf[off] = (byte)(v & 0xFF); buf[off + 1] = (byte)((v >> 8) & 0xFF);
         buf[off + 2] = (byte)((v >> 16) & 0xFF); buf[off + 3] = (byte)((v >> 24) & 0xFF);
     }
+
+    // ---------------- 手柄品牌检测（Raw Input 设备枚举） ----------------
+    // 只回答"这台机器上是什么品牌的手柄"：枚举 Raw Input 的 HID 设备，
+    // 先用 usUsagePage/usUsage 挑出摇杆类设备，再从设备路径里的 VID/PID 判品牌。
+    // 结果缓存到 _padBrand/_padVid/_padPid，只在启动与手柄连接状态变化时扫描。
+    // 这段逻辑不参与 76/92 字节帧，失败只记日志并回落 unknown，不影响键鼠/手柄推送。
+    private const uint RIM_TYPEHID = 2;
+    private const uint RIDI_DEVICEINFO = 0x2000000b;
+    private const uint RIDI_DEVICENAME = 0x20000007;
+    private const ushort HID_USAGE_PAGE_GENERIC = 0x01;
+    private const ushort HID_USAGE_JOYSTICK = 0x04;
+    private const ushort HID_USAGE_GAMEPAD = 0x05;
+    private const ushort HID_USAGE_MULTIAXIS = 0x08;
+    private const int VID_MICROSOFT = 0x045E;    // 微软 / Xbox 手柄
+    private const int VID_SONY = 0x054C;         // Sony DualShock / DualSense
+    private const int VID_NINTENDO = 0x057E;     // Nintendo
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RAWINPUTDEVICELIST { public IntPtr hDevice; public uint dwType; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RID_DEVICE_INFO_HID
+    {
+        public uint dwVendorId, dwProductId, dwVersionNumber;
+        public ushort usUsagePage, usUsage;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RID_DEVICE_INFO_KEYBOARD
+    {
+        public uint dwType, dwSubType, dwKeyboardMode, dwNumberOfFunctionKeys, dwNumberOfIndicators, dwNumberOfKeysTotal;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RID_DEVICE_INFO_MOUSE { public uint dwId, dwNumberOfButtons, dwSampleRate, fHasHorizontalWheel; }
+
+    // RID_DEVICE_INFO 的联合体：三种设备类型共用同一块内存
+    [StructLayout(LayoutKind.Explicit)]
+    private struct RID_DEVICE_INFO_UNION
+    {
+        [FieldOffset(0)] public RID_DEVICE_INFO_MOUSE mouse;
+        [FieldOffset(0)] public RID_DEVICE_INFO_KEYBOARD keyboard;
+        [FieldOffset(0)] public RID_DEVICE_INFO_HID hid;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RID_DEVICE_INFO { public uint cbSize, dwType; public RID_DEVICE_INFO_UNION u; }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint GetRawInputDeviceList([Out] RAWINPUTDEVICELIST[] pRawInputDeviceList,
+        ref uint puiNumDevices, uint cbSize);
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode, ExactSpelling = true,
+        EntryPoint = "GetRawInputDeviceInfoW")]
+    private static extern uint GetRawInputDeviceInfoW(IntPtr hDevice, uint uiCommand, IntPtr pData, ref uint pcbSize);
+
+    // 缓存：拿不到一律回落 "unknown" / 0
+    private static string _padBrand = "unknown";
+    private static int _padVid, _padPid;
+    private static bool _padDetected;
+    private static volatile bool _padScanned;    // 是否完成过一次检测（CMD|PAD 首次询问时补扫）
+    private static readonly object PadScanLock = new object();
+    private static byte _gpConnectedPrev;        // 上一轮 PollGamepad 看到的连接掩码
+    private static int _padRescanPending;        // 连接状态变化 → 请求重扫（在 StateLock 之外执行）
+
+    private static void ScanGamepadBrand()
+    {
+        lock (PadScanLock)
+        {
+            try { ScanGamepadBrandCore(); }
+            catch (Exception ex) { Log("手柄品牌检测异常（回落 unknown）: " + ex.Message); }
+        }
+    }
+
+    private static void ScanGamepadBrandCore()
+    {
+        string brand; int vid, pid; ushort usage; string path; int candidates;
+        FindGamepadHid(out brand, out vid, out pid, out usage, out path, out candidates);
+
+        // XInput 兜底：拿不到 VID 时，SubType==1 至少能说明"有标准手柄"
+        bool xinputStd = false;
+        if (vid == 0)
+        {
+            try
+            {
+                for (uint i = 0; i < 4; i++)
+                {
+                    XINPUT_STATE st;
+                    if (XInputGetState(i, out st) != 0) continue;
+                    XINPUT_CAPABILITIES caps;
+                    if (XInputGetCapabilities(i, 0, out caps) == 0 && caps.SubType == 1) xinputStd = true;
+                    break;
+                }
+            }
+            catch (Exception ex) { Log("手柄品牌检测: XInput 兜底异常 " + ex.Message); }
+        }
+
+        bool detected = vid != 0 || xinputStd;
+        string reason;
+        if (vid != 0 && BrandFromVid(vid) != "unknown") reason = "VID 表命中";
+        else if (vid != 0) reason = "设备名关键字命中";
+        else if (xinputStd) reason = "XInput SubType=1 兜底（拿不到 VID）";
+        else if (candidates > 0) reason = "枚举到摇杆类 HID 但无 VID/PID";
+        else reason = "未枚举到摇杆类 HID 设备";
+
+        _padBrand = brand;
+        _padVid = vid;
+        _padPid = pid;
+        _padDetected = detected;
+        _padScanned = true;
+        Log("手柄品牌检测: brand=" + brand + " vid=" + Hex4(vid) + " pid=" + Hex4(pid)
+            + " usage=" + Hex2(usage) + " 理由=" + reason + " hid候选=" + candidates
+            + " detected=" + (detected ? "1" : "0") + (path.Length > 0 ? " path=" + path : ""));
+    }
+
+    // 枚举 Raw Input 设备，挑出摇杆类 HID。任何一步失败都只记日志并回落 unknown，绝不抛出。
+    private static void FindGamepadHid(out string brand, out int vid, out int pid, out ushort usage,
+        out string path, out int candidates)
+    {
+        brand = "unknown"; vid = 0; pid = 0; usage = 0; path = ""; candidates = 0;
+        try
+        {
+            uint unit = (uint)Marshal.SizeOf(typeof(RAWINPUTDEVICELIST));
+            uint count = 0;
+            if (GetRawInputDeviceList(null, ref count, unit) != 0 || count == 0)
+            {
+                Log("手柄品牌检测: 设备数量查询失败 err=" + Marshal.GetLastWin32Error());
+                return;
+            }
+            // 留余量：两次调用之间可能正好插拔了设备
+            RAWINPUTDEVICELIST[] list = new RAWINPUTDEVICELIST[count + 16];
+            uint got = GetRawInputDeviceList(list, ref count, unit);
+            if (got == unchecked((uint)-1))
+            {
+                Log("手柄品牌检测: 设备列表读取失败 err=" + Marshal.GetLastWin32Error());
+                return;
+            }
+            uint infoSize = (uint)Marshal.SizeOf(typeof(RID_DEVICE_INFO));
+            IntPtr infoPtr = Marshal.AllocHGlobal((int)infoSize);
+            try
+            {
+                for (uint i = 0; i < got; i++)
+                {
+                    if (list[i].dwType != RIM_TYPEHID) continue;
+                    Marshal.WriteInt32(infoPtr, (int)infoSize);   // cbSize 必须先填好
+                    uint sz = infoSize;
+                    if (GetRawInputDeviceInfoW(list[i].hDevice, RIDI_DEVICEINFO, infoPtr, ref sz) == unchecked((uint)-1))
+                        continue;
+                    RID_DEVICE_INFO info = (RID_DEVICE_INFO)Marshal.PtrToStructure(infoPtr, typeof(RID_DEVICE_INFO));
+                    if (info.dwType != RIM_TYPEHID) continue;
+                    if (info.u.hid.usUsagePage != HID_USAGE_PAGE_GENERIC) continue;
+                    ushort u = info.u.hid.usUsage;
+                    if (u != HID_USAGE_JOYSTICK && u != HID_USAGE_GAMEPAD && u != HID_USAGE_MULTIAXIS) continue;
+
+                    string devPath = GetRawInputDeviceName(list[i].hDevice);
+                    int dv, dp;
+                    bool fromPath = TryParseVidPid(devPath, out dv, out dp);
+                    if (!fromPath)
+                    {
+                        // 路径里没有 VID_/PID_ 时退回 HID 设备描述里的厂商/产品编号
+                        dv = (int)info.u.hid.dwVendorId;
+                        dp = (int)info.u.hid.dwProductId;
+                    }
+                    string devBrand = BrandFromVid(dv);
+                    if (devBrand == "unknown") devBrand = BrandFromName(devPath);
+                    candidates++;
+                    Log("手柄品牌检测: 候选 HID usage=" + Hex2(u) + " vid=" + Hex4(dv) + " pid=" + Hex4(dp)
+                        + " 来源=" + (fromPath ? "设备路径" : "HID 描述") + " 判定=" + devBrand);
+
+                    // 已命中的品牌不被后面的候选覆盖；第一个候选作为最终兜底
+                    if (vid == 0 || (brand == "unknown" && devBrand != "unknown"))
+                    {
+                        brand = devBrand; vid = dv; pid = dp; usage = u; path = devPath;
+                    }
+                }
+            }
+            finally { Marshal.FreeHGlobal(infoPtr); }
+        }
+        catch (Exception ex) { Log("手柄品牌检测: 枚举异常（回落 unknown） " + ex.Message); }
+    }
+
+    private static string GetRawInputDeviceName(IntPtr hDevice)
+    {
+        try
+        {
+            uint chars = 0;
+            if (GetRawInputDeviceInfoW(hDevice, RIDI_DEVICENAME, IntPtr.Zero, ref chars) == unchecked((uint)-1) || chars == 0)
+                return "";
+            IntPtr p = Marshal.AllocHGlobal((int)chars * 2);
+            try
+            {
+                if (GetRawInputDeviceInfoW(hDevice, RIDI_DEVICENAME, p, ref chars) == unchecked((uint)-1)) return "";
+                return Marshal.PtrToStringUni(p) ?? "";
+            }
+            finally { Marshal.FreeHGlobal(p); }
+        }
+        catch { return ""; }
+    }
+
+    // 设备路径形如 \\?\HID#VID_045E&PID_0B13#...
+    private static bool TryParseVidPid(string path, out int vid, out int pid)
+    {
+        vid = 0; pid = 0;
+        if (string.IsNullOrEmpty(path)) return false;
+        bool okV = TryParseHexTag(path, "VID_", out vid);
+        bool okP = TryParseHexTag(path, "PID_", out pid);
+        return okV && okP;
+    }
+
+    private static bool TryParseHexTag(string s, string tag, out int value)
+    {
+        value = 0;
+        int at = s.IndexOf(tag, StringComparison.OrdinalIgnoreCase);
+        if (at < 0) return false;
+        at += tag.Length;
+        if (at + 4 > s.Length) return false;
+        return int.TryParse(s.Substring(at, 4), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out value);
+    }
+
+    private static string BrandFromVid(int vid)
+    {
+        switch (vid)
+        {
+            case VID_MICROSOFT: return "xbox";
+            case VID_SONY: return "ps";
+            case VID_NINTENDO: return "switch";
+            default: return "unknown";
+        }
+    }
+
+    // VID 不在表里时，再看设备名/路径里的关键字
+    private static string BrandFromName(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return "unknown";
+        if (name.IndexOf("Xbox", StringComparison.OrdinalIgnoreCase) >= 0) return "xbox";
+        if (name.IndexOf("Wireless Controller", StringComparison.OrdinalIgnoreCase) >= 0
+            || name.IndexOf("DualSense", StringComparison.OrdinalIgnoreCase) >= 0
+            || name.IndexOf("DualShock", StringComparison.OrdinalIgnoreCase) >= 0) return "ps";
+        if (name.IndexOf("Pro Controller", StringComparison.OrdinalIgnoreCase) >= 0) return "switch";
+        return "unknown";
+    }
+
+    private static string Hex4(int v) { return "0x" + v.ToString("X4", CultureInfo.InvariantCulture); }
+    private static string Hex2(ushort v) { return "0x" + v.ToString("X2", CultureInfo.InvariantCulture); }
 
     // ---------------- 帧序列化（与 Python 侧逐字节一致） ----------------
     private static byte[] BuildFrame(bool withGamepad)
@@ -699,6 +950,28 @@ internal static class Program
                 + "|rawkeys=" + Interlocked.Read(ref _rawKeyEvents)
                 + "|rawmouse=" + Interlocked.Read(ref _rawMouseEvents)
                 + "|gppolls=" + Interlocked.Read(ref _gpPolls));
+            return;
+        }
+        // 手柄品牌：首次询问前若还没检测过，先补扫一次，再按固定字段回 JSON。
+        // 必须在 ProxyCommand 之前处理，否则会被转发给命令服务。
+        if (rest == "PAD")
+        {
+            try
+            {
+                if (!_padScanned) ScanGamepadBrand();
+                string brand = _padBrand;
+                if (brand != "xbox" && brand != "ps" && brand != "switch") brand = "unknown";
+                bool detected = _padDetected;
+                int vid = detected ? _padVid : 0;
+                int pid = detected ? _padPid : 0;
+                Reply(c, "RESP|DATA|{\"brand\":\"" + brand + "\",\"vid\":\"" + Hex4(vid)
+                    + "\",\"pid\":\"" + Hex4(pid) + "\",\"detected\":" + (detected ? "true" : "false") + "}");
+            }
+            catch (Exception ex)
+            {
+                Log("CMD|PAD 处理失败: " + ex.Message);
+                Reply(c, "RESP|DATA|{\"brand\":\"unknown\",\"vid\":\"0x0000\",\"pid\":\"0x0000\",\"detected\":false}");
+            }
             return;
         }
         // 其余命令（GET_PRESETS / PUT_PRESETS / GET_STATS / SET_OPT / OPEN_URL …）
@@ -915,6 +1188,9 @@ internal static class Program
             return 4;
         }
         Log("Raw Input 已注册（键盘+鼠标，INPUTSINK）");
+
+        // 启动扫一次手柄品牌；之后只在 PollGamepad 发现连接状态变化时重扫
+        ScanGamepadBrand();
 
         Thread fa = new Thread(AcceptLoop); fa.IsBackground = true; fa.Name = "pipe-accept"; fa.Start();
         Thread ff = new Thread(FrameLoop); ff.IsBackground = true; ff.Name = "frame"; ff.Start();
