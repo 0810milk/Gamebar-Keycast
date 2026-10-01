@@ -82,6 +82,7 @@ ClickInstall=单击"安装"开始安装。
 
 [Files]
 Source: "..\KeyDisplay.Companion\dist\KeyDisplayCompanion.exe"; DestDir: "{app}"; Flags: ignoreversion restartreplace
+Source: "..\KeyDisplay.Input\KeyDisplayInput.exe"; DestDir: "{app}"; Flags: ignoreversion restartreplace
 Source: "..\cert\KeyDisplay.cer"; DestDir: "{app}\cert"; Flags: ignoreversion
 Source: "..\dist\KeyDisplay.Install\*.msix"; DestDir: "{app}\appx"; Flags: ignoreversion
 Source: "install-msix.ps1"; DestDir: "{app}"; Flags: ignoreversion
@@ -150,7 +151,14 @@ Filename: "schtasks.exe"; Parameters: "/Create /F /TN ""KeyDisplayCompanionWatch
 ; 安装/更新完成后启动伴生进程（mutex 保证单实例），widget 无需重开即可连接
 Filename: "{app}\{#MyAppExeName}"; Flags: runhidden nowait; StatusMsg: "正在启动数据采集服务..."
 
+; 输入采集：先停掉旧版伴生进程（它占着同名管道），再注册登录任务（最高权限）并启动
+Filename: "powershell.exe"; Parameters: "-NoProfile -Command ""Stop-Process -Name KeyDisplayCompanion -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 600"""; Flags: runhidden waituntilterminated
+Filename: "schtasks.exe"; Parameters: "/Create /F /TN ""KeyDisplayInput"" /SC ONLOGON /RL HIGHEST /TR ""{app}\KeyDisplayInput.exe"""; Flags: runhidden
+Filename: "schtasks.exe"; Parameters: "/Run /TN ""KeyDisplayInput"""; Flags: runhidden
+Filename: "{app}\KeyDisplayInput.exe"; Flags: runhidden nowait
+
 [UninstallRun]
+Filename: "schtasks.exe"; Parameters: "/Delete /F /TN ""KeyDisplayInput"""; Flags: runhidden
 ; 0.8.4/0.9.3：卸载先删除自启与看门狗计划任务（避免残留任务指向已删除的 exe）
 Filename: "schtasks.exe"; Parameters: "/Delete /F /TN ""KeyDisplayCompanion"""; Flags: runhidden
 Filename: "schtasks.exe"; Parameters: "/Delete /F /TN ""KeyDisplayCompanionWatchdog"""; Flags: runhidden

@@ -1,21 +1,18 @@
-新增原生输入接收器 P1（KeyDisplay.Input）：Raw Input 采集骨架，零界面、单实例
+输入接收器接入产品链路：接管小组件管道 + 命令转发 + 安装器集成
 
-- KeyDisplayInput.cs：纯 P/Invoke 的原生采集层骨架。只用 Raw Input（RIDEV_INPUTSINK）
-  接收键盘/鼠标 —— 事件级、无钩子、不存在"因回调超时被系统静默摘除"的失效模式，
-  因此不需要自检/看门狗；GetAsyncKeyState 高速轮询是常开的冗余数据源（两条源按位 OR，
-  谁异常都不影响结果）；按下事件带最小保持锁存（键/鼠标键 60ms、滚轮 150ms），
-  保证 240Hz 采样下任何捕获到的事件都必然可见。
-- 无界面：/target:winexe（子系统 2，实测无控制台黑框）+ 消息专用窗口 HWND_MESSAGE
-  （实测 MainWindowHandle=0，不显示、不进任务栏、不进 Alt+Tab）；日志只写
-  %LOCALAPPDATA%\KeyDisplay\input.log。
-- 单实例（Global 互斥体）、管道支持包 SID ACL（--acl=包族名，供 UWP 小组件连接）。
-- 协议与现有一致：76 字节 v4 帧；CMD|PROTO|92 后改发 92 字节（前 76 字节不变 + 手柄块）；
-  新增 CMD|VERSION（自报版本/权限/RawInput 计数）与 CMD|STATS。
-- tools/input-state-check.py：状态查看器，实时显示 12 内置键、按下的任意键、鼠标、手柄、
-  帧率与按 seq 统计的丢帧数 —— 用于亲眼验证"底层到底收没收到输入"。
-- KeyDisplay.Input/run-test.cmd + 桌面快捷方式：一键在**测试管道**上起接收器并看状态，
-  完全不动现在的小组件/伴生进程链路（管道名不同）。
+- KeyDisplayInput.cs：
+  · 默认管道名 KeyDisplayState（小组件与设置窗口无需任何改动即可连接），
+    默认放行小组件 UWP 包 SID（已实测 ACL 附加成功：S-1-15-2-206734977-…）；
+  · 未实现的命令（GET_PRESETS/PUT_PRESETS/GET_STATS/SET_OPT/OPEN_URL）
+    转发给命令服务（Python 伴生进程，管道 KeyDisplayCmd）并回传应答；
+  · 只有首个管道实例带 FILE_FLAG_FIRST_PIPE_INSTANCE（带上后续实例会 err=5 起不来）；
+  · 异常保护：ACL 构建失败只记日志并退回默认 ACL，不再让进程静默崩溃；
+    DeriveAppContainerSidFromAppContainerName 无 W 后缀（带上会找不到入口点）。
+- Python 伴生进程：管道名默认改为 KeyDisplayCmd（可用 KD_PIPE_NAME 覆盖）——
+  它从此只做命令服务，输入采集交给接收器。
+- setup.iss：安装时先停旧版伴生进程（它占着同名管道）、部署 KeyDisplayInput.exe、
+  注册登录任务（/RL HIGHEST 最高权限）并立刻启动当前会话实例；卸载时删除该任务。
+- tools/input-state-check.py：修 ctypes 句柄声明（64 位句柄溢出会让查看器连不上正式管道）。
 
-实测（P1 验收）：exe 20.5 KB、子系统=GUI、内存 21.5MB、单实例生效、76 字节帧字段正确
-（magic/ver/seq/QPC 纳秒时间戳/虚拟屏/光标）、PROTO|92 正常、rawmouse 计数证明 Raw Input
-确实在收事件、seq 每帧 +1 无丢帧。
+实测：ACL 生效、多客户端连续连接正常（无 err=5）、帧 seq 连续不丢、查看器在正式管道下
+读到版本/键位/鼠标/帧率。

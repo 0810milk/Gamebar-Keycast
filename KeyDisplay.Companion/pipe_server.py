@@ -22,7 +22,7 @@ from hooks import reconcile, sync_mouse_position, raw_stats, expire_wheel
 from state import SNAPSHOT_SIZE, SNAPSHOT_SIZE_V5, VERSION
 
 
-PIPE_NAME = r"\\.\pipe\KeyDisplayState"
+PIPE_NAME = os.environ.get("KD_PIPE_NAME") or r"\\.\pipe\KeyDisplayCmd"
 
 # 虚拟屏幕度量索引（与 GetSystemMetrics 常量一致）
 SM_XVIRTUALSCREEN = 76

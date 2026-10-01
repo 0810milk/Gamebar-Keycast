@@ -34,7 +34,8 @@ internal static class Program
     // ---------------- 配置 ----------------
     internal static string PipeName = "KeyDisplayState";
     internal static int PushHz = 240;
-    internal static string AclFamilyName = null;
+    // 生产默认：小组件所在 UWP 包的族名。管道 ACL 必须放行它，否则 Game Bar 里连不上。
+    internal static string AclFamilyName = "KeyDisplay.Widget_hdjf4fqmxxv8g";
     internal static int LatchMs = 60;
     internal static int WheelLatchMs = 150;
     internal static int PollSweepPerTick = 64;     // 每 tick 轮询 64 个 VK → 4 tick 扫完 256
@@ -146,6 +147,8 @@ internal static class Program
     private const uint PIPE_READMODE_MESSAGE = 0x00000002;
     private const uint PIPE_WAIT = 0x00000000;
     private const uint PIPE_UNLIMITED_INSTANCES = 255;
+    private const uint FILE_FLAG_FIRST_PIPE_INSTANCE = 0x00080000;
+    private static bool _firstInstance = true;   // 只有第一个实例能带 FIRST_PIPE_INSTANCE   // 首实例独占：名字被别的服务占用时明确失败
     private const uint PIPE_NOWAIT = 0x00000001;
     private const int ERROR_PIPE_CONNECTED = 535;
     private const int ERROR_BROKEN_PIPE = 109;
@@ -177,7 +180,7 @@ internal static class Program
     [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern bool ConvertSidToStringSidW(IntPtr sid, out IntPtr str);
     [DllImport("userenv.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    private static extern int DeriveAppContainerSidFromAppContainerNameW(string name, out IntPtr sid);
+    private static extern int DeriveAppContainerSidFromAppContainerName(string name, out IntPtr sid);
     [DllImport("kernel32.dll")] private static extern IntPtr LocalFree(IntPtr h);
 
     // ---------------- P/Invoke：XInput ----------------
@@ -540,17 +543,22 @@ internal static class Program
         sec.nLength = (uint)Marshal.SizeOf(typeof(SECURITY_ATTRIBUTES));
         sec.bInheritHandle = false;
         sec.lpSecurityDescriptor = IntPtr.Zero;
+        try
+        {
         if (!string.IsNullOrEmpty(AclFamilyName))
         {
             IntPtr pkgSid;
-            if (DeriveAppContainerSidFromAppContainerNameW(AclFamilyName, out pkgSid) == 0)
+            if (DeriveAppContainerSidFromAppContainerName(AclFamilyName, out pkgSid) == 0)
             {
                 IntPtr sidStr;
                 if (ConvertSidToStringSidW(pkgSid, out sidStr))
                 {
                     string sid = Marshal.PtrToStringUni(sidStr);
                     LocalFree(sidStr);
-                    string sddl = "D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;" + sid + ")";
+                    string userSid = "";
+                    try { userSid = System.Security.Principal.WindowsIdentity.GetCurrent().User.Value; } catch { }
+                    string sddl = "D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;" + sid + ")"
+                        + (userSid.Length > 0 ? "(A;;GA;;;" + userSid + ")" : "");
                     uint sz;
                     if (ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, 1, out sd, out sz))
                     {
@@ -564,14 +572,22 @@ internal static class Program
             else Log("派生包 SID 失败 err=" + Marshal.GetLastWin32Error());
         }
 
+        }
+        catch (Exception exa) { Log("ACL 构建异常（将退回默认 ACL）: " + exa.Message); }
+
         while (true)
         {
-            IntPtr h = CreateNamedPipeW(@"\\.\pipe\" + PipeName, PIPE_ACCESS_DUPLEX,
+            // 只有首个实例带 FIRST_PIPE_INSTANCE；后续实例再带它会把自己挡在门外（err=5）
+            uint openMode = PIPE_ACCESS_DUPLEX | (_firstInstance ? FILE_FLAG_FIRST_PIPE_INSTANCE : 0u);
+            _firstInstance = false;
+            IntPtr h = CreateNamedPipeW(@"\\.\pipe\" + PipeName, openMode,
                 PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT, PIPE_UNLIMITED_INSTANCES,
                 8192, 8192, 0, ref sec);
             if (h == IntPtr.Zero || h.ToInt64() == -1)
             {
-                Log("CreateNamedPipe 失败 err=" + Marshal.GetLastWin32Error());
+                int perr = Marshal.GetLastWin32Error();
+                Log("CreateNamedPipe 失败 err=" + perr
+                    + (perr == 5 ? "（管道名已被另一个服务占用：多半是旧版伴生进程还在跑，等它退出后会自动重试）" : ""));
                 Thread.Sleep(1000);
                 continue;
             }
@@ -655,15 +671,52 @@ internal static class Program
                 + "|rawmouse=" + Interlocked.Read(ref _rawMouseEvents));
             return;
         }
-        if (rest == "STATS")
+        // 其余命令（GET_PRESETS / PUT_PRESETS / GET_STATS / SET_OPT / OPEN_URL …）
+        // 一律转发给命令服务（Python 伴生进程，管道 KeyDisplayCmd），
+        // 这样小组件与设置窗口**完全不用改动**。
+        ProxyCommand(c, text);
+    }
+
+    private const uint GENERIC_READ_W = 0x80000000, GENERIC_WRITE_W = 0x40000000, OPEN_EXISTING_W = 3;
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern IntPtr CreateFileW(string name, uint access, uint share, IntPtr sec,
+        uint disposition, uint flags, IntPtr template);
+
+    private static readonly string CommandPipe = @"\\.\pipe\KeyDisplayCmd";
+
+    private static void ProxyCommand(Client c, string text)
+    {
+        IntPtr h = CreateFileW(CommandPipe, GENERIC_READ_W | GENERIC_WRITE_W, 0, IntPtr.Zero,
+            OPEN_EXISTING_W, 0, IntPtr.Zero);
+        if (h == IntPtr.Zero || h.ToInt64() == -1)
         {
-            Reply(c, "RESP|DATA|{\"version\":\"" + Version + "\",\"frames\":" + Interlocked.Read(ref _frames)
-                + ",\"rawKeyEvents\":" + Interlocked.Read(ref _rawKeyEvents)
-                + ",\"rawMouseEvents\":" + Interlocked.Read(ref _rawMouseEvents)
-                + ",\"clients\":" + _clientCount + ",\"elevated\":" + (IsElevated() ? "true" : "false") + "}");
+            Reply(c, "RESP|ERR|command service unavailable（命令服务未运行）");
             return;
         }
-        Reply(c, "RESP|ERR|unsupported:" + rest);
+        try
+        {
+            uint mode = PIPE_READMODE_MESSAGE;
+            SetNamedPipeHandleState(h, ref mode, IntPtr.Zero, IntPtr.Zero);
+            byte[] b = Encoding.UTF8.GetBytes(text);
+            uint written;
+            if (!WriteFile(h, b, (uint)b.Length, out written, IntPtr.Zero))
+            {
+                Reply(c, "RESP|ERR|写命令服务失败");
+                return;
+            }
+            byte[] buf = new byte[262144];
+            uint read;
+            if (!ReadFile(h, buf, (uint)buf.Length, out read, IntPtr.Zero))
+            {
+                Reply(c, "RESP|ERR|命令服务无应答");
+                return;
+            }
+            byte[] reply = new byte[read];
+            Buffer.BlockCopy(buf, 0, reply, 0, (int)read);
+            uint w2;
+            WriteFile(c.Handle, reply, (uint)reply.Length, out w2, IntPtr.Zero);
+        }
+        finally { CloseHandle(h); }
     }
 
     private static void Reply(Client c, string text)
@@ -742,6 +795,7 @@ internal static class Program
             return 1;
         }
 
+        AppDomain.CurrentDomain.UnhandledException += (s, e) => Log("未处理异常: " + e.ExceptionObject);
         Log("启动: version=" + Version + " pipe=" + PipeName + " hz=" + PushHz
             + " elevated=" + (IsElevated() ? "1" : "0") + " latch=" + LatchMs + "ms");
 

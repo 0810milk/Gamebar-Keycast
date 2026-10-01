@@ -22,6 +22,17 @@ k32.CreateFileW.argtypes = [wt.LPCWSTR, wt.DWORD, wt.DWORD, ctypes.c_void_p,
 GENERIC_READ, GENERIC_WRITE, OPEN_EXISTING = 0x80000000, 0x40000000, 3
 PIPE_READMODE_MESSAGE = 0x02
 
+# 关键：显式声明 argtypes，否则 64 位句柄会被 ctypes 当成 32 位整数而溢出
+k32.SetNamedPipeHandleState.argtypes = [wt.HANDLE, ctypes.POINTER(wt.DWORD),
+                                        ctypes.POINTER(wt.DWORD), ctypes.POINTER(wt.DWORD)]
+k32.SetNamedPipeHandleState.restype = wt.BOOL
+k32.ReadFile.argtypes = [wt.HANDLE, ctypes.c_void_p, wt.DWORD,
+                         ctypes.POINTER(wt.DWORD), ctypes.c_void_p]
+k32.ReadFile.restype = wt.BOOL
+k32.WriteFile.argtypes = [wt.HANDLE, ctypes.c_void_p, wt.DWORD,
+                          ctypes.POINTER(wt.DWORD), ctypes.c_void_p]
+k32.WriteFile.restype = wt.BOOL
+
 BUILTIN = [("Q", 0x51), ("W", 0x57), ("E", 0x45), ("R", 0x52),
            ("A", 0x41), ("S", 0x53), ("D", 0x44), ("F", 0x46),
            ("Shift", 0x10), ("Ctrl", 0x11), ("Alt", 0x12), ("Space", 0x20)]
