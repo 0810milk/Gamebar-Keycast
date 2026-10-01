@@ -1,11 +1,21 @@
-伴生进程更新器重写：自校验 + 留日志（不再需要跑整个安装包）
+新增原生输入接收器 P1（KeyDisplay.Input）：Raw Input 采集骨架，零界面、单实例
 
-旧版 tools\更新伴生进程.cmd 用一大段内联 PowerShell，失败时窗口一闪而过、
-看不到任何原因；而小组件用的伴生进程装在 Program Files 且以管理员权限常驻，
-普通权限既杀不掉也覆盖不了，所以更新失败时表现就是"小组件里手柄一直不出现"。
+- KeyDisplayInput.cs：纯 P/Invoke 的原生采集层骨架。只用 Raw Input（RIDEV_INPUTSINK）
+  接收键盘/鼠标 —— 事件级、无钩子、不存在"因回调超时被系统静默摘除"的失效模式，
+  因此不需要自检/看门狗；GetAsyncKeyState 高速轮询是常开的冗余数据源（两条源按位 OR，
+  谁异常都不影响结果）；按下事件带最小保持锁存（键/鼠标键 60ms、滚轮 150ms），
+  保证 240Hz 采样下任何捕获到的事件都必然可见。
+- 无界面：/target:winexe（子系统 2，实测无控制台黑框）+ 消息专用窗口 HWND_MESSAGE
+  （实测 MainWindowHandle=0，不显示、不进任务栏、不进 Alt+Tab）；日志只写
+  %LOCALAPPDATA%\KeyDisplay\input.log。
+- 单实例（Global 互斥体）、管道支持包 SID ACL（--acl=包族名，供 UWP 小组件连接）。
+- 协议与现有一致：76 字节 v4 帧；CMD|PROTO|92 后改发 92 字节（前 76 字节不变 + 手柄块）；
+  新增 CMD|VERSION（自报版本/权限/RawInput 计数）与 CMD|STATS。
+- tools/input-state-check.py：状态查看器，实时显示 12 内置键、按下的任意键、鼠标、手柄、
+  帧率与按 seq 统计的丢帧数 —— 用于亲眼验证"底层到底收没收到输入"。
+- KeyDisplay.Input/run-test.cmd + 桌面快捷方式：一键在**测试管道**上起接收器并看状态，
+  完全不动现在的小组件/伴生进程链路（管道名不同）。
 
-- tools\update-companion.ps1（新）：非管理员时自己提权；结束伴生进程（重试 +
-  taskkill 兜底）；复制后比对文件大小校验；重启；全程写入
-  %TEMP%\keydisplay-companion-update.log；结束前暂停以便看到结果。
-  另加 -Check 只读模式（不提权、不改动），输出源/目标时间戳与是否需要更新。
-- tools\更新伴生进程.cmd：改为纯 ASCII 的一行启动器，避免中文批处理的编码坑。
+实测（P1 验收）：exe 20.5 KB、子系统=GUI、内存 21.5MB、单实例生效、76 字节帧字段正确
+（magic/ver/seq/QPC 纳秒时间戳/虚拟屏/光标）、PROTO|92 正常、rawmouse 计数证明 Raw Input
+确实在收事件、seq 每帧 +1 无丢帧。
