@@ -1,18 +1,10 @@
-输入接收器接入产品链路：接管小组件管道 + 命令转发 + 安装器集成
+修复鼠标移动卡顿：坐标改为每 tick 读真值 + Raw Input 增量补位 + 循环不再空转
 
-- KeyDisplayInput.cs：
-  · 默认管道名 KeyDisplayState（小组件与设置窗口无需任何改动即可连接），
-    默认放行小组件 UWP 包 SID（已实测 ACL 附加成功：S-1-15-2-206734977-…）；
-  · 未实现的命令（GET_PRESETS/PUT_PRESETS/GET_STATS/SET_OPT/OPEN_URL）
-    转发给命令服务（Python 伴生进程，管道 KeyDisplayCmd）并回传应答；
-  · 只有首个管道实例带 FILE_FLAG_FIRST_PIPE_INSTANCE（带上后续实例会 err=5 起不来）；
-  · 异常保护：ACL 构建失败只记日志并退回默认 ACL，不再让进程静默崩溃；
-    DeriveAppContainerSidFromAppContainerName 无 W 后缀（带上会找不到入口点）。
-- Python 伴生进程：管道名默认改为 KeyDisplayCmd（可用 KD_PIPE_NAME 覆盖）——
-  它从此只做命令服务，输入采集交给接收器。
-- setup.iss：安装时先停旧版伴生进程（它占着同名管道）、部署 KeyDisplayInput.exe、
-  注册登录任务（/RL HIGHEST 最高权限）并立刻启动当前会话实例；卸载时删除该任务。
-- tools/input-state-check.py：修 ctypes 句柄声明（64 位句柄溢出会让查看器连不上正式管道）。
-
-实测：ACL 生效、多客户端连续连接正常（无 err=5）、帧 seq 连续不丢、查看器在正式管道下
-读到版本/键位/鼠标/帧率。
+- 原因一：鼠标坐标被写在 `if (tick % 8 == 0)` 里 —— 240Hz 推送下等于只有 30Hz 更新，
+  鼠标点必然一顿一顿。现在每个 tick 都读 GetCursorPos（240Hz，该调用极便宜）。
+- 原因二：两次真值之间没有运动信息。现在 RAWMOUSE 的相对增量（usFlags 非 ABSOLUTE）
+  立即累加进坐标，使两次 tick 之间也在动；下一次 tick 用真值覆盖，因此不会累积漂移。
+- 原因三：帧循环与客户端循环用 Thread.Sleep(0) 空转（白烧一个核）。改为 Sleep(1)，
+  配合 timeBeginPeriod(1) 抖动仍在 1ms 内，空闲 CPU 降到接近零。
+- 实测：程序化移动真实光标 200 次，1.2 秒内收到的帧中坐标变化 ≥100 个，
+  确认不再是 30Hz。

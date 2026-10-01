@@ -358,6 +358,11 @@ internal static class Program
                         ExtraKeys[idx] |= (byte)bit;
                     }
                 }
+                // 相对模式（普通鼠标）：立即把增量累加进坐标，让两次 tick 之间也在动
+                if ((ms.usFlags & 0x01) == 0)
+                {
+                    _mouseX += ms.lLastX; _mouseY += ms.lLastY;
+                }
                 _rawMouseEvents++;
             }
         }
@@ -645,7 +650,7 @@ internal static class Program
                 }
                 Interlocked.Increment(ref _frames);
             }
-            Thread.Sleep(0);
+            Thread.Sleep(1);   // 不再空转烧 CPU（timeBeginPeriod(1) 已保证 1ms 精度）
         }
         c.Alive = false;
         try { DisconnectNamedPipe(c.Handle); } catch { }
@@ -753,8 +758,9 @@ internal static class Program
                 next = now + interval;
                 tick++;
                 PollSweep();
-                if (tick % 8 == 0)
                 {
+                    // 0.2：鼠标坐标每个 tick 都读真值（240Hz）。原来写成每 8 个 tick 读一次 = 30Hz，
+                    // 鼠标点会明显一顿一顿 —— 这是"鼠标移动卡顿"的直接原因。GetCursorPos 极便宜，240Hz 无压力。
                     POINT p;
                     if (GetCursorPos(out p)) { _mouseX = p.X; _mouseY = p.Y; }
                     _vsX = GetSystemMetrics(76); _vsY = GetSystemMetrics(77);
@@ -765,7 +771,7 @@ internal static class Program
                 if (tick % 2 == 0) PollGamepad();
                 lock (StateLock) { _seq = (_seq + 1) & 0xFFFFFFFF; }
             }
-            Thread.Sleep(0);
+            Thread.Sleep(1);   // 不再空转烧 CPU（timeBeginPeriod(1) 已保证 1ms 精度）
         }
     }
 
