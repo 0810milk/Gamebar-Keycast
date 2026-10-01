@@ -4503,7 +4503,7 @@ namespace KeyDisplay
                 string tpl = GpTemplateStyle();
                 if (_gpTemplateStyle != tpl)
                 {
-                    BuildGamepadTemplate(tpl);
+                    GpOutlineBuild(tpl);
                     _gpTemplateStyle = tpl;
                 }
                 GpPaintTemplate(_latest);   // 配色 + 按下高亮（幂等写，随主题/快照刷新）
