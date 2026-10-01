@@ -23,7 +23,7 @@
             <StackPanel Padding="10,18,10,10">
                 <TextBlock x:Name="NavTitle" Text="设置" FontSize="20" FontWeight="SemiBold" Margin="10,0,0,14"/>
                 <Border x:Name="NavTheme" Height="38" CornerRadius="6" Margin="0,2" Tag="theme" Tapped="Nav_Click">
-                    <TextBlock x:Name="NavThemeText" Text="主题" FontSize="14" Margin="12,0,0,0" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                    <TextBlock x:Name="NavThemeText" Text="通用" FontSize="14" Margin="12,0,0,0" VerticalAlignment="Center" HorizontalAlignment="Left"/>
                 </Border>
                 <Border x:Name="NavAdv" Height="38" CornerRadius="6" Margin="0,2" Tag="adv" Tapped="Nav_Click">
                     <TextBlock x:Name="NavAdvText" Text="参数" FontSize="14" Margin="12,0,0,0" VerticalAlignment="Center" HorizontalAlignment="Left"/>
@@ -37,9 +37,6 @@
                 <Border x:Name="NavLayout" Height="38" CornerRadius="6" Margin="0,2" Tag="layout" Tapped="Nav_Click">
                     <TextBlock x:Name="NavLayoutText" Text="布局" FontSize="14" Margin="12,0,0,0" VerticalAlignment="Center" HorizontalAlignment="Left"/>
                 </Border>
-                <Border x:Name="NavPreset" Height="38" CornerRadius="6" Margin="0,2" Tag="preset" Tapped="Nav_Click">
-                    <TextBlock x:Name="NavPresetText" Text="预设" FontSize="14" Margin="12,0,0,0" VerticalAlignment="Center" HorizontalAlignment="Left"/>
-                </Border>
                 <Border x:Name="NavAbout" Height="38" CornerRadius="6" Margin="0,2" Tag="about" Tapped="Nav_Click">
                     <TextBlock x:Name="NavAboutText" Text="关于" FontSize="14" Margin="12,0,0,0" VerticalAlignment="Center" HorizontalAlignment="Left"/>
                 </Border>
@@ -50,7 +47,7 @@
         <Grid Grid.Column="1">
             <ScrollViewer Padding="24,18,24,18" VerticalScrollBarVisibility="Auto">
                 <StackPanel>
-                    <TextBlock x:Name="PageTitle" Text="主题" FontSize="22" FontWeight="SemiBold"/>
+                    <TextBlock x:Name="PageTitle" Text="通用" FontSize="22" FontWeight="SemiBold"/>
                     <TextBlock x:Name="PageDesc" Text="选择配色方案" FontSize="12" Opacity="0.7" Margin="0,4,0,0"/>
 
                     <!-- 主题 -->
@@ -75,14 +72,58 @@
                                 </Grid>
                             </StackPanel>
                         </Border>
+
+                        <!-- 预设（0.9.5：原为独立导航页，现并入「通用」页，紧跟在主题选择之后；控件与事件处理器原样保留） -->
+                        <Border x:Name="PresetCard" CornerRadius="8" BorderThickness="1" Padding="16" Margin="0,18,0,0">
+                            <StackPanel>
+                                <TextBlock x:Name="PresetCardTitle" Text="预设" FontSize="15" FontWeight="SemiBold"/>
+                                <TextBlock x:Name="PresetCardDesc" Text="把当前的主题配色 / 布局保存为预设，随时一键套用。预设文件保存在 %LOCALAPPDATA%\KeyDisplay\presets.json。" FontSize="12" Opacity="0.7" Margin="0,6,0,0" TextWrapping="Wrap"/>
+
+                                <!-- 0.9.5：导入按钮放在卡片最上方（原来在最底部，窗口一矮就滚出可视区，用户以为"没有这个按钮"）
+                                     左：从剪贴板导入（粘贴别人发来的 JSON）；右：文件导入（选 .json 文件） -->
+                                <Grid Margin="0,14,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/><ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Button x:Name="ImportClipboardBtn" Grid.Column="0" Height="32" Margin="0,0,4,0" HorizontalAlignment="Stretch"
+                                            FontSize="12" Content="从剪贴板导入" Click="ImportPreset_Click"/>
+                                    <Button x:Name="ImportFileBtn" Grid.Column="1" Height="32" Margin="4,0,0,0" HorizontalAlignment="Stretch"
+                                            FontSize="12" Content="文件导入" Click="ImportPresetFromFile_Click"/>
+                                </Grid>
+                                <TextBlock x:Name="PresetIoHint" Text="导入：左边粘贴别人发来的 JSON 文本，右边选择 .json 预设文件。每条预设右侧可「导出至粘贴板」或「导出」成 .json 文件。" FontSize="12" Opacity="0.7" Margin="0,6,0,0" TextWrapping="Wrap"/>
+
+                                <!-- 状态/反馈紧跟操作区，任何操作都在这里立刻回显 -->
+                                <TextBlock x:Name="PresetStatus" Text="" FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap"/>
+
+                                <TextBlock x:Name="PresetNameLbl" Text="预设名称" FontSize="13" Margin="0,16,0,0"/>
+                                <TextBox x:Name="PresetNameBox" FontSize="13" Margin="0,6,0,0" PlaceholderText="例如：我的配置"/>
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/><ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Button x:Name="SaveThemePresetBtn" Grid.Column="0" Height="32" Margin="0,0,4,0" HorizontalAlignment="Stretch"
+                                            Content="保存当前主题" Click="SaveThemePreset_Click"/>
+                                    <Button x:Name="SaveLayoutPresetBtn" Grid.Column="1" Height="32" Margin="4,0,0,0" HorizontalAlignment="Stretch"
+                                            Content="保存当前布局" Click="SaveLayoutPreset_Click"/>
+                                </Grid>
+
+
+
+                                <TextBlock x:Name="ThemePresetLbl" Text="主题预设" FontSize="13" Margin="0,18,0,0"/>
+                                <StackPanel x:Name="ThemePresetList" Margin="0,6,0,0"/>
+                                <TextBlock x:Name="LayoutPresetLbl" Text="布局预设" FontSize="13" Margin="0,16,0,0"/>
+                                <StackPanel x:Name="LayoutPresetList" Margin="0,6,0,0"/>
+
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
 
-                    <!-- 参数（0.9.5：底层实测数据 + 无害开关 + 改不了项的入口） -->
+                    <!-- 参数（0.9.5：底层实测数据 + 频率调整 + 改不了项的入口） -->
                     <StackPanel x:Name="SecAdv" Visibility="Collapsed" Margin="0,18,0,0">
                         <Border x:Name="AdvSwitchCard" CornerRadius="8" BorderThickness="1" Padding="16" Margin="0,14,0,0">
                             <StackPanel>
-                                <TextBlock x:Name="AdvSwitchTitle" Text="无害开关" FontSize="15" FontWeight="SemiBold"/>
-                                <TextBlock x:Name="AdvSwitchDesc" Text="只影响本工具自身（以及系统的「提高指针精确度」），不会改动任何游戏设置。" FontSize="12" Opacity="0.7" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                                <TextBlock x:Name="AdvSwitchTitle" Text="频率调整" FontSize="15" FontWeight="SemiBold"/>
+                                <TextBlock x:Name="AdvSwitchDesc" Text="只影响本工具自身，不会改动任何游戏设置。" FontSize="12" Opacity="0.7" Margin="0,4,0,0" TextWrapping="Wrap"/>
 
                                 <TextBlock x:Name="AdvPushLbl" Text="推送频率（状态刷新上限）" FontSize="13" Margin="0,14,0,0"/>
                                 <!-- 0.9.5：回报率由固定档位按钮改为三个独立滑条（键盘 / 鼠标 / 手柄），
@@ -133,13 +174,6 @@
                                     </Grid.ColumnDefinitions>
                                     <TextBlock x:Name="AdvLowLatLbl" Grid.Column="0" Text="低延迟模式（进程优先级 + 1ms 定时器精度）" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap"/>
                                     <Button x:Name="AdvLowLatBtn" Grid.Column="1" MinWidth="88" Height="32" Content="开" Click="AdvLowLat_Click"/>
-                                </Grid>
-                                <Grid Margin="0,10,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock x:Name="AdvAccelLbl" Grid.Column="0" Text="鼠标加速（系统的「提高指针精确度」）" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap"/>
-                                    <Button x:Name="AdvAccelBtn" Grid.Column="1" MinWidth="88" Height="32" Content="关" Click="AdvAccel_Click"/>
                                 </Grid>
 
                                 <!-- 操作反馈行（原来在实测数据卡里，现在跟着开关走） -->
@@ -452,52 +486,6 @@
                                 </StackPanel>
                             </Border>
                         </StackPanel>
-                    </StackPanel>
-
-                    <!-- 预设 -->
-                    <StackPanel x:Name="SecPreset" Visibility="Collapsed" Margin="0,18,0,0">
-                        <Border x:Name="PresetCard" CornerRadius="8" BorderThickness="1" Padding="16">
-                            <StackPanel>
-                                <TextBlock x:Name="PresetCardTitle" Text="预设" FontSize="15" FontWeight="SemiBold"/>
-                                <TextBlock x:Name="PresetCardDesc" Text="把当前的主题配色 / 布局保存为预设，随时一键套用。预设文件保存在 %LOCALAPPDATA%\KeyDisplay\presets.json。" FontSize="12" Opacity="0.7" Margin="0,6,0,0" TextWrapping="Wrap"/>
-
-                                <!-- 0.9.5：导入按钮放在卡片最上方（原来在最底部，窗口一矮就滚出可视区，用户以为"没有这个按钮"）
-                                     左：从剪贴板导入（粘贴别人发来的 JSON）；右：文件导入（选 .json 文件） -->
-                                <Grid Margin="0,14,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/><ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
-                                    <Button x:Name="ImportClipboardBtn" Grid.Column="0" Height="32" Margin="0,0,4,0" HorizontalAlignment="Stretch"
-                                            FontSize="12" Content="从剪贴板导入" Click="ImportPreset_Click"/>
-                                    <Button x:Name="ImportFileBtn" Grid.Column="1" Height="32" Margin="4,0,0,0" HorizontalAlignment="Stretch"
-                                            FontSize="12" Content="文件导入" Click="ImportPresetFromFile_Click"/>
-                                </Grid>
-                                <TextBlock x:Name="PresetIoHint" Text="导入：左边粘贴别人发来的 JSON 文本，右边选择 .json 预设文件。每条预设右侧可「导出至粘贴板」或「导出」成 .json 文件。" FontSize="12" Opacity="0.7" Margin="0,6,0,0" TextWrapping="Wrap"/>
-
-                                <!-- 状态/反馈紧跟操作区，任何操作都在这里立刻回显 -->
-                                <TextBlock x:Name="PresetStatus" Text="" FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap"/>
-
-                                <TextBlock x:Name="PresetNameLbl" Text="预设名称" FontSize="13" Margin="0,16,0,0"/>
-                                <TextBox x:Name="PresetNameBox" FontSize="13" Margin="0,6,0,0" PlaceholderText="例如：我的配置"/>
-                                <Grid Margin="0,10,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/><ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
-                                    <Button x:Name="SaveThemePresetBtn" Grid.Column="0" Height="32" Margin="0,0,4,0" HorizontalAlignment="Stretch"
-                                            Content="保存当前主题" Click="SaveThemePreset_Click"/>
-                                    <Button x:Name="SaveLayoutPresetBtn" Grid.Column="1" Height="32" Margin="4,0,0,0" HorizontalAlignment="Stretch"
-                                            Content="保存当前布局" Click="SaveLayoutPreset_Click"/>
-                                </Grid>
-
-
-
-                                <TextBlock x:Name="ThemePresetLbl" Text="主题预设" FontSize="13" Margin="0,18,0,0"/>
-                                <StackPanel x:Name="ThemePresetList" Margin="0,6,0,0"/>
-                                <TextBlock x:Name="LayoutPresetLbl" Text="布局预设" FontSize="13" Margin="0,16,0,0"/>
-                                <StackPanel x:Name="LayoutPresetList" Margin="0,6,0,0"/>
-
-                            </StackPanel>
-                        </Border>
                     </StackPanel>
 
                     <!-- 关于 -->

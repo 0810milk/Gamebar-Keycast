@@ -300,7 +300,7 @@ namespace KeyDisplay
                 card.BorderBrush = B(_pal.Border);
             }
             AvatarFrame.BorderBrush = B(_pal.Border);
-            PresetStatus.Foreground = B(_pal.Accent);   // 预设页状态与反馈用强调色，保证一眼看到
+            PresetStatus.Foreground = B(_pal.Accent);   // 预设区状态与反馈用强调色，保证一眼看到
             AddKeyToggle.Background = B(_pal.Card2);
             AddKeyToggle.BorderBrush = B(_pal.Border);
 
@@ -707,7 +707,7 @@ namespace KeyDisplay
         {
             var v = ApplicationData.Current.LocalSettings.Values;
             string theme = (v["Theme"] as string) ?? "dark";
-            foreach (var b in new Border[] { NavTheme, NavAdv, NavColor, NavFont, NavLayout, NavPreset, NavAbout })
+            foreach (var b in new Border[] { NavTheme, NavAdv, NavColor, NavFont, NavLayout, NavAbout })
             {
                 bool sel = (b.Tag as string) == _section;
                 b.Background = sel ? B(_pal.Accent) : B(Colors.Transparent);
@@ -735,17 +735,15 @@ namespace KeyDisplay
             SecColor.Visibility = section == "color" ? Visibility.Visible : Visibility.Collapsed;
             SecFont.Visibility = section == "font" ? Visibility.Visible : Visibility.Collapsed;
             SecLayout.Visibility = section == "layout" ? Visibility.Visible : Visibility.Collapsed;
-            SecPreset.Visibility = section == "preset" ? Visibility.Visible : Visibility.Collapsed;
             SecAbout.Visibility = section == "about" ? Visibility.Visible : Visibility.Collapsed;
 
             switch (section)
             {
-                case "theme": PageTitle.Text = "主题"; PageDesc.Text = "选择配色方案"; break;
-                case "adv": PageTitle.Text = "参数"; PageDesc.Text = "底层实测数据与无害开关（不改动游戏设置）"; break;
+                case "theme": PageTitle.Text = "通用"; PageDesc.Text = "选择配色方案"; break;
+                case "adv": PageTitle.Text = "参数"; PageDesc.Text = "底层实测数据与频率调整（不改动游戏设置）"; break;
                 case "color": PageTitle.Text = "颜色"; PageDesc.Text = "自定义颜色（9 个色槽，含强调色）"; break;
                 case "font": PageTitle.Text = "字体"; PageDesc.Text = "按键显示名的字体、字号与粗细"; break;
                 case "layout": PageTitle.Text = "布局"; PageDesc.Text = "透明度、鼠标垫与布局锁定"; break;
-                case "preset": PageTitle.Text = "预设"; PageDesc.Text = "主题预设与布局预设"; break;
                 default: PageTitle.Text = "关于"; PageDesc.Text = "版本与项目信息"; break;
             }
             ApplyNavSelection();
@@ -2022,7 +2020,7 @@ namespace KeyDisplay
             catch (Exception ex) { AboutTip.Text = "复制失败：" + ex.Message; }
         }
 
-        // 预设导出的剪贴板写入：写完后回读一次校验，并把结果提示写在预设页顶部状态行（不写关于页的提示）
+        // 预设导出的剪贴板写入：写完后回读一次校验，并把结果提示写在「通用」页预设区的状态行（不写关于页的提示）
         private async void CopyJsonToClipboard(string text, string tip)
         {
             try
@@ -2209,7 +2207,7 @@ namespace KeyDisplay
             try { PresetStatus.Text = s; Diag(s); } catch { }
         }
 
-        // ===================== 0.9.5：参数页（无害开关 + 鼠标速度）=====================
+        // ===================== 0.9.5：参数页（频率调整 + 鼠标速度）=====================
         // 开关状态来自桌面伴生进程（命名管道命令 GET_STATS / SET_OPT），每秒轮询一次回显真实状态；
         // 实测数据（回报率/刷新率/延迟）按用户要求已不在此页展示，只保留开关状态与反馈。
         // 鼠标速度是小组件侧渲染参数（LocalSettings 键 MouseSpeed_），不经过伴生进程。
@@ -2288,14 +2286,12 @@ namespace KeyDisplay
                 if (!Windows.Data.Json.JsonObject.TryParse(_advLastStatsJson, out o)) { AdvSetStatus("数据解析失败"); return; }
 
                 int proto = (int)GetNum(o, "proto");
-                bool mouseAccel = GetBool(o, "mouseAccel", false);
                 bool lowLat = GetBool(o, "lowLatency", true);
                 bool follow = GetBool(o, "followRefresh", false);
 
                 // 0.9.5：只保留开关状态回显（用户要求去掉回报率/刷新率/延迟等实测展示）；
                 // 回报率已改为三个滑条、直接下发给原生接收器，这里不再回显 pushHz（那是 Python 伴生进程的旧值）
                 AdvSetStatus("已连接伴生进程（协议 v" + proto + "）");
-                AdvAccelBtn.Content = mouseAccel ? "开" : "关";   // 读不到时按「关」显示，用户可直接点开
                 AdvLowLatBtn.Content = lowLat ? "开" : "关";
                 AdvFollowBtn.Content = follow ? "开" : "关";
                 AdvSetStatus("");
@@ -2523,13 +2519,6 @@ namespace KeyDisplay
             _ = SendAdvOptAsync("{\"lowLatency\":" + (now ? "false" : "true") + "}", AdvLowLatBtn);
         }
 
-        private void AdvAccel_Click(object sender, RoutedEventArgs e)
-        {
-            string cur = AdvAccelBtn.Content as string;
-            if (cur != "开" && cur != "关") { AdvSetStatus("读不到当前鼠标加速状态（需要新版伴生进程）"); return; }
-            _ = SendAdvOptAsync("{\"mouseAccel\":" + (cur == "开" ? "false" : "true") + "}", AdvAccelBtn);
-        }
-
         // ===================== 0.9.5：出厂默认预设 =====================
         // 用户拍板：下面这套配色就是新的「默认」主题预设。首次加载设置窗口时把它种进 presets.json：
         // 同名「默认」存在则替换成这套内容，不存在则追加；然后应用一次并落盘。
@@ -2591,7 +2580,7 @@ namespace KeyDisplay
 
         // ===================== 0.9.5：预设导出 / 导入 =====================
         // 导出：每条预设右侧两个按钮 —— 「导出至粘贴板」（复制 JSON，便于直接发给别人）与「导出」（存成 .json 文件）。
-        // 导入：预设页顶部「文件导入」，选择 .json 文件（完整 presets 文件或单条预设对象都认）。
+        // 导入：「通用」页预设区的「文件导入」，选择 .json 文件（完整 presets 文件或单条预设对象都认）。
         // 文件选择器在 Game Bar 里理论上可用；万一被覆盖层挡住/不可用，会自动回退到应用本地文件夹并给出完整路径，
         // 保证功能永远可用（不会出现"点了没反应"）。
 
@@ -2600,7 +2589,7 @@ namespace KeyDisplay
         {
             err = null;
             var root = ParsePresetsRoot();
-            if (root == null) { err = "预设数据不可用，请到预设页重新加载"; return null; }
+            if (root == null) { err = "预设数据不可用，请到「通用」页重新加载"; return null; }
             string arrName = type == "layout" ? "layoutPresets" : "themePresets";
             Windows.Data.Json.IJsonValue av;
             if (!root.TryGetValue(arrName, out av) || av.ValueType != Windows.Data.Json.JsonValueType.Array) { err = "找不到该预设"; return null; }

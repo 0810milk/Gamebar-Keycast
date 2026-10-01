@@ -11,17 +11,17 @@
 ; 卸载流程：先结束伴生进程与小组件进程 → 移除 UWP 包与证书 → Inno 删除文件与注册表。
 
 #define MyAppName "按键显示"
-; 版本号与 VERSION.md 保持一致（当前 1.1.1 中秋版本），发布时同步修改
-#define MyAppVersion "1.2.2"
+; 版本号与 VERSION.md 保持一致，发布时同步修改
+#define MyAppVersion "1.2.3"
 #define MyAppPublisher "KeyDisplay"
-#define MyAppEdition "中秋版本"
+#define MyAppEdition ""
 #define MyAppExeName "KeyDisplayCompanion.exe"
 
 [Setup]
 AppId={{3C1A7E2D-9B4F-4C6A-B5D2-8E0F1A3D6C21}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
-AppVerName={#MyAppName} {#MyAppVersion} {#MyAppEdition}
+AppVerName={#MyAppName} {#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\KeyDisplay
 ; 0.6.0 事故修复：禁用"记住上次安装路径"，强制使用默认目录，避免装进遗留的 %TEMP% 目录
@@ -55,8 +55,8 @@ AlwaysRestart=no
 ; ---- 中文界面（零外部依赖：覆盖内置英文文案）----
 [Messages]
 SetupAppTitle=安装 {#MyAppName}
-SetupWindowTitle=安装 - {#MyAppName} {#MyAppVersion} {#MyAppEdition}
-WelcomeLabel1=欢迎使用 {#MyAppName} {#MyAppVersion} {#MyAppEdition} 安装向导
+SetupWindowTitle=安装 - {#MyAppName} {#MyAppVersion}
+WelcomeLabel1=欢迎使用 {#MyAppName} {#MyAppVersion} 安装向导
 WelcomeLabel2=本向导将引导您安装 {#MyAppName}（Windows Game Bar 键盘鼠标状态显示小组件）。%n%n建议先关闭已打开的 Game Bar（Win+G）再继续安装。
 WizardSelectDir=选择安装位置
 SelectDirLabel3=安装程序将把 {#MyAppName} 安装到以下文件夹。
@@ -68,7 +68,7 @@ WizardInstalling=正在安装
 InstallingLabel=正在安装 {#MyAppName}，请稍候...
 WizardFinished=正在完成 {#MyAppName} 安装向导
 FinishedHeadingLabel=正在完成 {#MyAppName} 安装向导
-FinishedLabel=已成功安装 {#MyAppName} {#MyAppVersion} {#MyAppEdition}。%n%n按 Win+G 打开 Game Bar，在小组件中选择「按键显示」即可使用。%n%n中秋快乐，愿键影如月，常伴左右。
+FinishedLabel=已成功安装 {#MyAppName} {#MyAppVersion}。%n%n按 Win+G 打开 Game Bar，在小组件中选择「按键显示」即可使用。
 ButtonNext=下一步 >
 ButtonBack=< 上一步
 ButtonInstall=安装
