@@ -10,7 +10,7 @@
   <Identity
     Name="KeyDisplay.Widget"
     Publisher="CN=KeyDisplay, O=KeyDisplay, C=CN"
-    Version="2.3.0.0" />
+    Version="2.4.0.0" />
 
   <mp:PhoneIdentity PhoneProductId="3c1a7e2d-9b4f-4c6a-b5d2-8e0f1a3d6c21" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
 
@@ -21,7 +21,7 @@
   </Properties>
 
   <Dependencies>
-    <TargetDeviceFamily Name="Windows.Universal" MinVersion="10.0.18362.0" MaxVersionTested="10.0.22621.0" />
+    <TargetDeviceFamily Name="Windows.Universal" MinVersion="2.4.0.0" MaxVersionTested="10.0.22621.0" />
   </Dependencies>
 
   <Resources>

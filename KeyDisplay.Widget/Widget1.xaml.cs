@@ -3360,8 +3360,8 @@ namespace KeyDisplay
         private const double GpStickRingR = 15.0;      // 摇杆环半径（φ30）
         private const double GpStickDotR = 5.0;        // 摇杆点半径（φ10）
         private const double GpStickTravel = GpStickRingR - GpStickDotR;   // 点圆心的可移动半径
-        private const double GpLsCenterX = 34.0, GpLsCenterY = 44.0;       // 左摇杆环心
-        private const double GpRsCenterX = 126.0, GpRsCenterY = 88.0;      // 右摇杆环心
+        private const double GpLsCenterX = 27, GpLsCenterY = 46;       // 左摇杆环心
+        private const double GpRsCenterX = 118, GpRsCenterY = 86;      // 右摇杆环心
         private const int GpTriggerHighlightThreshold = 30;   // 与 gamepad.py 的 TRIGGER_THRESHOLD 一致
 
         // 摇杆点平滑（与鼠标点同一套指数插值：alpha = 1-0.75^(dt/16.67)，帧率无关）。
@@ -3508,7 +3508,7 @@ namespace KeyDisplay
                 var fg = KeyFgB();
                 if (!ReferenceEquals(GpLsHint.Foreground, fg)) GpLsHint.Foreground = fg;
                 if (!ReferenceEquals(GpRsHint.Foreground, fg)) GpRsHint.Foreground = fg;
-                if (!ReferenceEquals(GpBattery.Foreground, fg)) GpBattery.Foreground = fg;
+                if (!ReferenceEquals(GpBatFill.Background, fg)) GpBatFill.Background = fg;
 
                 // 扳机条回到静息态（值 0 = 空填充 + 主题字色）
                 GpApplyTrigger(GpLT, GpLTFill, GpLTText, 0, GpTriggerName(true));
@@ -3555,7 +3555,7 @@ namespace KeyDisplay
                 GpSetVisible(GpView, menu);
                 GpSetVisible(GpMenu, menu);
                 GpSetVisible(GpGuide, (_gpParts & GP_PART_GUIDE) != 0);
-                GpSetVisible(GpBattery, (_gpParts & GP_PART_BATTERY) != 0);
+                GpSetVisible(GpBatTrack, (_gpParts & GP_PART_BATTERY) != 0);
             }
             catch (Exception ex) { DiagLog("gamepad parts fail: " + ex.Message); }
         }
@@ -3657,9 +3657,7 @@ namespace KeyDisplay
 
                 // ---- 电量角标（0/1/2/3 → 空/低/中/满；0xFF 或未知 → 空）----
                 int lv = snap.GamepadBattery;
-                GpSetText(GpBattery, lv == 1 ? "\u7535\u91cf \u4f4e"
-                    : lv == 2 ? "\u7535\u91cf \u4e2d"
-                    : lv == 3 ? "\u7535\u91cf \u6ee1" : "");
+                GpSetBatBar(lv);
 
                 // 1.4：模板的按下高亮（与部件共用同一份快照；内部自带 try/catch，不影响键鼠渲染）
                 GpPaintTemplate(snap);
@@ -3740,6 +3738,25 @@ namespace KeyDisplay
         //    （点从死区边界开始动，不会有跳变）；
         // 2) 幅值 > 1 时整体缩放，保证斜角方向刚好贴住圆环内缘
         //    （XInput 摇杆是方框钳制，斜角能到 ±32767，直接按 x/32767 画点会戳出环外）。
+        // 电量条：底槽按主题边框色描边，填充宽度 = 42 × 电量/3（满格 3）
+        private void GpSetBatBar(int lv)
+        {
+            try
+            {
+                if (GpBatTrack == null || GpBatFill == null) return;
+                var bd = BorderB();
+                if (!ReferenceEquals(GpBatTrack.BorderBrush, bd)) GpBatTrack.BorderBrush = bd;
+                var bg = KeyBgB();
+                if (!ReferenceEquals(GpBatTrack.Background, bg)) GpBatTrack.Background = bg;
+                GpSetVisible(GpBatFill, lv >= 1);
+                double w = lv <= 0 ? 0 : (lv >= 3 ? 42 : (lv == 2 ? 28 : 14));
+                if (Math.Abs(GpBatFill.Width - w) > 0.01) GpBatFill.Width = w;
+                var fg = lv <= 1 ? KeyFgB() : AccentB();
+                if (!ReferenceEquals(GpBatFill.Background, fg)) GpBatFill.Background = fg;
+            }
+            catch (Exception ex) { DiagLog("battery bar fail: " + ex.Message); }
+        }
+
         private static void GpStickNormalize(int x, int y, int deadzonePercent, out double nx, out double ny)
         {
             nx = 0.0;
